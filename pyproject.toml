@@ -1,0 +1,228 @@
+[build-system]
+build-backend = "hatchling.build"
+requires = [
+  "hatchling>=1.27",
+  "uv-dynamic-versioning>=0.14",
+]
+
+[project]
+name = "confidantic"
+description = "Configuration and CLIs for Python projects based on Pydantic and Pydantic Settings."
+readme = "README.md"
+license = "MIT"
+license-files = [
+  "LICENSE",
+]
+maintainers = [
+  { name = "Szymon Talaga", email = "stalaga@protonmail.com" },
+]
+authors = [
+  { name = "Szymon Talaga", email = "stalaga@protonmail.com" },
+]
+requires-python = ">=3.10"
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Natural Language :: English",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Programming Language :: Python :: Implementation :: CPython",
+  "Typing :: Typed",
+]
+dynamic = [
+  "version",
+]
+dependencies = [  ]
+urls.Changelog = "https://sztal.github.io/confidantic/changelog"
+urls.Documentation = "https://sztal.github.io/confidantic/"
+urls.Homepage = "https://github.com/sztal/confidantic"
+urls.Issues = "https://github.com/sztal/confidantic/issues"
+urls.Repository = "https://github.com/sztal/confidantic"
+
+[dependency-groups]
+dev = [
+  { include-group = "lint" },
+  { include-group = "release" },
+  { include-group = "test" },
+  { include-group = "type" },
+]
+test = [
+  "coverage[toml]>=7.11",
+  "nox>=2025.2.9",
+  "pytest>=9",
+  "pytest-xdist>=3.8",
+]
+type = [
+  "mypy>=1.15",
+  { include-group = "test" },
+]
+docs = [
+  "mkdocstrings-python>=2",
+  "zensical>=0.0.11",
+]
+lint = [
+  "pre-commit>=4.5",
+]
+release = [
+  "towncrier>=25.8",
+]
+
+[tool.hatch.version]
+source = "uv-dynamic-versioning"
+
+[tool.hatch.build.targets.wheel]
+packages = [
+  "./confidantic",
+]
+
+[tool.ruff]
+target-version = "py314"
+line-length = 88
+format.indent-style = "space"
+format.quote-style = "double"
+format.docstring-code-format = true
+lint.select = [
+  "B",
+  "C4",
+  "E",
+  "F",
+  "I",
+  "PIE",
+  "RUF",
+  "SIM",
+  "UP",
+  "W",
+]
+lint.ignore = [
+  "COM812", # conflicts with formatter
+  "E501",
+  "ISC001", # conflicts with formatter
+]
+lint.per-file-ignores."tests/**" = [
+  "S101", # using assert is okay in tests
+]
+lint.isort.known-first-party = [
+  "confidantic",
+]
+lint.pydocstyle.convention = "numpy"
+lint.future-annotations = true
+
+[tool.codespell]
+write-changes = true
+
+[tool.pyproject-fmt]
+
+[tool.pytest]
+minversion = "9.0"
+addopts = [
+  "-ra",
+  "-v",
+  "--tb=short",
+  "--doctest-glob",
+  "*.md",
+  "--doctest-modules",
+  "--showlocals",
+]
+filterwarnings = [
+  "error",
+]
+log_level = "INFO"
+testpaths = [
+  "docs",
+  ".",
+  "tests",
+  "README.md",
+]
+strict = true
+
+[tool.coverage]
+html.show_contexts = true
+html.skip_covered = false
+paths.source = [
+  ".",
+  ".nox/**/site-packages",
+]
+report.exclude_also = [
+  "-> [\"']?(Never|NoReturn)[\"']?:",
+  "^\\s*(typing\\.)?assert_never\\b",
+  "^\\s*@(abc\\.)?abstractmethod\\b",
+  "^\\s*@(typing\\.)?overload\\b",
+  "^\\s*if (typing\\.)?TYPE_CHECKING:",
+  "^\\s*if False:",
+  "^\\s*raise NotImplementedError\\b",
+  "^\\s*return NotImplemented\\b",
+  "^if __name__ == [\"']__main__[\"']:$",
+]
+report.fail_under = 100
+report.show_missing = true
+report.skip_covered = true
+run.branch = true
+run.dynamic_context = "test_function"
+run.omit = [
+  "__main__.py",
+  "setup.py",
+]
+run.patch = [
+  "subprocess",
+]
+run.source_dirs = [
+  "tests",
+]
+run.source_pkgs = [
+  "confidantic",
+]
+
+[tool.towncrier]
+name = "Confidantic"
+filename = "CHANGELOG.md"
+directory = "changelog.d"
+start_string = "<!-- towncrier release notes start -->\n"
+underlines = [ "", "", "" ]
+title_format = "## [{version}](https://github.com/sztal/confidantic/tree/v{version}) - {project_date}"
+issue_format = "[#{issue}](https://github.com/sztal/confidantic/issues/{issue})"
+
+[[tool.towncrier.type]]
+directory = "security"
+name = "Security"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "removed"
+name = "Removed"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "deprecated"
+name = "Deprecated"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "added"
+name = "Added"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "changed"
+name = "Changed"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "fixed"
+name = "Fixed"
+showcontent = true
+
+[tool.mypy]
+python_version = "3.14"
+warn_unreachable = true
+enable_error_code = [
+  "ignore-without-code",
+  "redundant-expr",
+  "truthy-bool",
+]
+strict = true
+pretty = true

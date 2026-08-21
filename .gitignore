@@ -1,0 +1,37 @@
+# Cache
+.cache/
+
+# Python
+*.py[codz]
+__pycache__/
+
+# Python environments
+.nox/
+.venv/
+
+# Python packaging
+dist/
+
+# Testing
+.coverage
+.coverage.*
+.hypothesis/
+.pytest_cache/
+htmlcov/
+
+# Type checking
+.dmypy.json
+.mypy_cache/
+
+# Linting
+.ruff_cache/
+
+# Documentation
+/site/
+
+# IDEs
+.idea/
+.vscode/
+
+# macOS
+.DS_Store

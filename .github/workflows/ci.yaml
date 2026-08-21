@@ -1,0 +1,88 @@
+---
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['*']
+  pull_request: null
+  workflow_dispatch: null
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        session:
+          - lint
+          - typecheck
+          - docs
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Install the latest version of uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install Nox
+        run: >-
+          uv tool install nox
+          --python-preference only-managed
+          --python 3.14
+      - name: Set up ${{ matrix.session }}
+        run: >-
+          nox
+          --install-only
+          --error-on-missing-interpreters
+          --session ${{ matrix.session }}
+      - name: Run ${{ matrix.session }}
+        run: >-
+          nox
+          --no-install
+          --session ${{ matrix.session }}
+
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python_version:
+          - '3.14'
+          - '3.13'
+          - '3.12'
+          - '3.11'
+          - '3.10'
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Install the latest version of uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install Nox
+        run: >-
+          uv tool install nox
+          --python-preference only-managed
+          --python 3.14
+      - name: Set up the test suite
+        run: >-
+          nox
+          --install-only
+          --error-on-missing-interpreters
+          --session tests-${{ matrix.python_version }}
+      - name: Run the test suite
+        run: >-
+          nox
+          --no-install
+          --session tests-${{ matrix.python_version }}

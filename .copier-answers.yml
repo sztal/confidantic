@@ -1,0 +1,23 @@
+# Changes here will be overwritten by Copier. Do not edit manually.
+_commit: 19792dc
+_src_path: gh:sztal/python-package-template
+code_of_conduct: false
+doctest:
+- docstrings
+- docs
+- readme
+entry_points: []
+features:
+- tasks
+- docs
+- doctest
+github_user: sztal
+install: uv pip
+license: MIT
+package_layout: flat
+project_description: Configuration and CLIs for Python projects based on Pydantic
+    and Pydantic Settings.
+project_name: Confidantic
+target_python: py314
+user_email: stalaga@protonmail.com
+user_name: Szymon Talaga

@@ -5,6 +5,7 @@ ______________________________________________________________________
 # Docstring Audit
 
 Check public classes, functions, and properties for concise accurate
-Docstrings. Review examples for runnable doctests and run the configured pytest
-checks after documentation changes. Keep comments focused on non-obvious
-behavior and avoid documenting implementation details as API contracts.
+Docstrings. Review examples for runnable doctests and run `uv run pytest` after
+documentation changes. Do not run the full Nox test matrix. Keep comments
+focused on non-obvious behavior and avoid documenting implementation details as
+API contracts.

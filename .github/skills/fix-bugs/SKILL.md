@@ -5,5 +5,8 @@ ______________________________________________________________________
 # Fix Bugs
 
 Confirm the bug against current source, make the smallest focused change, add
-a regression test that fails before the fix, and run `make lint` and `make test`.
-Do not mix unrelated refactors or test-audit work into a bug fix.
+a regression test that fails before the fix, and run `make lint` and
+`uv run pytest`. Use `make coverage` when coverage statistics are needed. Never
+run `make test` or the full Nox test session; that matrix is reserved for a
+human contributor. Do not mix unrelated refactors or test-audit work into a bug
+fix.

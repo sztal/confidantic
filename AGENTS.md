@@ -4,7 +4,7 @@
 
 - Distribution: `confidantic`
 - Import package: `confidantic`
-- Source directory: `src/confidantic/`
+- Source directory: `confidantic/`
 - Tests: `tests/`
 - Repository: https://github.com/sztal/confidantic
 
@@ -28,12 +28,27 @@ follow-up work.
 
 ## Validation
 
-Use the generated Nox script to run automation:
+Agents must use standard pytest for test validation:
+
+```console
+uv run pytest
+```
+
+Use the coverage target only when coverage statistics are needed:
+
+```console
+make coverage
+```
+
+Do not run the full Nox test matrix through `make test`, `nox -s tests`, or
+`uv run noxfile.py -s tests`. Full multi-version Nox testing is reserved for a
+human contributor.
+
+Agents may use the non-test Nox sessions for repository checks:
 
 ```console
 uv run noxfile.py -s lint
 uv run noxfile.py -s typecheck
-uv run noxfile.py -s tests
 ```
 
 ## Documentation

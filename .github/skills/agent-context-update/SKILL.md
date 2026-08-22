@@ -15,8 +15,13 @@ have changed and agent guidance may be stale.
 1. Update every skill under `.github/skills/` with the actual paths, commands,
    environment rules, and testing conventions.
 1. Remove assumptions that are not supported by the source tree.
-1. Run `make lint`, `make test`, and the relevant Nox sessions.
+1. Run `make lint` and `uv run pytest`. Use `make coverage` only when coverage
+   statistics are relevant.
 1. Re-read all agent files and confirm they agree with each other.
+
+Never run `make test`, `nox -s tests`, or `uv run noxfile.py -s tests` as an
+agent. The full multi-version Nox test matrix is reserved for a human
+contributor.
 
 ## Later updates
 

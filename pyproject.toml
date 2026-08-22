@@ -37,7 +37,9 @@ classifiers = [
 dynamic = [
   "version",
 ]
-dependencies = [  ]
+dependencies = [
+  "pydantic-settings>=2.15",
+]
 urls.Changelog = "https://sztal.github.io/confidantic/changelog"
 urls.Documentation = "https://sztal.github.io/confidantic/"
 urls.Homepage = "https://github.com/sztal/confidantic"
@@ -53,6 +55,7 @@ dev = [
 ]
 test = [
   "coverage[toml]>=7.11",
+  "ipdb",
   "nox>=2025.2.9",
   "pytest>=9",
   "pytest-xdist>=3.8",

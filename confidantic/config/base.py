@@ -1,7 +1,5 @@
 """Base configuration model."""
 
-from __future__ import annotations
-
 from collections.abc import Collection, Mapping
 from contextvars import ContextVar
 from inspect import get_annotations, signature
@@ -12,7 +10,9 @@ from typing import (
     Any,
     ClassVar,
     Literal,
+    Self,
     Union,
+    cast,
     get_args,
     get_origin,
     overload,
@@ -291,6 +291,23 @@ class BaseConfig(BaseSettings):
     )
 
     _model_field_sources: dict[str, _FieldSource] = PrivateAttr(default_factory=dict)
+
+    def model_resolve(self) -> Self:
+        """Materialize factory fields in a generated resolved model.
+
+        Resolution uses this instance's current validated values and recursively
+        materializes factory configs in nested Pydantic models and standard
+        containers without mutating the source.
+
+        Returns
+        -------
+        Self
+            Instance of a cached ``<Source>Resolved`` subclass whose declared
+            concrete factory config annotations are replaced by target types.
+        """
+        from confidantic.config.factory import _model_resolve
+
+        return cast(Self, _model_resolve(self))
 
     @field_validator("*", mode="before", check_fields=False)
     @classmethod

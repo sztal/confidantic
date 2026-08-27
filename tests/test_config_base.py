@@ -1,7 +1,5 @@
 """Tests for the base configuration model."""
 
-from __future__ import annotations
-
 import sys
 from enum import Enum
 from io import StringIO

@@ -1,7 +1,5 @@
 """Tests for runtime utilities."""
 
-from __future__ import annotations
-
 import sys
 from types import ModuleType
 

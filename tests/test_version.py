@@ -1,7 +1,5 @@
 """The test for the version attribute."""
 
-from __future__ import annotations
-
 import importlib.metadata
 
 from confidantic import __version__

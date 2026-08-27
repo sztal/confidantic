@@ -1,17 +1,13 @@
 """Context-local configuration state."""
 
-from __future__ import annotations
-
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import Any, ClassVar, TypeVar, cast
+from typing import Any, ClassVar, Self
 
 from confidantic.config.base import BaseConfig
 
 __all__ = ("BaseContext",)
-
-_ContextT = TypeVar("_ContextT", bound="BaseContext")
 
 
 class BaseContext(BaseConfig):
@@ -25,7 +21,7 @@ class BaseContext(BaseConfig):
     Each subclass receives an independent context variable automatically.
     """
 
-    _current: ClassVar[ContextVar[BaseContext]] = ContextVar("BaseContext.current")
+    _current: ClassVar[ContextVar[Self]] = ContextVar("BaseContext.current")
 
     @classmethod
     def __pydantic_init_subclass__(cls, **kwargs: Any) -> None:
@@ -33,7 +29,7 @@ class BaseContext(BaseConfig):
         cls._current = ContextVar(f"{cls.__module__}.{cls.__qualname__}.current")
 
     @classmethod
-    def current(cls: type[_ContextT]) -> _ContextT:
+    def current(cls) -> Self:
         """Return the active instance for the current execution context.
 
         If no instance has been activated, one is constructed through the
@@ -42,18 +38,18 @@ class BaseContext(BaseConfig):
 
         Returns
         -------
-        _ContextT
+        Self
             Active instance of the receiving context class.
         """
         try:
-            return cast(_ContextT, cls._current.get())
+            return cls._current.get()
         except LookupError:
             context = cls()
             cls._current.set(context)
             return context
 
     @classmethod
-    def set(cls: type[_ContextT], context: _ContextT) -> _ContextT:
+    def set(cls, context: Self) -> Self:
         """Set the active instance for the current execution context.
 
         Parameters
@@ -63,7 +59,7 @@ class BaseContext(BaseConfig):
 
         Returns
         -------
-        _ContextT
+        Self
             The activated instance.
 
         Raises
@@ -80,7 +76,7 @@ class BaseContext(BaseConfig):
 
     @classmethod
     @contextmanager
-    def temporary(cls: type[_ContextT], context: _ContextT) -> Iterator[_ContextT]:
+    def temporary(cls, context: Self) -> Iterator[Self]:
         """Temporarily activate an instance in the current execution context.
 
         Parameters
@@ -91,7 +87,7 @@ class BaseContext(BaseConfig):
 
         Yields
         ------
-        _ContextT
+        Self
             The temporarily activated instance.
 
         Raises

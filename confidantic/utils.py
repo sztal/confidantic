@@ -21,10 +21,13 @@ def is_runtime_jupyterlike() -> bool:
     if "ipykernel" in sys.modules:
         return True
     try:
-        from IPython import get_ipython
+        import IPython
     except Exception:
+        return False
+    get_ipython = getattr(IPython, "get_ipython", None)
+    if get_ipython is None:
         return False
     shell = get_ipython()
     if shell is None:
         return False
-    return shell.__class__.__name__ == "ZMQInteractiveShell"
+    return type(shell).__name__ == "ZMQInteractiveShell"

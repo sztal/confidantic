@@ -1,13 +1,11 @@
 # /// script
-# requires-python = ">=3.10"
+# requires-python = ">=3.11"
 # dependencies = [
 #   "nox[uv]>=2025.2.9",
 #   "uv>=0.8.6",
 # ]
 # ///
 """Task automation with Nox."""
-
-from __future__ import annotations
 
 import os
 from pathlib import Path
@@ -17,12 +15,12 @@ import nox
 nox.needs_version = ">=2025.2.9"
 nox.options.default_venv_backend = "uv"
 nox.options.reuse_existing_virtualenvs = True
-nox.options.sessions = (
+nox.options.sessions = [
     "lint",
     "typecheck",
     "docs",
     "tests",
-)
+]
 
 PYPROJECT = nox.project.load_toml()
 PROJECT_NAME = PYPROJECT["project"]["name"]
@@ -76,7 +74,10 @@ def lint(session: nox.Session) -> None:
 def typecheck(session: nox.Session) -> None:
     """Typecheck Python code."""
     session.install(".", "--group", "type")
-    session.run("mypy", *(session.posargs or (".", "tests")))
+    session.run(
+        "mypy",
+        *(session.posargs or ("confidantic", "tests", "noxfile.py", "scripts")),
+    )
 
 
 @nox.session(python=DEFAULT_PYTHON_VERSION, tags=["checks"])

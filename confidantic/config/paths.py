@@ -1,10 +1,8 @@
 """Path-oriented configuration models."""
 
-from __future__ import annotations
-
 from os import PathLike
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Self
 
 from pydantic import Field, GetCoreSchemaHandler, model_validator
 from pydantic_core import CoreSchema, core_schema
@@ -34,7 +32,7 @@ class DynamicPath(_DynamicPathBase):
     True
     """
 
-    def __call__(self, *pathsegments: str | PathLike[str]) -> DynamicPath:
+    def __call__(self, *pathsegments: str | PathLike[str]) -> Self:
         """Join path segments and return a dynamic path.
 
         Parameters
@@ -47,7 +45,7 @@ class DynamicPath(_DynamicPathBase):
         DynamicPath
                 Joined path.
         """
-        return DynamicPath(self.joinpath(*pathsegments))
+        return type(self)(self.joinpath(*pathsegments))
 
     @classmethod
     def __get_pydantic_core_schema__(
@@ -110,7 +108,7 @@ class BasePaths(BaseConfig):
             )
 
     @model_validator(mode="after")
-    def _canonicalize_paths(self) -> BasePaths:
+    def _canonicalize_paths(self) -> Self:
         root = _canonicalize_path(self.root)
         object.__setattr__(self, "root", root)
 

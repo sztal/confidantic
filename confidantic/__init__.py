@@ -1,13 +1,12 @@
 """Configuration and CLIs for Python projects based on Pydantic Settings."""
 
-from __future__ import annotations
-
 __all__ = (
     "BaseConfig",
     "BaseContext",
     "BasePaths",
     "ClassDefaultsSource",
     "DynamicPath",
+    "FactoryConfig",
     "SettingsConfigDict",
     "__version__",
 )
@@ -20,6 +19,7 @@ from confidantic.config import (
     BasePaths,
     ClassDefaultsSource,
     DynamicPath,
+    FactoryConfig,
     SettingsConfigDict,
 )
 

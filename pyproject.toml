@@ -19,14 +19,13 @@ maintainers = [
 authors = [
   { name = "Szymon Talaga", email = "stalaga@protonmail.com" },
 ]
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 classifiers = [
   "Development Status :: 4 - Beta",
   "Natural Language :: English",
   "Operating System :: OS Independent",
   "Programming Language :: Python",
   "Programming Language :: Python :: 3 :: Only",
-  "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
@@ -86,7 +85,7 @@ packages = [
 ]
 
 [tool.ruff]
-target-version = "py314"
+target-version = "py311"
 line-length = 88
 format.indent-style = "space"
 format.quote-style = "double"
@@ -115,7 +114,6 @@ lint.isort.known-first-party = [
   "confidantic",
 ]
 lint.pydocstyle.convention = "numpy"
-lint.future-annotations = true
 
 [tool.codespell]
 write-changes = true
@@ -222,7 +220,7 @@ name = "Fixed"
 showcontent = true
 
 [tool.mypy]
-python_version = "3.14"
+python_version = "3.11"
 warn_unreachable = true
 enable_error_code = [
   "ignore-without-code",

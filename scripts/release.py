@@ -1,5 +1,5 @@
 # /// script
-# requires-python = ">=3.10"
+# requires-python = ">=3.11"
 # dependencies = [
 #   "packaging>=24.2",
 #   "towncrier>=25.8",
@@ -7,16 +7,11 @@
 # ///
 """Release a new version."""
 
-from __future__ import annotations
-
 import argparse
 import subprocess
-from typing import TYPE_CHECKING
+from collections.abc import Sequence
 
 from packaging.version import Version
-
-if TYPE_CHECKING:
-    from collections.abc import Sequence
 
 
 def create_parser() -> argparse.ArgumentParser:

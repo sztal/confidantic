@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
-__all__ = ("BaseConfig", "ClassDefaultsSource", "__version__")
+__all__ = (
+    "BaseConfig",
+    "ClassDefaultsSource",
+    "SettingsConfigDict",
+    "__version__",
+)
 
 import importlib.metadata
 
-from confidantic.config import BaseConfig, ClassDefaultsSource
+from confidantic.config import BaseConfig, ClassDefaultsSource, SettingsConfigDict
 
 __version__ = importlib.metadata.version("confidantic")

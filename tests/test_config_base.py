@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from docstring_parser import DocstringStyle, parse
 from pydantic import BaseModel, Field, SecretStr, ValidationError, field_validator
 from pydantic_settings import (
     BaseSettings,
@@ -17,11 +18,10 @@ from pydantic_settings import (
     InitSettingsSource,
     PydanticBaseSettingsSource,
     SecretsSettingsSource,
-    SettingsConfigDict,
 )
 from rich.table import Table
 
-from confidantic import BaseConfig, ClassDefaultsSource
+from confidantic import BaseConfig, ClassDefaultsSource, SettingsConfigDict
 
 
 class DocumentedConfig(BaseConfig):
@@ -33,6 +33,17 @@ class DocumentedConfig(BaseConfig):
 
 def _build_config(settings_cls: type[BaseConfig], **kwargs: Any) -> Any:
     return settings_cls(**kwargs)
+
+
+def _docstring_attributes(
+    settings_cls: type[BaseConfig],
+) -> list[tuple[str, str | None]]:
+    parsed = parse(settings_cls.__doc__, style=DocstringStyle.NUMPYDOC)
+    return [
+        (item.arg_name, item.description)
+        for item in parsed.params
+        if item.args[0] == "attribute"
+    ]
 
 
 def test_base_config_can_be_instantiated() -> None:
@@ -114,9 +125,101 @@ def test_model_info_uses_attribute_docstrings() -> None:
     assert DocumentedConfig.model_fields["name"].description == (
         "The name of the configuration."
     )
+    assert _docstring_attributes(DocumentedConfig) == [
+        ("name", "The name of the configuration.")
+    ]
     assert "The name of the configuration." in DocumentedConfig.model_info(
         output="string"
     )
+
+
+def test_model_docstring_replaces_attributes_and_preserves_other_sections() -> None:
+    """Generated attributes replace stale entries without losing other content."""
+
+    class Config(BaseConfig):
+        """Current summary.
+
+        Attributes
+        ----------
+        stale
+            Remove this entry.
+
+        Notes
+        -----
+        Keep this note.
+        """
+
+        primary: str = Field(description="Primary value.")
+        secondary: int = Field(default=1, alias="SECONDARY")
+
+    assert Config.__doc__ is not None
+    parsed = parse(Config.__doc__, style=DocstringStyle.NUMPYDOC)
+
+    assert parsed.short_description == "Current summary."
+    assert _docstring_attributes(Config) == [
+        ("primary", "Primary value."),
+        ("secondary", None),
+    ]
+    assert "stale" not in Config.__doc__
+    assert "SECONDARY" not in Config.__doc__
+    assert any(
+        item.args == ["notes"] and item.description == "Keep this note."
+        for item in parsed.meta
+    )
+
+
+def test_model_docstring_is_created_with_inherited_fields() -> None:
+    """Undocumented subclasses describe all effective model fields in order."""
+
+    class ParentConfig(BaseConfig):
+        """Parent configuration."""
+
+        inherited: str = Field(description="Inherited value.")
+
+    class Config(ParentConfig):
+        direct: int = Field(description="Direct value.")
+
+    assert _docstring_attributes(Config) == [
+        ("inherited", "Inherited value."),
+        ("direct", "Direct value."),
+    ]
+    assert _docstring_attributes(ParentConfig) == [("inherited", "Inherited value.")]
+
+
+def test_model_docstring_generation_can_be_disabled() -> None:
+    """The inherited opt-out leaves class docstrings unchanged."""
+    original_docstring = (
+        "Original documentation.\n\n"
+        "Attributes\n"
+        "----------\n"
+        "handwritten\n"
+        "    Keep this entry."
+    )
+
+    class DisabledConfig(BaseConfig):
+        __doc__ = original_docstring
+        model_config = SettingsConfigDict(
+            docstring_set_attributes_section=False,
+        )
+
+        value: str = Field(description="Generated description.")
+
+    class ChildConfig(DisabledConfig):
+        """Child documentation."""
+
+        child: int
+
+    assert DisabledConfig.__doc__ == original_docstring
+    assert ChildConfig.__doc__ == "Child documentation."
+
+
+def test_fieldless_model_does_not_gain_an_attributes_section() -> None:
+    """A model without fields keeps its original docstring unchanged."""
+
+    class Config(BaseConfig):
+        """Summary only."""
+
+    assert Config.__doc__ == "Summary only."
 
 
 def test_model_info_controls_colors() -> None:

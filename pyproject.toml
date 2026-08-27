@@ -38,6 +38,7 @@ dynamic = [
   "version",
 ]
 dependencies = [
+  "docstring-parser>=0.18",
   "pydantic-settings>=2.15",
   "rich>=15",
 ]

@@ -6,15 +6,18 @@ from collections.abc import Collection, Mapping
 from inspect import get_annotations, signature
 from io import StringIO
 from types import MappingProxyType
-from typing import Any, Literal, overload
+from typing import Any, ClassVar, Literal, get_origin, overload
 
+from docstring_parser import DocstringParam, DocstringStyle, compose, parse
 from pydantic import PrivateAttr, TypeAdapter
 from pydantic.fields import FieldInfo
 from pydantic_settings import (
     BaseSettings,
     CliSettingsSource,
     PydanticBaseSettingsSource,
-    SettingsConfigDict,
+)
+from pydantic_settings import (
+    SettingsConfigDict as PydanticSettingsConfigDict,
 )
 from pydantic_settings.sources import DefaultSettingsSource
 from pydantic_settings.sources.types import (
@@ -31,7 +34,7 @@ from rich.text import Text
 
 from confidantic.utils import is_runtime_jupyterlike
 
-__all__ = ("BaseConfig", "ClassDefaultsSource")
+__all__ = ("BaseConfig", "ClassDefaultsSource", "SettingsConfigDict")
 
 _FACTORY_DEFAULT = object()
 
@@ -39,6 +42,19 @@ _FieldSource = tuple[
     type[PydanticBaseSettingsSource],
     type[BaseSettings],
 ]
+
+
+class SettingsConfigDict(PydanticSettingsConfigDict, total=False):
+    """Configuration options for :class:`BaseConfig`.
+
+    Attributes
+    ----------
+    docstring_set_attributes_section
+        Whether model fields replace the class docstring's ``Attributes``
+        section when a configuration subclass is created.
+    """
+
+    docstring_set_attributes_section: bool
 
 
 class ClassDefaultsSource(PydanticBaseSettingsSource):
@@ -150,9 +166,14 @@ class BaseConfig(BaseSettings):
 
     Resolved instances expose each field's source class and the configuration
     class for which that source was constructed through ``model_field_sources``.
+
+    Subclass docstrings receive a NumPy-style ``Attributes`` section generated
+    from the effective model field names and descriptions. Set
+    ``docstring_set_attributes_section=False`` in ``model_config`` to preserve
+    a handwritten class docstring unchanged.
     """
 
-    model_config = SettingsConfigDict(
+    model_config: ClassVar[SettingsConfigDict] = SettingsConfigDict(
         env_nested_delimiter="__",
         env_ignore_empty=True,
         env_parse_enums=True,
@@ -164,12 +185,46 @@ class BaseConfig(BaseSettings):
         cli_kebab_case=True,
         cli_hide_none_type=True,
         cli_show_env_vars=True,
-        cli_use_class_docs_for_group=True,
+        cli_use_class_docs_for_groups=True,
         use_attribute_docstrings=True,
+        docstring_set_attributes_section=True,
         dotenv_filtering="match_prefix",
     )
 
     _model_field_sources: dict[str, _FieldSource] = PrivateAttr(default_factory=dict)
+
+    @classmethod
+    def __pydantic_init_subclass__(cls, **kwargs: Any) -> None:
+        super().__pydantic_init_subclass__(**kwargs)
+        if not cls.model_config.get("docstring_set_attributes_section", True):
+            return
+
+        parsed = parse(cls.__doc__, style=DocstringStyle.NUMPYDOC)
+        attributes = [
+            item
+            for item in parsed.meta
+            if isinstance(item, DocstringParam) and item.args[0] == "attribute"
+        ]
+        if not cls.model_fields and not attributes:
+            return
+
+        parsed.meta = [item for item in parsed.meta if item not in attributes]
+        parsed.meta.extend(
+            DocstringParam(
+                args=["attribute", field_name],
+                description=field.description,
+                arg_name=field_name,
+                type_name=None,
+                is_optional=None,
+                default=None,
+            )
+            for field_name, field in cls.model_fields.items()
+        )
+        cls.__doc__ = compose(
+            parsed,
+            style=DocstringStyle.NUMPYDOC,
+            indent="    ",
+        )
 
     def __init__(self, **kwargs: Any) -> None:
         if is_runtime_jupyterlike():
@@ -393,7 +448,7 @@ class BaseConfig(BaseSettings):
             annotation = field.annotation
             if annotation is type(None):
                 annotation_name = "None"
-            elif isinstance(annotation, type):
+            elif get_origin(annotation) is None and isinstance(annotation, type):
                 annotation_name = annotation.__name__
             else:
                 annotation_name = str(annotation).removeprefix("typing.")

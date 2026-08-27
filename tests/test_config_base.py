@@ -10,8 +10,12 @@ import pytest
 from pydantic import BaseModel, Field, ValidationError, field_validator
 from pydantic_settings import (
     BaseSettings,
+    CliSettingsSource,
+    DotEnvSettingsSource,
+    EnvSettingsSource,
     InitSettingsSource,
     PydanticBaseSettingsSource,
+    SecretsSettingsSource,
     SettingsConfigDict,
 )
 
@@ -58,6 +62,171 @@ def test_class_defaults_source_is_public() -> None:
     assert ClassDefaultsSource(Config, {"inherited"})() == {"inherited": "inherited"}
     assert ClassDefaultsSource(Config, set())() == {}
     assert ClassDefaultsSource(Config, {"unknown"})() == {}
+
+
+def test_model_field_sources_track_defaults_and_init() -> None:
+    """Field sources identify both resolution and inheritance coordinates."""
+
+    class Config(BaseConfig):
+        value: str = "from-default"
+
+    assert Config().model_field_sources == {"value": (ClassDefaultsSource, Config)}
+    assert Config(value="from-init").model_field_sources == {
+        "value": (InitSettingsSource, Config)
+    }
+
+
+def test_model_field_sources_track_standard_sources(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Built-in sources expose their exact source and configuration classes."""
+    env_file = tmp_path / ".env"
+    env_file.write_text("VALUE=from-dotenv\n", encoding="utf-8")
+    secrets_dir = tmp_path / "secrets"
+    secrets_dir.mkdir()
+    (secrets_dir / "value").write_text("from-secret", encoding="utf-8")
+
+    class Config(BaseConfig):
+        value: str = "from-default"
+
+    cli = _build_config(
+        Config,
+        _cli_parse_args=["--value=from-cli"],
+        _env_file=env_file,
+        _secrets_dir=secrets_dir,
+    )
+    assert cli.model_field_sources["value"] == (CliSettingsSource, Config)
+
+    monkeypatch.setenv("VALUE", "from-environment")
+    environment = _build_config(
+        Config,
+        _env_file=env_file,
+        _secrets_dir=secrets_dir,
+    )
+    assert environment.model_field_sources["value"] == (
+        EnvSettingsSource,
+        Config,
+    )
+
+    monkeypatch.delenv("VALUE")
+    dotenv = _build_config(Config, _env_file=env_file, _secrets_dir=secrets_dir)
+    assert dotenv.model_field_sources["value"] == (DotEnvSettingsSource, Config)
+
+    secret = _build_config(Config, _env_file=None, _secrets_dir=secrets_dir)
+    assert secret.model_field_sources["value"] == (SecretsSettingsSource, Config)
+
+
+def test_model_field_sources_track_mro_and_nested_priority(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Coordinates retain MRO owners and top-level nested priority."""
+    monkeypatch.setenv("CHILD_OPTIONS", '{"child": "environment"}')
+    monkeypatch.setenv("PARENT_INHERITED", "environment")
+
+    class ParentConfig(BaseConfig):
+        model_config = SettingsConfigDict(env_prefix="PARENT_")
+
+        inherited: str = "parent-default"
+        parent_default: str = "parent-default"
+        options: dict[str, str] = Field(default={"parent": "default"})
+
+    class ChildConfig(ParentConfig):
+        model_config = SettingsConfigDict(env_prefix="CHILD_")
+
+        factory: list[str] = Field(default_factory=list)
+
+    config = ChildConfig()
+
+    assert config.options == {"child": "environment", "parent": "default"}
+    assert config.model_field_sources == {
+        "inherited": (EnvSettingsSource, ParentConfig),
+        "parent_default": (ClassDefaultsSource, ParentConfig),
+        "options": (EnvSettingsSource, ChildConfig),
+        "factory": (ClassDefaultsSource, ChildConfig),
+    }
+
+
+def test_model_field_sources_use_names_and_retain_input_provenance() -> None:
+    """Aliases and validators do not replace settings-source provenance."""
+
+    class Config(BaseConfig):
+        value: int = Field(1, alias="VALUE")
+
+        @field_validator("value")
+        @classmethod
+        def double_value(cls, value: int) -> int:
+            return value * 2
+
+    default = _build_config(Config)
+    explicit = _build_config(Config, VALUE="4")
+
+    assert default.model_field_sources == {"value": (ClassDefaultsSource, Config)}
+    assert explicit.value == 8
+    assert explicit.model_field_sources == {"value": (InitSettingsSource, Config)}
+    assert explicit.model_dump() == {"value": 8}
+    assert explicit.model_fields_set == {"value"}
+    with pytest.raises(TypeError):
+        explicit.model_field_sources["value"] = (
+            ClassDefaultsSource,
+            Config,
+        )
+
+
+def test_model_field_sources_preserve_custom_source_identity() -> None:
+    """Custom settings sources run once and retain their exact class."""
+    calls = 0
+
+    class CustomSource(InitSettingsSource):
+        def __call__(self) -> dict[str, Any]:
+            nonlocal calls
+            calls += 1
+            return super().__call__()
+
+    class Config(BaseConfig):
+        value: str
+
+        @classmethod
+        def settings_customise_sources(
+            cls,
+            settings_cls: type[BaseSettings],
+            init_settings: PydanticBaseSettingsSource,
+            env_settings: PydanticBaseSettingsSource,
+            dotenv_settings: PydanticBaseSettingsSource,
+            file_secret_settings: PydanticBaseSettingsSource,
+        ) -> tuple[PydanticBaseSettingsSource, ...]:
+            return (CustomSource(settings_cls, {"value": "from-custom"}),)
+
+    config = _build_config(Config)
+
+    assert config.model_field_sources == {"value": (CustomSource, Config)}
+    assert calls == 1
+
+
+def test_model_field_sources_omit_bare_callable_sources() -> None:
+    """Sources without a settings-class axis remain usable but untracked."""
+
+    def custom_source() -> dict[str, str]:
+        return {"value": "from-custom"}
+
+    class Config(BaseConfig):
+        value: str
+
+        @classmethod
+        def settings_customise_sources(
+            cls,
+            settings_cls: type[BaseSettings],
+            init_settings: PydanticBaseSettingsSource,
+            env_settings: PydanticBaseSettingsSource,
+            dotenv_settings: PydanticBaseSettingsSource,
+            file_secret_settings: PydanticBaseSettingsSource,
+        ) -> tuple[PydanticBaseSettingsSource, ...]:
+            return (custom_source,)  # type: ignore[return-value]
+
+    config = _build_config(Config)
+
+    assert config.value == "from-custom"
+    assert config.model_field_sources == {}
 
 
 def test_child_default_precedes_parent_environment(
@@ -301,6 +470,9 @@ def test_values_equal_to_defaults_are_in_fields_set(
     assert default.model_fields_set == set()
     assert explicit.model_fields_set == {"value"}
     assert environment.model_fields_set == {"value"}
+    assert default.model_field_sources["value"] == (ClassDefaultsSource, Config)
+    assert explicit.model_field_sources["value"] == (InitSettingsSource, Config)
+    assert environment.model_field_sources["value"] == (EnvSettingsSource, Config)
 
 
 @pytest.mark.parametrize(
@@ -361,6 +533,11 @@ def test_c3_mro_controls_duplicate_defaults() -> None:
     assert config.value == "left"
     assert config.root == "root"
     assert config.right == "right"
+    assert config.model_field_sources == {
+        "root": (ClassDefaultsSource, RootConfig),
+        "value": (ClassDefaultsSource, LeftConfig),
+        "right": (ClassDefaultsSource, RightConfig),
+    }
 
 
 def test_missing_required_field_raises_validation_error() -> None:

@@ -108,6 +108,33 @@ come from class `model_config` or from arguments passed by the subclass when it
 constructs the source. Preserving this constraint keeps source registration and
 priority explicit in the subclass.
 
+## Value provenance
+
+Every resolved `BaseConfig` instance exposes `model_field_sources`, a read-only
+mapping from canonical model field names to two-dimensional resolution
+coordinates. Each coordinate is ordered as:
+
+1. The concrete Pydantic settings source class that established the field.
+1. The actual configuration class for which that source was constructed.
+
+For example, a child-level environment value is represented by
+`(EnvSettingsSource, ChildConfig)`, while an inherited parent default is
+represented by `(ClassDefaultsSource, ParentConfig)`. Aliases are normalized to
+model field names in the mapping. Values transformed by validators retain the
+coordinate of their source input, and lazy default factories are attributed to
+`ClassDefaultsSource` for the class that declared them.
+
+Nested mappings and models can combine values from several sources. Provenance
+remains field-level: the mapping reports the highest-priority source that first
+established the top-level field, not the sources of individual nested keys.
+Computed fields and values synthesized solely during validation have no settings
+source coordinate and are omitted.
+
+Tracking requires sources derived from `PydanticBaseSettingsSource`, which
+provides both source state and the owning settings class. If a source sequence
+contains a bare callable, settings resolution still works but provenance is
+empty because the required inheritance coordinate is unavailable.
+
 ## Validation
 
 - Checked the [Pydantic Settings documentation](https://pydantic.dev/docs/validation/latest/concepts/pydantic_settings/#field-value-priority)

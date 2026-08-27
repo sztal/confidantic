@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from collections.abc import Collection, Mapping
 from inspect import get_annotations, signature
+from types import MappingProxyType
 from typing import Any, Literal
 
-from pydantic import TypeAdapter
+from pydantic import PrivateAttr, TypeAdapter
 from pydantic.fields import FieldInfo
 from pydantic_settings import (
     BaseSettings,
@@ -28,6 +29,11 @@ from confidantic.utils import is_runtime_jupyterlike
 __all__ = ("BaseConfig", "ClassDefaultsSource")
 
 _FACTORY_DEFAULT = object()
+
+_FieldSource = tuple[
+    type[PydanticBaseSettingsSource],
+    type[BaseSettings],
+]
 
 
 class ClassDefaultsSource(PydanticBaseSettingsSource):
@@ -84,12 +90,61 @@ class ClassDefaultsSource(PydanticBaseSettingsSource):
         return self.defaults
 
 
+class _ResolvedSettingsSource(PydanticBaseSettingsSource):
+    def __init__(
+        self,
+        settings_cls: type[BaseSettings],
+        sources: tuple[PydanticBaseSettingsSource, ...],
+        _init_state: InitState,
+    ) -> None:
+        super().__init__(settings_cls, _init_state)
+        self.sources = sources
+        self.field_sources: dict[str, _FieldSource] = {}
+
+    def get_field_value(
+        self, field: FieldInfo, field_name: str
+    ) -> tuple[Any, str, bool]:
+        return None, "", False  # pragma: no cover
+
+    def __call__(self) -> dict[str, Any]:
+        self.field_sources.clear()
+        if not all(
+            isinstance(source, PydanticBaseSettingsSource) for source in self.sources
+        ):
+            return {}
+
+        for field_name, field in self.settings_cls.model_fields.items():
+            aliases, _ = _get_alias_names(field_name, field)
+            keys = aliases or (field_name,)
+
+            for index, source in enumerate(self.sources):
+                next_state = (
+                    self.sources[index + 1].current_state
+                    if index + 1 < len(self.sources)
+                    else self.current_state
+                )
+                if any(
+                    key not in source.current_state and key in next_state
+                    for key in keys
+                ):
+                    self.field_sources[field_name] = (
+                        type(source),
+                        source.settings_cls,
+                    )
+                    break
+
+        return {}
+
+
 class BaseConfig(BaseSettings):
     """Resolve configuration sources independently along the class MRO.
 
     Each class is resolved using Pydantic Settings source ordering, followed by
     defaults declared directly on that class. Remaining values continue through
     Python's C3 MRO. Nested values retain Pydantic Settings deep-merge behavior.
+
+    Resolved instances expose each field's source class and the configuration
+    class for which that source was constructed through ``model_field_sources``.
     """
 
     model_config = SettingsConfigDict(
@@ -109,10 +164,58 @@ class BaseConfig(BaseSettings):
         dotenv_filtering="match_prefix",
     )
 
+    _model_field_sources: dict[str, _FieldSource] = PrivateAttr(default_factory=dict)
+
     def __init__(self, **kwargs: Any) -> None:
         if is_runtime_jupyterlike():
             kwargs["_cli_parse_args"] = False
-        super().__init__(**kwargs)
+
+        build_sources = kwargs.pop("_build_sources", None)
+        if build_sources is None:
+            option_names = signature(self._settings_init_sources).parameters.keys()
+            source_options = {
+                key: kwargs.pop(key)
+                for key in tuple(kwargs)
+                if key in option_names and key != "_init_kwargs"
+            }
+            build_sources = self._settings_init_sources(
+                **source_options,
+                _init_kwargs=kwargs,
+            )
+
+        super().__init__(_build_sources=build_sources)
+
+        sources, _ = build_sources
+        resolved_source = next(
+            (
+                source
+                for source in reversed(sources)
+                if isinstance(source, _ResolvedSettingsSource)
+            ),
+            None,
+        )
+        if resolved_source is not None:
+            self._model_field_sources = resolved_source.field_sources.copy()
+
+    @property
+    def model_field_sources(self) -> Mapping[str, _FieldSource]:
+        """Map field names to their resolution and inheritance coordinates.
+
+        Each value contains the settings source class followed by the actual
+        configuration class for which that source was constructed. Keys are
+        canonical model field names rather than aliases.
+
+        For a field assembled by nested merging, the coordinate identifies the
+        highest-priority source that established the top-level field. Validators
+        retain their input source, while default factories are attributed to
+        :class:`ClassDefaultsSource`.
+
+        Returns
+        -------
+        Mapping[str, tuple[type[PydanticBaseSettingsSource], type[BaseSettings]]]
+            Read-only field provenance for this instance.
+        """
+        return MappingProxyType(self._model_field_sources)
 
     @classmethod
     def _settings_init_sources(
@@ -163,6 +266,7 @@ class BaseConfig(BaseSettings):
 
         resolved_sources: list[PydanticBaseSettingsSource] = []
         init_kwargs = _init_kwargs if _init_kwargs is not None else {}
+        init_state = InitState()
 
         for index, level in enumerate(levels):
             source_builder = BaseSettings.__dict__["_settings_init_sources"].__get__(
@@ -179,6 +283,7 @@ class BaseConfig(BaseSettings):
                 for source in reversed(level_sources)
                 if isinstance(source, DefaultSettingsSource)
             )
+            init_state = default_source._init_state
             resolved_sources.extend(
                 source
                 for source in level_sources
@@ -193,7 +298,13 @@ class BaseConfig(BaseSettings):
             if defaults.defaults:
                 resolved_sources.append(defaults)
 
-        return tuple(resolved_sources), init_kwargs
+        sources = tuple(resolved_sources)
+        resolved_source = _ResolvedSettingsSource(
+            cls,
+            sources,
+            _init_state=init_state,
+        )
+        return (*sources, resolved_source), init_kwargs
 
     @classmethod
     def _settings_build_values(

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 from enum import Enum
+from io import StringIO
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +20,7 @@ from pydantic_settings import (
     PydanticBaseSettingsSource,
     SecretsSettingsSource,
 )
+from rich.console import Console
 from rich.table import Table
 
 from confidantic import BaseConfig, ClassDefaultsSource, SettingsConfigDict
@@ -33,6 +35,16 @@ class DocumentedConfig(BaseConfig):
 
 def _build_config(settings_cls: type[BaseConfig], **kwargs: Any) -> Any:
     return settings_cls(**kwargs)
+
+
+def _render_with_colors(table: Table) -> str:
+    buffer = StringIO()
+    Console(
+        file=buffer,
+        color_system="standard",
+        force_terminal=True,
+    ).print(table)
+    return buffer.getvalue()
 
 
 def _docstring_attributes(
@@ -227,12 +239,15 @@ def test_model_info_controls_colors() -> None:
 
     class Config(BaseConfig):
         required: str
+        number: int = 1
 
     plain_table = Config.model_info(output="table")
     colored_table = Config.model_info(output="table", colors=True)
 
     assert not plain_table.columns[0].style
     assert colored_table.columns[0].style == "cyan"
+    assert "\x1b[" not in _render_with_colors(plain_table)
+    assert "\x1b[" in _render_with_colors(colored_table)
     assert "\x1b[" not in Config.model_info(output="string")
     assert "\x1b[" in Config.model_info(output="string", colors=True)
 
@@ -297,9 +312,7 @@ def test_info_shows_actual_values_without_evaluating_factories_again(
     assert table.title == "Config"
     assert [column.header for column in table.columns] == [
         "Option",
-        "Type",
         "Value",
-        "Default",
         "Description",
     ]
     assert len(table.rows) == 6
@@ -309,7 +322,7 @@ def test_info_shows_actual_values_without_evaluating_factories_again(
     assert capsys.readouterr().out == ""
     assert "NAME" not in rendered
     assert "'current'" in rendered
-    assert "'default'" in rendered
+    assert "'default'" not in rendered
     assert "Status.ready" in rendered
     assert "PosixPath('/x')" in rendered
     assert "Options(enabled=True)" in rendered
@@ -330,11 +343,13 @@ def test_info_controls_table_and_output(
         value: str = "default"
 
     config = Config(value="current")
+    plain_table = config.info(output="table")
     table = config.info(
         output="table",
         header=False,
         describe=False,
         colors=True,
+        types=True,
     )
 
     assert table.title is None
@@ -342,9 +357,10 @@ def test_info_controls_table_and_output(
         "Option",
         "Type",
         "Value",
-        "Default",
     ]
     assert table.columns[0].style == "cyan"
+    assert "\x1b[" not in _render_with_colors(plain_table)
+    assert "\x1b[" in _render_with_colors(table)
     assert "\x1b[" not in config.info(output="string")
     assert "\x1b[" in config.info(output="string", colors=True)
     assert capsys.readouterr().out == ""

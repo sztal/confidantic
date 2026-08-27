@@ -28,7 +28,9 @@ from pydantic_settings.sources.types import (
 )
 from pydantic_settings.sources.utils import InitState, _get_alias_names
 from rich.console import Console
+from rich.highlighter import NullHighlighter
 from rich.pretty import Pretty
+from rich.style import Style
 from rich.table import Table
 from rich.text import Text
 
@@ -345,6 +347,8 @@ class BaseConfig(BaseSettings):
             If ``output`` is not a supported mode.
         """
         table = cls._build_info_table(
+            types=True,
+            defaults=True,
             header=header,
             describe=describe,
             colors=colors,
@@ -358,6 +362,7 @@ class BaseConfig(BaseSettings):
         header: bool = True,
         describe: bool = True,
         colors: bool = False,
+        types: bool = False,
     ) -> None: ...
 
     @overload
@@ -367,6 +372,7 @@ class BaseConfig(BaseSettings):
         header: bool = True,
         describe: bool = True,
         colors: bool = False,
+        types: bool = False,
     ) -> Table: ...
 
     @overload
@@ -376,6 +382,7 @@ class BaseConfig(BaseSettings):
         header: bool = True,
         describe: bool = True,
         colors: bool = False,
+        types: bool = False,
     ) -> str: ...
 
     def info(
@@ -384,6 +391,7 @@ class BaseConfig(BaseSettings):
         header: bool = True,
         describe: bool = True,
         colors: bool = False,
+        types: bool = False,
     ) -> Table | str | None:
         """Present the configuration fields and current values as a Rich table.
 
@@ -402,6 +410,8 @@ class BaseConfig(BaseSettings):
             Whether to include the ``Description`` column.
         colors
             Whether to enable Rich colors and text styles.
+        types
+            Whether to include the ``Type`` column.
 
         Returns
         -------
@@ -420,6 +430,8 @@ class BaseConfig(BaseSettings):
         }
         table = cls._build_info_table(
             values=values,
+            types=types,
+            defaults=False,
             header=header,
             describe=describe,
             colors=colors,
@@ -431,51 +443,68 @@ class BaseConfig(BaseSettings):
         cls,
         *,
         values: Mapping[str, Any] | None = None,
+        types: bool,
+        defaults: bool,
         header: bool,
         describe: bool,
         colors: bool,
     ) -> Table:
-        table = Table(title=cls.__name__ if header else None)
+        null_style = None if colors else Style()
+        highlighter = None if colors else NullHighlighter()
+        table = Table(
+            title=cls.__name__ if header else None,
+            header_style="table.header" if colors else null_style,
+            border_style=null_style,
+            title_style=null_style,
+        )
         table.add_column("Option", style="cyan" if colors else None, no_wrap=True)
-        table.add_column("Type", style="magenta" if colors else None)
+        if types:
+            table.add_column("Type", style="magenta" if colors else None)
         if values is not None:
             table.add_column("Value")
-        table.add_column("Default")
+        if defaults:
+            table.add_column("Default")
         if describe:
             table.add_column("Description")
 
         for field_name, field in cls.model_fields.items():
-            annotation = field.annotation
-            if annotation is type(None):
-                annotation_name = "None"
-            elif get_origin(annotation) is None and isinstance(annotation, type):
-                annotation_name = annotation.__name__
-            else:
-                annotation_name = str(annotation).removeprefix("typing.")
-
-            default: Text | Pretty
-            if field.is_required():
-                default = Text("required", style="bold red" if colors else "")
-            elif field.default_factory is not None:
-                factory_name = getattr(
-                    field.default_factory,
-                    "__name__",
-                    type(field.default_factory).__name__,
-                )
-                default = Text(
-                    f"<factory: {factory_name}>",
-                    style="dim" if colors else "",
-                )
-            else:
-                default = Pretty(field.get_default(call_default_factory=False))
-
-            cells: list[Any] = [
-                Text(field_name),
-                Text(annotation_name),
-            ]
+            cells: list[Any] = [Text(field_name)]
+            if types:
+                annotation = field.annotation
+                if annotation is type(None):
+                    annotation_name = "None"
+                elif get_origin(annotation) is None and isinstance(annotation, type):
+                    annotation_name = annotation.__name__
+                else:
+                    annotation_name = str(annotation).removeprefix("typing.")
+                cells.append(Text(annotation_name))
             if values is not None:
-                cells.append(Pretty(values[field_name]))
-            cells.append(default)
+                cells.append(
+                    Pretty(
+                        values[field_name],
+                        highlighter=highlighter,
+                    )
+                )
+            if defaults:
+                default: Text | Pretty
+                if field.is_required():
+                    default = Text("required", style="bold red" if colors else "")
+                elif field.default_factory is not None:
+                    factory_name = getattr(
+                        field.default_factory,
+                        "__name__",
+                        type(field.default_factory).__name__,
+                    )
+                    default = Text(
+                        f"<factory: {factory_name}>",
+                        style="dim" if colors else "",
+                    )
+                else:
+                    default = Pretty(
+                        field.get_default(call_default_factory=False),
+                        highlighter=highlighter,
+                    )
+                cells.append(default)
             if describe:
                 cells.append(Text(field.description or ""))
             table.add_row(*cells)

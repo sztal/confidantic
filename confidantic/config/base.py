@@ -12,6 +12,7 @@ from pydantic_settings import (
     BaseSettings,
     CliSettingsSource,
     PydanticBaseSettingsSource,
+    SettingsConfigDict,
 )
 from pydantic_settings.sources import DefaultSettingsSource
 from pydantic_settings.sources.types import (
@@ -88,6 +89,23 @@ class BaseConfig(BaseSettings):
     defaults declared directly on that class. Remaining values continue through
     Python's C3 MRO. Nested values retain Pydantic Settings deep-merge behavior.
     """
+
+    model_config = SettingsConfigDict(
+        env_nested_delimiter="__",
+        env_ignore_empty=True,
+        env_parse_enums=True,
+        env_parse_none_str="null",
+        nested_model_default_partial_update=True,
+        cli_parse_none_str="null",
+        cli_avoid_json=True,
+        cli_implicit_flags=True,
+        cli_kebab_case=True,
+        cli_hide_none_type=True,
+        cli_show_env_vars=True,
+        cli_use_class_docs_for_group=True,
+        use_attribute_docstrings=True,
+        dotenv_filtering="match_prefix",
+    )
 
     @classmethod
     def _settings_init_sources(

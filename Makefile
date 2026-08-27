@@ -35,8 +35,11 @@ wheel:
 install:
 	uv sync --group dev
 
-test:
+nox:
 	nox -s tests
+
+test:
+	uv run pytest
 
 coverage:
 	uv run coverage run -m pytest

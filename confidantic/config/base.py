@@ -23,6 +23,8 @@ from pydantic_settings.sources.types import (
 )
 from pydantic_settings.sources.utils import InitState, _get_alias_names
 
+from confidantic.utils import is_runtime_jupyterlike
+
 __all__ = ("BaseConfig", "ClassDefaultsSource")
 
 _FACTORY_DEFAULT = object()
@@ -106,6 +108,11 @@ class BaseConfig(BaseSettings):
         use_attribute_docstrings=True,
         dotenv_filtering="match_prefix",
     )
+
+    def __init__(self, **kwargs: Any) -> None:
+        if is_runtime_jupyterlike():
+            kwargs["_cli_parse_args"] = False
+        super().__init__(**kwargs)
 
     @classmethod
     def _settings_init_sources(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +25,23 @@ def _build_config(settings_cls: type[BaseConfig], **kwargs: Any) -> Any:
 def test_base_config_can_be_instantiated() -> None:
     """The public base class is also a valid empty settings model."""
     assert BaseConfig().model_dump() == {}
+
+
+def test_cli_parsing_is_disabled_in_jupyterlike_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Kernel arguments are ignored when a config enables CLI parsing."""
+    monkeypatch.setitem(sys.modules, "ipykernel", object())
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["ipykernel_launcher.py", "-f", "kernel.json"],
+    )
+
+    class Config(BaseConfig, cli_parse_args=True):
+        value: str = "from-default"
+
+    assert Config().value == "from-default"
 
 
 def test_class_defaults_source_is_public() -> None:

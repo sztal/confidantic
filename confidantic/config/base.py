@@ -169,6 +169,11 @@ class BaseConfig(BaseSettings):
     Resolved instances expose each field's source class and the configuration
     class for which that source was constructed through ``model_field_sources``.
 
+    Instances are frozen by default, so model fields cannot be reassigned after
+    validation. Use ``model_copy(update=...)`` to derive a modified copy from
+    trusted values, or set ``frozen=False`` in ``model_config`` when a subclass
+    intentionally requires mutable fields.
+
     Subclass docstrings receive a NumPy-style ``Attributes`` section generated
     from the effective model field names and descriptions. Set
     ``docstring_set_attributes_section=False`` in ``model_config`` to preserve
@@ -176,6 +181,7 @@ class BaseConfig(BaseSettings):
     """
 
     model_config: ClassVar[SettingsConfigDict] = SettingsConfigDict(
+        frozen=True,
         env_nested_delimiter="__",
         env_ignore_empty=True,
         env_parse_enums=True,

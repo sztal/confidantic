@@ -20,6 +20,38 @@ Install `confidantic` using [pip](https://pip.pypa.io/) or [uv](https://docs.ast
 pip install confidantic
 ```
 
+## Frozen configuration
+
+`BaseConfig` instances are frozen by default, so model fields cannot be
+reassigned after validation. Create a modified copy from trusted values with
+Pydantic's `model_copy` method:
+
+```python
+from confidantic import BaseConfig
+
+
+class AppConfig(BaseConfig):
+	retries: int = 3
+
+
+config = AppConfig()
+updated = config.model_copy(update={"retries": 5})
+```
+
+Pydantic's frozen behavior is shallow: mutable values stored in fields are not
+recursively frozen. A subclass that intentionally requires field reassignment
+can opt out:
+
+```python
+from confidantic import BaseConfig, SettingsConfigDict
+
+
+class MutableAppConfig(BaseConfig):
+	model_config = SettingsConfigDict(frozen=False)
+
+	retries: int = 3
+```
+
 ## Field documentation
 
 `BaseConfig` subclasses automatically replace their NumPy-style `Attributes`

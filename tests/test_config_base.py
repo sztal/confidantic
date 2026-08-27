@@ -63,6 +63,64 @@ def test_base_config_can_be_instantiated() -> None:
     assert BaseConfig().model_dump() == {}
 
 
+def test_base_config_is_frozen_by_default() -> None:
+    """Configuration fields cannot be reassigned by default."""
+
+    class Config(BaseConfig):
+        value: str = "initial"
+
+    config = Config()
+
+    assert Config.model_config["frozen"] is True
+    with pytest.raises(ValidationError) as error:
+        config.value = "changed"
+
+    assert error.value.errors()[0]["type"] == "frozen_instance"
+
+
+def test_frozen_config_retains_field_sources() -> None:
+    """Frozen construction retains default and explicit field provenance."""
+
+    class Config(BaseConfig):
+        model_config = SettingsConfigDict(frozen=True)
+
+        value: str = "default"
+
+    assert Config().model_field_sources == {
+        "value": (ClassDefaultsSource, Config),
+    }
+    assert Config(value="explicit").model_field_sources == {
+        "value": (InitSettingsSource, Config),
+    }
+
+
+def test_frozen_default_is_inherited_with_other_model_options() -> None:
+    """Subclass model options preserve the inherited frozen default."""
+
+    class Config(BaseConfig):
+        model_config = SettingsConfigDict(env_prefix="APP_")
+
+        value: str = "initial"
+
+    assert Config.model_config["frozen"] is True
+    with pytest.raises(ValidationError):
+        Config().value = "changed"
+
+
+def test_frozen_default_can_be_disabled() -> None:
+    """Subclasses can opt into mutable configuration fields."""
+
+    class Config(BaseConfig):
+        model_config = SettingsConfigDict(frozen=False)
+
+        value: str = "initial"
+
+    config = Config()
+    config.value = "changed"
+
+    assert config.value == "changed"
+
+
 def test_model_info_builds_table_without_evaluating_factories(
     capsys: pytest.CaptureFixture[str],
 ) -> None:

@@ -119,6 +119,32 @@ def test_standard_source_order(
     )
 
 
+def test_dotenv_filters_keys_by_each_mro_prefix(tmp_path: Path) -> None:
+    """Dotenv sources load their level's prefix and ignore unrelated keys."""
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "CHILD_VALUE=from-child\nPARENT_INHERITED=from-parent\nUNRELATED=ignored\n",
+        encoding="utf-8",
+    )
+
+    class ParentConfig(BaseConfig):
+        model_config = SettingsConfigDict(env_prefix="PARENT_")
+
+        inherited: str
+
+    class ChildConfig(ParentConfig):
+        model_config = SettingsConfigDict(env_prefix="CHILD_")
+
+        value: str
+
+    config = _build_config(ChildConfig, _env_file=env_file)
+
+    assert config.model_dump() == {
+        "inherited": "from-parent",
+        "value": "from-child",
+    }
+
+
 def test_nested_values_merge_across_mro(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -239,6 +265,24 @@ def test_aliases_validators_and_fields_set_are_preserved() -> None:
     assert default.model_fields_set == set()
     assert explicit.value == 8
     assert explicit.model_fields_set == {"value"}
+
+
+def test_values_equal_to_defaults_are_in_fields_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Explicit sources retain provenance when their values equal defaults."""
+
+    class Config(BaseConfig):
+        value: str = "same"
+
+    default = Config()
+    explicit = Config(value="same")
+    monkeypatch.setenv("VALUE", "same")
+    environment = Config()
+
+    assert default.model_fields_set == set()
+    assert explicit.model_fields_set == {"value"}
+    assert environment.model_fields_set == {"value"}
 
 
 @pytest.mark.parametrize(

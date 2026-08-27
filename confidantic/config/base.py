@@ -196,11 +196,16 @@ class BaseConfig(BaseSettings):
     ) -> dict[str, Any]:
         values = super()._settings_build_values(sources, init_kwargs)
         defaults: dict[str, Any] = {}
+        seen_defaults: set[str] = set()
 
         for source in sources:
             if isinstance(source, ClassDefaultsSource):
                 for key, value in source.defaults.items():
-                    defaults.setdefault(key, value)
+                    if key in seen_defaults:
+                        continue
+                    seen_defaults.add(key)
+                    if key not in source.current_state:
+                        defaults[key] = value
 
         return {
             key: value

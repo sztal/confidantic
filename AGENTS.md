@@ -19,19 +19,26 @@ pytest, and coverage configuration.
 Keep changes focused, preserve public behavior unless the task intentionally
 changes it, and add or update tests for behavior changes.
 
-## Development notes
+## Project records
 
-Use `wiki/` to record concise, task-specific context during development.
-Read [wiki/example.md](wiki/example.md) before starting a note, and
-replace it with notes that capture decisions, validation results, and useful
-follow-up work.
+Use `BUGS.md` as the only repository backlog for confirmed, unresolved source
+defects. Record a concise symptom, reproduction or evidence, affected behavior,
+and expected behavior. Test audits add confirmed source bugs there instead of
+fixing them. Bug-fixing tasks remove resolved entries after their regression
+tests and required checks pass.
+
+Use `wiki/` for durable architecture, design decisions, investigations, and
+technical reference material. Never use wiki pages for bug tracking or
+task-session notes.
 
 ## Validation
 
-Agents must use standard pytest for test validation:
+Agents must use standard pytest for test validation and the Nox lint session for
+repository checks:
 
 ```console
 uv run pytest
+uv run noxfile.py -s lint
 ```
 
 Use the coverage target only when coverage statistics are needed:
@@ -44,7 +51,8 @@ Do not run the full Nox test matrix through `make test`, `nox -s tests`, or
 `uv run noxfile.py -s tests`. Full multi-version Nox testing is reserved for a
 human contributor.
 
-Agents may use the non-test Nox sessions for repository checks:
+Agents may use the non-test Nox sessions directly when a focused check is
+needed:
 
 ```console
 uv run noxfile.py -s lint

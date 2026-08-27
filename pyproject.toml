@@ -39,6 +39,7 @@ dynamic = [
 ]
 dependencies = [
   "pydantic-settings>=2.15",
+  "rich>=15",
 ]
 urls.Changelog = "https://sztal.github.io/confidantic/changelog"
 urls.Documentation = "https://sztal.github.io/confidantic/"

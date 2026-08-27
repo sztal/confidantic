@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Collection, Mapping
 from inspect import get_annotations, signature
+from io import StringIO
 from types import MappingProxyType
-from typing import Any, Literal
+from typing import Any, Literal, overload
 
 from pydantic import PrivateAttr, TypeAdapter
 from pydantic.fields import FieldInfo
@@ -23,6 +24,10 @@ from pydantic_settings.sources.types import (
     PathType,
 )
 from pydantic_settings.sources.utils import InitState, _get_alias_names
+from rich.console import Console
+from rich.pretty import Pretty
+from rich.table import Table
+from rich.text import Text
 
 from confidantic.utils import is_runtime_jupyterlike
 
@@ -216,6 +221,237 @@ class BaseConfig(BaseSettings):
             Read-only field provenance for this instance.
         """
         return MappingProxyType(self._model_field_sources)
+
+    @classmethod
+    @overload
+    def model_info(
+        cls,
+        output: Literal["print"] = "print",
+        header: bool = True,
+        describe: bool = True,
+        colors: bool = False,
+    ) -> None: ...
+
+    @classmethod
+    @overload
+    def model_info(
+        cls,
+        output: Literal["table"],
+        header: bool = True,
+        describe: bool = True,
+        colors: bool = False,
+    ) -> Table: ...
+
+    @classmethod
+    @overload
+    def model_info(
+        cls,
+        output: Literal["string"],
+        header: bool = True,
+        describe: bool = True,
+        colors: bool = False,
+    ) -> str: ...
+
+    @classmethod
+    def model_info(
+        cls,
+        output: Literal["table", "string", "print"] = "print",
+        header: bool = True,
+        describe: bool = True,
+        colors: bool = False,
+    ) -> Table | str | None:
+        """Present the configuration options as a Rich table.
+
+        Options use canonical model field names and retain Pydantic's field
+        order. Required fields are identified in the ``Default`` column, while
+        default factories are named without being evaluated.
+
+        Parameters
+        ----------
+        output
+            Output mode. ``"table"`` returns the Rich table, ``"string"``
+            returns a rendering, and ``"print"`` prints the table.
+        header
+            Whether to display the configuration class name above the table.
+        describe
+            Whether to include the ``Description`` column.
+        colors
+            Whether to enable Rich colors and text styles.
+
+        Returns
+        -------
+        Table | str | None
+            The table for ``"table"``, its rendering for ``"string"``, or
+            ``None`` after printing for ``"print"``.
+
+        Raises
+        ------
+        ValueError
+            If ``output`` is not a supported mode.
+        """
+        table = cls._build_info_table(
+            header=header,
+            describe=describe,
+            colors=colors,
+        )
+        return cls._render_info(table, output=output, colors=colors)
+
+    @overload
+    def info(
+        self,
+        output: Literal["print"] = "print",
+        header: bool = True,
+        describe: bool = True,
+        colors: bool = False,
+    ) -> None: ...
+
+    @overload
+    def info(
+        self,
+        output: Literal["table"],
+        header: bool = True,
+        describe: bool = True,
+        colors: bool = False,
+    ) -> Table: ...
+
+    @overload
+    def info(
+        self,
+        output: Literal["string"],
+        header: bool = True,
+        describe: bool = True,
+        colors: bool = False,
+    ) -> str: ...
+
+    def info(
+        self,
+        output: Literal["table", "string", "print"] = "print",
+        header: bool = True,
+        describe: bool = True,
+        colors: bool = False,
+    ) -> Table | str | None:
+        """Present the configuration fields and current values as a Rich table.
+
+        The ``Value`` column contains each validated Python value as stored on
+        this instance. Values retain their normal representations, including
+        the masked representations of Pydantic secret types.
+
+        Parameters
+        ----------
+        output
+            Output mode. ``"table"`` returns the Rich table, ``"string"``
+            returns a rendering, and ``"print"`` prints the table.
+        header
+            Whether to display the configuration class name above the table.
+        describe
+            Whether to include the ``Description`` column.
+        colors
+            Whether to enable Rich colors and text styles.
+
+        Returns
+        -------
+        Table | str | None
+            The table for ``"table"``, its rendering for ``"string"``, or
+            ``None`` after printing for ``"print"``.
+
+        Raises
+        ------
+        ValueError
+            If ``output`` is not a supported mode.
+        """
+        cls = type(self)
+        values = {
+            field_name: getattr(self, field_name) for field_name in cls.model_fields
+        }
+        table = cls._build_info_table(
+            values=values,
+            header=header,
+            describe=describe,
+            colors=colors,
+        )
+        return cls._render_info(table, output=output, colors=colors)
+
+    @classmethod
+    def _build_info_table(
+        cls,
+        *,
+        values: Mapping[str, Any] | None = None,
+        header: bool,
+        describe: bool,
+        colors: bool,
+    ) -> Table:
+        table = Table(title=cls.__name__ if header else None)
+        table.add_column("Option", style="cyan" if colors else None, no_wrap=True)
+        table.add_column("Type", style="magenta" if colors else None)
+        if values is not None:
+            table.add_column("Value")
+        table.add_column("Default")
+        if describe:
+            table.add_column("Description")
+
+        for field_name, field in cls.model_fields.items():
+            annotation = field.annotation
+            if annotation is type(None):
+                annotation_name = "None"
+            elif isinstance(annotation, type):
+                annotation_name = annotation.__name__
+            else:
+                annotation_name = str(annotation).removeprefix("typing.")
+
+            default: Text | Pretty
+            if field.is_required():
+                default = Text("required", style="bold red" if colors else "")
+            elif field.default_factory is not None:
+                factory_name = getattr(
+                    field.default_factory,
+                    "__name__",
+                    type(field.default_factory).__name__,
+                )
+                default = Text(
+                    f"<factory: {factory_name}>",
+                    style="dim" if colors else "",
+                )
+            else:
+                default = Pretty(field.get_default(call_default_factory=False))
+
+            cells: list[Any] = [
+                Text(field_name),
+                Text(annotation_name),
+            ]
+            if values is not None:
+                cells.append(Pretty(values[field_name]))
+            cells.append(default)
+            if describe:
+                cells.append(Text(field.description or ""))
+            table.add_row(*cells)
+
+        return table
+
+    @staticmethod
+    def _render_info(
+        table: Table,
+        *,
+        output: Literal["table", "string", "print"],
+        colors: bool,
+    ) -> Table | str | None:
+        if output not in {"table", "string", "print"}:
+            raise ValueError(f"Invalid output mode: {output!r}")
+        if output == "table":
+            return table
+        if output == "string":
+            buffer = StringIO()
+            Console(
+                file=buffer,
+                color_system="auto" if colors else None,
+                force_terminal=colors,
+            ).print(table)
+            return buffer.getvalue()
+
+        Console(
+            color_system="auto" if colors else None,
+            force_terminal=colors,
+        ).print(table)
+        return None
 
     @classmethod
     def _settings_init_sources(

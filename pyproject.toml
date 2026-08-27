@@ -137,7 +137,7 @@ filterwarnings = [
 log_level = "INFO"
 testpaths = [
   "docs",
-  ".",
+  "confidantic",
   "tests",
   "README.md",
 ]

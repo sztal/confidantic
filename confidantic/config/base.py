@@ -3,17 +3,35 @@
 from __future__ import annotations
 
 from collections.abc import Collection, Mapping
+from contextvars import ContextVar
 from inspect import get_annotations, signature
 from io import StringIO
-from types import MappingProxyType
-from typing import Any, ClassVar, Literal, get_origin, overload
+from types import MappingProxyType, UnionType
+from typing import (
+    Annotated,
+    Any,
+    ClassVar,
+    Literal,
+    Union,
+    get_args,
+    get_origin,
+    overload,
+)
 
 from docstring_parser import DocstringParam, DocstringStyle, compose, parse
-from pydantic import PrivateAttr, TypeAdapter
+from pydantic import (
+    BaseModel,
+    Discriminator,
+    PrivateAttr,
+    TypeAdapter,
+    ValidationInfo,
+    field_validator,
+)
 from pydantic.fields import FieldInfo
 from pydantic_settings import (
     BaseSettings,
     CliSettingsSource,
+    InitSettingsSource,
     PydanticBaseSettingsSource,
 )
 from pydantic_settings import (
@@ -39,11 +57,79 @@ from confidantic.utils import is_runtime_jupyterlike
 __all__ = ("BaseConfig", "ClassDefaultsSource", "SettingsConfigDict")
 
 _FACTORY_DEFAULT = object()
+_DEFERRED_MODEL_DEFAULT = object()
 
 _FieldSource = tuple[
     type[PydanticBaseSettingsSource],
     type[BaseSettings],
 ]
+_NestedModelBaselines = dict[str, BaseModel | object]
+_NESTED_MODEL_BASELINES: ContextVar[_NestedModelBaselines | None] = ContextVar(
+    "_NESTED_MODEL_BASELINES",
+    default=None,
+)
+
+
+def _field_has_discriminator(field: FieldInfo) -> bool:
+    return field.discriminator is not None or any(
+        isinstance(metadata, Discriminator) for metadata in field.metadata
+    )
+
+
+def _annotation_has_model(annotation: Any) -> bool:
+    if isinstance(annotation, type):
+        return issubclass(annotation, BaseModel)
+    origin = get_origin(annotation)
+    if origin is Annotated:
+        return _annotation_has_model(get_args(annotation)[0])
+    if origin in (Union, UnionType):
+        return any(_annotation_has_model(item) for item in get_args(annotation))
+    return False
+
+
+def _update_nested_model(
+    model: BaseModel,
+    update: Mapping[str, Any],
+) -> BaseModel:
+    model_type = type(model)
+    values = {
+        field_name: getattr(model, field_name) for field_name in model_type.model_fields
+    }
+    remaining = dict(update)
+    updated_fields: set[str] = set()
+
+    for field_name, field in model_type.model_fields.items():
+        aliases, _ = _get_alias_names(
+            field_name,
+            field,
+            populate_by_name=True,
+        )
+        key = next((alias for alias in aliases if alias in update), None)
+        if key is None:
+            continue
+
+        value = update[key]
+        current = values[field_name]
+        if (
+            isinstance(current, BaseModel)
+            and isinstance(value, Mapping)
+            and not _field_has_discriminator(field)
+        ):
+            value = _update_nested_model(current, value)
+        values[field_name] = value
+        updated_fields.add(field_name)
+        for alias in aliases:
+            remaining.pop(alias, None)
+
+    values.update(model.model_extra or {})
+    values.update(remaining)
+    updated = model_type.model_validate(values, by_alias=True, by_name=True)
+    object.__setattr__(
+        updated,
+        "__pydantic_fields_set__",
+        model.model_fields_set | updated_fields,
+    )
+    return updated
 
 
 class SettingsConfigDict(PydanticSettingsConfigDict, total=False):
@@ -63,8 +149,9 @@ class ClassDefaultsSource(PydanticBaseSettingsSource):
     """Load defaults declared directly on one settings class.
 
     Static defaults become source values so they participate in BaseConfig's
-    per-MRO priority and nested merging. Default factories remain lazy and act
-    as whole-field barriers until Pydantic evaluates them during validation.
+    per-MRO priority and nested merging. Default factories and discriminated
+    defaults act as whole-field barriers until Pydantic evaluates them during
+    validation.
 
     Parameters
     ----------
@@ -98,7 +185,7 @@ class ClassDefaultsSource(PydanticBaseSettingsSource):
 
             aliases, _ = _get_alias_names(field_name, field)
             key = aliases[0] if aliases else field_name
-            if field.default_factory is not None:
+            if field.default_factory is not None or _field_has_discriminator(field):
                 self.defaults[key] = _FACTORY_DEFAULT
             else:
                 default = field.get_default(call_default_factory=False)
@@ -119,9 +206,11 @@ class _ResolvedSettingsSource(PydanticBaseSettingsSource):
         settings_cls: type[BaseSettings],
         sources: tuple[PydanticBaseSettingsSource, ...],
         _init_state: InitState,
+        nested_model_default_partial_update: bool,
     ) -> None:
         super().__init__(settings_cls, _init_state)
         self.sources = sources
+        self.nested_model_default_partial_update = nested_model_default_partial_update
         self.field_sources: dict[str, _FieldSource] = {}
 
     def get_field_value(
@@ -165,6 +254,8 @@ class BaseConfig(BaseSettings):
     Each class is resolved using Pydantic Settings source ordering, followed by
     defaults declared directly on that class. Remaining values continue through
     Python's C3 MRO. Nested values retain Pydantic Settings deep-merge behavior.
+    Partial updates to Pydantic models retain the concrete type and current
+    values of the default or lower-priority initialization instance.
 
     Resolved instances expose each field's source class and the configuration
     class for which that source was constructed through ``model_field_sources``.
@@ -200,6 +291,27 @@ class BaseConfig(BaseSettings):
     )
 
     _model_field_sources: dict[str, _FieldSource] = PrivateAttr(default_factory=dict)
+
+    @field_validator("*", mode="before", check_fields=False)
+    @classmethod
+    def _apply_nested_model_partial_update(
+        cls,
+        value: Any,
+        info: ValidationInfo,
+    ) -> Any:
+        baselines = _NESTED_MODEL_BASELINES.get()
+        if baselines is None or info.field_name not in baselines:
+            return value
+
+        baseline = baselines[info.field_name]
+        if baseline is _DEFERRED_MODEL_DEFAULT:
+            baseline = cls.model_fields[info.field_name].get_default(
+                call_default_factory=True,
+                validated_data=info.data,
+            )
+        if isinstance(baseline, BaseModel) and isinstance(value, Mapping):
+            return _update_nested_model(baseline, value)
+        return value
 
     @classmethod
     def __pydantic_init_subclass__(cls, **kwargs: Any) -> None:
@@ -251,7 +363,11 @@ class BaseConfig(BaseSettings):
                 _init_kwargs=kwargs,
             )
 
-        super().__init__(_build_sources=build_sources)
+        token = _NESTED_MODEL_BASELINES.set({})
+        try:
+            super().__init__(_build_sources=build_sources)
+        finally:
+            _NESTED_MODEL_BASELINES.reset(token)
 
         sources, _ = build_sources
         resolved_source = next(
@@ -593,6 +709,7 @@ class BaseConfig(BaseSettings):
         resolved_sources: list[PydanticBaseSettingsSource] = []
         init_kwargs = _init_kwargs if _init_kwargs is not None else {}
         init_state = InitState()
+        partial_update = False
 
         for index, level in enumerate(levels):
             source_builder = BaseSettings.__dict__["_settings_init_sources"].__get__(
@@ -609,6 +726,10 @@ class BaseConfig(BaseSettings):
                 for source in reversed(level_sources)
                 if isinstance(source, DefaultSettingsSource)
             )
+            if index == 0:
+                partial_update = bool(
+                    default_source.nested_model_default_partial_update
+                )
             init_state = default_source._init_state
             resolved_sources.extend(
                 source
@@ -629,6 +750,7 @@ class BaseConfig(BaseSettings):
             cls,
             sources,
             _init_state=init_state,
+            nested_model_default_partial_update=partial_update,
         )
         return (*sources, resolved_source), init_kwargs
 
@@ -651,8 +773,69 @@ class BaseConfig(BaseSettings):
                     if key not in source.current_state:
                         defaults[key] = value
 
-        return {
+        values = {
             key: value
             for key, value in values.items()
             if key not in defaults or defaults[key] != value
         }
+
+        resolved_source = next(
+            (
+                source
+                for source in reversed(sources)
+                if isinstance(source, _ResolvedSettingsSource)
+            ),
+            None,
+        )
+        baselines = _NESTED_MODEL_BASELINES.get()
+        if (
+            resolved_source is None
+            or not resolved_source.nested_model_default_partial_update
+            or baselines is None
+        ):
+            return values
+
+        for field_name, field in cls.model_fields.items():
+            if _field_has_discriminator(field):
+                continue
+            aliases, _ = _get_alias_names(field_name, field)
+            keys = aliases or (field_name,)
+            selected_key = next(
+                (candidate for candidate in keys if candidate in values),
+                None,
+            )
+            if selected_key is None or not isinstance(values[selected_key], Mapping):
+                continue
+
+            for source in sources:
+                if not isinstance(source, InitSettingsSource):
+                    continue
+                source_key = next(
+                    (
+                        candidate
+                        for candidate in keys
+                        if candidate in source.init_kwargs
+                    ),
+                    None,
+                )
+                if source_key is None:
+                    continue
+                baseline = source.init_kwargs[source_key]
+                if not isinstance(baseline, BaseModel):
+                    continue
+                if not any(candidate in source.current_state for candidate in keys):
+                    values[selected_key] = baseline
+                else:
+                    baselines[field_name] = baseline
+                break
+            else:
+                if not field.is_required():
+                    if field.default_factory is not None:
+                        if _annotation_has_model(field.annotation):
+                            baselines[field_name] = _DEFERRED_MODEL_DEFAULT
+                    else:
+                        baseline = field.get_default(call_default_factory=False)
+                        if isinstance(baseline, BaseModel):
+                            baselines[field_name] = baseline
+
+        return values

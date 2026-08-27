@@ -6,11 +6,17 @@ import sys
 from enum import Enum
 from io import StringIO
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import pytest
 from docstring_parser import DocstringStyle, parse
-from pydantic import BaseModel, Field, SecretStr, ValidationError, field_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    SecretStr,
+    ValidationError,
+    field_validator,
+)
 from pydantic_settings import (
     BaseSettings,
     CliSettingsSource,
@@ -832,6 +838,226 @@ def test_validated_data_default_factory_keeps_pydantic_semantics() -> None:
         values: list[int] = Field(default_factory=lambda data: [data["seed"]])
 
     assert Config().values == [3]
+
+
+def test_partial_cli_update_preserves_nested_factory_model() -> None:
+    """A CLI patch retains the factory model's concrete type and defaults."""
+
+    class Nested(BaseModel):
+        x: int = 1
+        y: int = 1
+
+    class NestedChild(Nested):
+        y: int = 2
+        child_only: int = 3
+
+    class Config(BaseConfig):
+        nested: Nested = Field(default_factory=NestedChild)
+
+    config = _build_config(Config, _cli_parse_args=["--nested.x=11"])
+
+    assert type(config.nested) is NestedChild
+    assert config.nested == NestedChild(x=11)
+
+
+def test_nested_factory_model_is_partially_updated_from_env_and_init(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Mapping sources patch the factory model and retain their provenance."""
+
+    class Nested(BaseModel):
+        x: int = 1
+        y: int = 1
+
+    class NestedChild(Nested):
+        y: int = 2
+
+    class Config(BaseConfig):
+        nested: Nested = Field(default_factory=NestedChild)
+
+    monkeypatch.setenv("NESTED__X", "11")
+    environment = Config()
+    monkeypatch.delenv("NESTED__X")
+    explicit_mapping = _build_config(Config, nested={"x": "12"})
+
+    assert type(environment.nested) is NestedChild
+    assert environment.nested == NestedChild(x=11)
+    assert environment.model_field_sources["nested"] == (EnvSettingsSource, Config)
+    assert type(explicit_mapping.nested) is NestedChild
+    assert explicit_mapping.nested == NestedChild(x=12)
+    assert explicit_mapping.model_field_sources["nested"] == (
+        InitSettingsSource,
+        Config,
+    )
+
+
+def test_partial_update_uses_static_or_explicit_nested_model_baseline() -> None:
+    """A patch retains the concrete type and current values of its baseline."""
+
+    class Nested(BaseModel):
+        x: int = 1
+        y: int = 1
+
+    class NestedChild(Nested):
+        y: int = 2
+        child_only: int = 3
+
+    class Config(BaseConfig):
+        nested: Nested = NestedChild(y=7)
+
+    static = _build_config(Config, _cli_parse_args=["--nested.x=11"])
+    base = Nested(x=2, y=8)
+    explicit = Config(nested=base)
+    patched_explicit = _build_config(
+        Config,
+        nested=base,
+        _cli_parse_args=["--nested.x=12"],
+    )
+
+    assert type(static.nested) is NestedChild
+    assert static.nested == NestedChild(x=11, y=7)
+    assert explicit.nested is base
+    assert type(patched_explicit.nested) is Nested
+    assert patched_explicit.nested == Nested(x=12, y=8)
+
+
+def test_partial_update_evaluates_validated_data_model_factory_once() -> None:
+    """A partial update defers one data-aware factory call to validation."""
+    calls = 0
+
+    class Nested(BaseModel):
+        x: int = 1
+        y: int = 1
+
+    class NestedChild(Nested):
+        y: int = 2
+
+    def make_nested(data: dict[str, Any]) -> NestedChild:
+        nonlocal calls
+        calls += 1
+        return NestedChild(y=data["seed"])
+
+    class Config(BaseConfig):
+        seed: int = 3
+        nested: Nested = Field(default_factory=make_nested)
+
+    config = _build_config(
+        Config,
+        seed="7",
+        _cli_parse_args=["--nested.x=11"],
+    )
+
+    assert type(config.nested) is NestedChild
+    assert config.nested == NestedChild(x=11, y=7)
+    assert calls == 1
+
+
+def test_mapping_source_does_not_evaluate_non_model_factory() -> None:
+    """A supplied mapping does not evaluate an unrelated mapping factory."""
+    calls = 0
+
+    def make_values() -> dict[str, int]:
+        nonlocal calls
+        calls += 1
+        return {"default": 1}
+
+    class Config(BaseConfig):
+        values: dict[str, int] = Field(default_factory=make_values)
+
+    config = Config(values={"provided": 2})
+
+    assert config.values == {"provided": 2}
+    assert calls == 0
+
+
+def test_partial_update_recurses_through_plain_pydantic_models() -> None:
+    """Direct BaseModel fields retain runtime types at every nested level."""
+
+    class Inner(BaseModel):
+        x: int = Field(1, alias="X")
+        y: int = 1
+
+        @field_validator("x")
+        @classmethod
+        def double_x(cls, value: int) -> int:
+            return value * 2
+
+    class InnerChild(Inner):
+        y: int = 2
+        child_only: int = 3
+
+    class Outer(BaseModel):
+        inner: Inner = InnerChild(X=1)
+
+    class OuterChild(Outer):
+        outer_only: int = 4
+
+    class Config(BaseConfig):
+        nested: Outer = Field(default_factory=OuterChild)
+
+    config = _build_config(Config, nested={"inner": {"X": "5"}})
+
+    assert type(config.nested) is OuterChild
+    assert type(config.nested.inner) is InnerChild
+    assert config.nested.inner == InnerChild(X=5)
+    assert config.nested.model_fields_set == {"inner"}
+    assert config.nested.inner.model_fields_set == {"x"}
+
+
+def test_nested_model_partial_update_can_be_disabled() -> None:
+    """Class and instance opt-outs retain the original Pydantic behavior."""
+
+    class Nested(BaseModel):
+        x: int = 1
+        y: int = 1
+
+    class NestedChild(Nested):
+        y: int = 2
+
+    class Config(BaseConfig):
+        model_config = SettingsConfigDict(
+            nested_model_default_partial_update=False,
+        )
+
+        nested: Nested = Field(default_factory=NestedChild)
+
+    class InstanceOverrideConfig(BaseConfig):
+        nested: Nested = Field(default_factory=NestedChild)
+
+    configured = _build_config(Config, _cli_parse_args=["--nested.x=11"])
+    overridden = _build_config(
+        InstanceOverrideConfig,
+        _nested_model_default_partial_update=False,
+        _cli_parse_args=["--nested.x=12"],
+    )
+
+    assert type(configured.nested) is Nested
+    assert configured.nested == Nested(x=11)
+    assert type(overridden.nested) is Nested
+    assert overridden.nested == Nested(x=12)
+
+
+def test_discriminated_nested_model_update_selects_replacement_variant() -> None:
+    """A discriminator selects a variant without values from the default."""
+
+    class First(BaseModel):
+        kind: Literal["first"] = "first"
+        shared: int = 7
+
+    class Second(BaseModel):
+        kind: Literal["second"] = "second"
+        shared: int = 2
+
+    class Config(BaseConfig):
+        nested: First | Second = Field(
+            default=First(),
+            discriminator="kind",
+        )
+
+    config = _build_config(Config, nested={"kind": "second"})
+
+    assert type(config.nested) is Second
+    assert config.nested == Second()
 
 
 def test_aliases_validators_and_fields_set_are_preserved() -> None:

@@ -1,5 +1,6 @@
 """Tests for constructor-derived factory configuration models."""
 
+import sys
 from typing import Annotated, Any, cast, get_args
 
 import pytest
@@ -224,6 +225,29 @@ def test_model_from_type_creates_ordered_config_fields() -> None:
     assert config_type.model_fields["enabled"].default is True
 
 
+def test_cli_help_omits_generated_factory_attributes(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Generated factory fields do not become CLI group descriptions."""
+
+    class Target:
+        def __init__(self, value: int = 1) -> None:
+            self.value = value
+
+    class Config(BaseConfig, cli_parse_args=True):
+        target: FactoryConfig.model_from(Target) = Field(  # type: ignore[valid-type]
+            default_factory=Target
+        )
+
+    with pytest.raises(SystemExit, match="0"):
+        cast(Any, Config)(_cli_parse_args=["--help"])
+
+    output = capsys.readouterr().out
+    assert "target options:" in output
+    assert "--target.value int" in output
+    assert "Attributes" not in output
+
+
 def test_model_from_type_accepts_custom_name() -> None:
     """Callers can choose the generated model name."""
     config_type = cast(
@@ -355,6 +379,44 @@ def test_materialize_propagates_target_errors() -> None:
 
     with pytest.raises(RuntimeError, match="5"):
         config_type(value=5).materialize()
+
+
+def test_materialize_disables_cli_parsing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Target construction cannot consume process CLI arguments."""
+
+    class CliConfig(BaseConfig, cli_parse_args=True):
+        value: int = 1
+
+    class Target:
+        def __init__(self) -> None:
+            self.config = CliConfig()
+
+    config_type = cast(Any, FactoryConfig.model_from(Target))
+    monkeypatch.setattr(sys, "argv", ["factory.py", "--value=17"])
+
+    target = config_type().materialize()
+
+    assert target.config.value == 1
+    assert CliConfig().value == 17
+
+
+def test_model_resolve_disables_cli_parsing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Resolved model construction does not reparse process arguments."""
+
+    class Config(BaseConfig, cli_parse_args=True):
+        child: ChildConfig = Field(default_factory=lambda: ChildConfig(value=1))
+
+    monkeypatch.setattr(sys, "argv", ["factory.py", "--child.value=17"])
+    source = Config()
+
+    resolved = source.model_resolve()
+
+    assert source.child.value == 17
+    assert resolved.child.value == 17
 
 
 def test_model_resolve_uses_instance_values() -> None:

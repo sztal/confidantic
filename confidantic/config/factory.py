@@ -33,7 +33,10 @@ from pydantic_core import (
     core_schema,
 )
 
-from confidantic.config.base import BaseConfig
+from confidantic.config.base import (
+    _DISABLE_CLI_PARSE_ARGS,
+    BaseConfig,
+)
 
 __all__ = ("FactoryConfig",)
 
@@ -206,12 +209,19 @@ class FactoryConfig(BaseConfig):
     def materialize(self) -> Any:
         """Create the target object from the validated configuration values.
 
+        CLI parsing is disabled throughout materialization, including any
+        configuration models constructed by the target.
+
         Returns
         -------
         Any
                 Instance of the target type recorded by :meth:`model_from`.
         """
-        return _materialize_factory(self, set())
+        token = _DISABLE_CLI_PARSE_ARGS.set(True)
+        try:
+            return _materialize_factory(self, set())
+        finally:
+            _DISABLE_CLI_PARSE_ARGS.reset(token)
 
     __call__ = materialize
 
@@ -423,4 +433,8 @@ def _resolve_value(value: Any, active: set[int]) -> Any:
 
 
 def _model_resolve(config: BaseConfig) -> BaseConfig:
-    return cast(BaseConfig, _resolve_model_instance(config, set()))
+    token = _DISABLE_CLI_PARSE_ARGS.set(True)
+    try:
+        return cast(BaseConfig, _resolve_model_instance(config, set()))
+    finally:
+        _DISABLE_CLI_PARSE_ARGS.reset(token)

@@ -68,6 +68,10 @@ _NESTED_MODEL_BASELINES: ContextVar[_NestedModelBaselines | None] = ContextVar(
     "_NESTED_MODEL_BASELINES",
     default=None,
 )
+_DISABLE_CLI_PARSE_ARGS: ContextVar[bool] = ContextVar(
+    "_DISABLE_CLI_PARSE_ARGS",
+    default=False,
+)
 
 
 def _field_has_discriminator(field: FieldInfo) -> bool:
@@ -139,10 +143,11 @@ class SettingsConfigDict(PydanticSettingsConfigDict, total=False):
     ----------
     docstring_set_attributes_section
         Whether model fields replace the class docstring's ``Attributes``
-        section when a configuration subclass is created.
+        section when a configuration subclass is created. ``None`` enables
+        this by default except for models with ``cli_parse_args=True``.
     """
 
-    docstring_set_attributes_section: bool
+    docstring_set_attributes_section: bool | None
 
 
 class ClassDefaultsSource(PydanticBaseSettingsSource):
@@ -286,7 +291,7 @@ class BaseConfig(BaseSettings):
         cli_show_env_vars=True,
         cli_use_class_docs_for_groups=True,
         use_attribute_docstrings=True,
-        docstring_set_attributes_section=True,
+        docstring_set_attributes_section=None,
         dotenv_filtering="match_prefix",
     )
 
@@ -333,7 +338,15 @@ class BaseConfig(BaseSettings):
     @classmethod
     def __pydantic_init_subclass__(cls, **kwargs: Any) -> None:
         super().__pydantic_init_subclass__(**kwargs)
-        if not cls.model_config.get("docstring_set_attributes_section", True):
+        set_attributes_section = cls.model_config.get(
+            "docstring_set_attributes_section"
+        )
+        if set_attributes_section is None:
+            set_attributes_section = (
+                cls.__doc__ is not None
+                and not cls.model_config.get("cli_parse_args", False)
+            )
+        if not set_attributes_section:
             return
 
         parsed = parse(cls.__doc__, style=DocstringStyle.NUMPYDOC)
@@ -364,7 +377,7 @@ class BaseConfig(BaseSettings):
         )
 
     def __init__(self, **kwargs: Any) -> None:
-        if is_runtime_jupyterlike():
+        if _DISABLE_CLI_PARSE_ARGS.get() or is_runtime_jupyterlike():
             kwargs["_cli_parse_args"] = False
 
         build_sources = kwargs.pop("_build_sources", None)

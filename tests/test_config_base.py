@@ -243,7 +243,7 @@ def test_model_docstring_replaces_attributes_and_preserves_other_sections() -> N
 
 
 def test_model_docstring_is_created_with_inherited_fields() -> None:
-    """Undocumented subclasses describe all effective model fields in order."""
+    """Documented subclasses describe all effective model fields in order."""
 
     class ParentConfig(BaseConfig):
         """Parent configuration."""
@@ -251,6 +251,8 @@ def test_model_docstring_is_created_with_inherited_fields() -> None:
         inherited: str = Field(description="Inherited value.")
 
     class Config(ParentConfig):
+        """Child configuration."""
+
         direct: int = Field(description="Direct value.")
 
     assert _docstring_attributes(Config) == [
@@ -285,6 +287,33 @@ def test_model_docstring_generation_can_be_disabled() -> None:
 
     assert DisabledConfig.__doc__ == original_docstring
     assert ChildConfig.__doc__ == "Child documentation."
+
+
+def test_model_docstring_generation_is_disabled_for_cli_models_by_default() -> None:
+    """CLI-enabled models preserve handwritten docstrings by default."""
+    original_docstring = (
+        "Original documentation.\n\n"
+        "Attributes\n"
+        "----------\n"
+        "handwritten\n"
+        "    Keep this entry."
+    )
+
+    class Config(BaseConfig, cli_parse_args=True):
+        __doc__ = original_docstring
+
+        value: str = Field(description="Generated description.")
+
+    assert Config.__doc__ == original_docstring
+
+
+def test_model_docstring_generation_requires_a_docstring_by_default() -> None:
+    """Undocumented models do not receive a generated attributes section."""
+
+    class Config(BaseConfig):
+        value: str = Field(description="Generated description.")
+
+    assert Config.__doc__ is None
 
 
 def test_fieldless_model_does_not_gain_an_attributes_section() -> None:

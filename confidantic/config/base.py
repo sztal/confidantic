@@ -1,6 +1,6 @@
 """Base configuration model."""
 
-from collections.abc import Collection, Mapping
+from collections.abc import Callable, Collection, Mapping
 from contextvars import ContextVar
 from inspect import get_annotations, signature
 from io import StringIO
@@ -290,13 +290,53 @@ class BaseConfig(BaseSettings):
         cli_kebab_case=True,
         cli_hide_none_type=True,
         cli_show_env_vars=True,
-        cli_use_class_docs_for_groups=True,
+        cli_use_class_docs_for_group=True,
+        cli_ignore_unknown_args=True,
         use_attribute_docstrings=True,
         docstring_set_attributes_section=None,
         dotenv_filtering="match_prefix",
     )
 
     _model_field_sources: dict[str, _FieldSource] = PrivateAttr(default_factory=dict)
+
+    def model_factory(
+        self,
+        selector: Callable[[str], bool]
+        | Callable[[str, FieldInfo], bool]
+        | None = None,
+        *,
+        clear_metadata: bool = True,
+    ) -> type[Self]:
+        """Create a subclass with generated factory configuration defaults.
+
+        Selection uses each field's current validated value to generate its
+        factory configuration annotation and default instance. A one-argument
+        selector receives the field name; a two-argument selector also receives
+        its field information. Without a selector, all fields are selected.
+        Existing factory configuration values remain unchanged. The generated
+        subclass uses a copy of :class:`BaseConfig`'s default model configuration.
+
+        Parameters
+        ----------
+        selector
+            Optional predicate accepting a field name or a field name and its
+            field information. It must declare exactly one or two positional
+            parameters.
+        clear_metadata
+            Whether to remove metadata inherited from selected source fields.
+
+        Returns
+        -------
+        type[Self]
+            ``<Source>Factory`` subclass whose selected fields use generated
+            factory configurations, or this instance's type if none are selected.
+        """
+        from confidantic.config.factory import _model_factory
+
+        return cast(
+            type[Self],
+            _model_factory(self, selector, clear_metadata=clear_metadata),
+        )
 
     def model_resolve(self) -> Self:
         """Materialize factory fields in a generated resolved model.

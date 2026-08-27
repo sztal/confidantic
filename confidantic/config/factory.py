@@ -307,6 +307,59 @@ def _resolved_field(field: FieldInfo, annotation: Any) -> FieldInfo:
     return resolved
 
 
+def _model_factory(
+    config: BaseConfig,
+    selector: Callable[[str], bool] | Callable[[str, FieldInfo], bool] | None = None,
+    *,
+    clear_metadata: bool = True,
+) -> type[BaseConfig]:
+    selector_arity = 1
+    if selector is not None:
+        parameters = tuple(signature(selector).parameters.values())
+        if len(parameters) not in {1, 2} or any(
+            parameter.kind
+            not in {Parameter.POSITIONAL_ONLY, Parameter.POSITIONAL_OR_KEYWORD}
+            for parameter in parameters
+        ):
+            msg = "selector must declare exactly one or two positional parameters"
+            raise TypeError(msg)
+        selector_arity = len(parameters)
+
+    source_type = type(config)
+    fields: dict[str, tuple[Any, Any]] = {}
+    for field_name, field in source_type.model_fields.items():
+        value = getattr(config, field_name)
+        selected = selector is None or (
+            selector(field_name) if selector_arity == 1 else selector(field_name, field)
+        )
+        if not selected or isinstance(value, FactoryConfig):
+            continue
+
+        factory_type = FactoryConfig.model_from(value)
+        factory_default = factory_type()
+        factory_field = copy(field)
+        factory_field.annotation = factory_type
+        factory_field.default = factory_default
+        factory_field.default_factory = None
+        if clear_metadata:
+            factory_field.metadata = []
+        fields[field_name] = (factory_type, factory_field)
+
+    if not fields:
+        return source_type
+
+    return cast(
+        type[BaseConfig],
+        create_model(
+            f"{source_type.__name__}Factory",
+            __base__=source_type,
+            __config__=copy(BaseConfig.model_config),
+            __module__=source_type.__module__,
+            **cast(dict[str, Any], fields),
+        ),
+    )
+
+
 def _resolved_model_type(
     source: type[BaseModel],
     *,

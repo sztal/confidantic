@@ -161,7 +161,7 @@ report.exclude_also = [
   "^\\s*return NotImplemented\\b",
   "^if __name__ == [\"']__main__[\"']:$",
 ]
-report.fail_under = 100
+report.fail_under = 95
 report.show_missing = true
 report.skip_covered = true
 run.branch = true

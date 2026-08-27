@@ -24,9 +24,14 @@ from typing import (
     get_type_hints,
 )
 
-from pydantic import BaseModel, ConfigDict, Field, create_model
+from pydantic import BaseModel, ConfigDict, Field, GetCoreSchemaHandler, create_model
 from pydantic.fields import FieldInfo
-from pydantic_core import PydanticUndefined
+from pydantic_core import (
+    CoreSchema,
+    PydanticCustomError,
+    PydanticUndefined,
+    core_schema,
+)
 
 from confidantic.config.base import BaseConfig
 
@@ -66,10 +71,48 @@ class FactoryConfig(BaseConfig):
     Concrete subclasses are created with :meth:`model_from`. Their fields
     correspond to annotated constructor parameters and validated instances can
     create the target object by calling :meth:`materialize` or the config itself.
+
+    Pydantic fields accept target instances and convert them to generated
+    factory config instances. Mappings supplied to concrete factory config
+    fields retain normal Pydantic model validation.
     """
 
     factory_target: ClassVar[type[Any]]
     factory_fields: ClassVar[tuple[str, ...]] = ()
+
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls,
+        source_type: Any,
+        handler: GetCoreSchemaHandler,
+    ) -> CoreSchema:
+        schema = handler(source_type)
+
+        def validate(value: Any, next_validator: Callable[[Any], Any]) -> Any:
+            if isinstance(value, FactoryConfig):
+                return value
+            if getattr(cls, "factory_target", None) is not None and isinstance(
+                value, Mapping
+            ):
+                return next_validator(value)
+            try:
+                config_type = cls.model_from(value)
+                return next_validator(config_type())
+            except (TypeError, ValueError) as error:
+                raise PydanticCustomError(
+                    "factory_config",
+                    "Input should be a FactoryConfig, target instance, or mapping",
+                ) from error
+
+        lax_schema = core_schema.no_info_wrap_validator_function(validate, schema)
+        factory_base = next(
+            base for base in cls.__mro__ if BaseConfig in base.__bases__
+        )
+        strict_schema = core_schema.union_schema(
+            [schema, core_schema.is_instance_schema(factory_base)],
+            mode="left_to_right",
+        )
+        return core_schema.lax_or_strict_schema(lax_schema, strict_schema)
 
     @singledispatchmethod
     @classmethod

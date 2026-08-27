@@ -3,7 +3,7 @@
 from typing import Annotated, Any, cast, get_args
 
 import pytest
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from confidantic import BaseConfig, FactoryConfig, SettingsConfigDict
 
@@ -97,6 +97,117 @@ class ResolvableConfig(BaseConfig):
     def primary_value(self) -> int:
         """Return the selected primary value."""
         return self.primary.value
+
+
+def test_factory_field_converts_target_instance() -> None:
+    """Pydantic fields convert target instances into factory configs."""
+
+    class Model(BaseModel):
+        factory: FactoryConfig
+
+    source = Product(3, "source", enabled=False)
+    model = Model.model_validate({"factory": source})
+
+    assert isinstance(model.factory, FactoryConfig)
+    assert model.factory.model_dump() == {
+        "count": 3,
+        "label": "source",
+        "enabled": False,
+    }
+    assert isinstance(model.factory.materialize(), Product)
+
+
+def test_concrete_factory_field_converts_target_instance() -> None:
+    """Concrete factory fields generate compatible config subclasses."""
+    model = NestedModel.model_validate({"child": Child(4)})
+
+    assert isinstance(model.child, ChildConfig)
+    assert model.child.value == 4
+    assert isinstance(model.child.materialize(), Child)
+
+
+def test_concrete_factory_field_validates_mapping() -> None:
+    """Mappings retain normal concrete model validation."""
+    model = NestedModel.model_validate({"child": {"value": "5"}})
+
+    assert type(model.child) is ChildConfig
+    assert model.child.value == 5
+
+
+def test_factory_field_preserves_existing_config_instance() -> None:
+    """Existing factory configs bypass conversion and subtype enforcement."""
+
+    class Model(BaseModel):
+        factory: FactoryConfig
+
+    child = ChildConfig(value=6)
+    bare = Model.model_validate({"factory": child})
+    product_config = cast(Any, FactoryConfig.model_from(Product))(count=7)
+    concrete = NestedModel.model_validate({"child": product_config})
+
+    assert bare.factory is child
+    assert concrete.child is product_config
+
+
+def test_factory_field_validation_composes_with_annotations() -> None:
+    """Factory conversion composes with containers, optionals, and unions."""
+
+    class Model(BaseModel):
+        factories: list[FactoryConfig]
+        optional: FactoryConfig | None
+        choice: FactoryConfig | str
+
+    model = Model.model_validate(
+        {
+            "factories": [Child(8)],
+            "optional": Child(9),
+            "choice": "unchanged",
+        }
+    )
+
+    assert isinstance(model.factories[0], FactoryConfig)
+    assert model.factories[0].materialize().value == 8
+    assert isinstance(model.optional, FactoryConfig)
+    assert model.optional.materialize().value == 9
+    assert model.choice == "unchanged"
+
+
+def test_factory_field_converts_assignment() -> None:
+    """Assignment validation uses the same factory conversion schema."""
+
+    class Model(BaseModel):
+        model_config = ConfigDict(validate_assignment=True)
+
+        factory: FactoryConfig
+
+    model = Model(factory=ChildConfig(value=10))
+    cast(Any, model).factory = Child(11)
+
+    assert isinstance(model.factory, FactoryConfig)
+    assert model.factory.materialize().value == 11
+
+
+def test_factory_field_failure_allows_union_fallback() -> None:
+    """Factory conversion failures remain local to their union branch."""
+
+    class PositionalTarget:
+        def __init__(self, value: int, /) -> None:
+            self.value = value
+
+    class FactoryModel(BaseModel):
+        factory: FactoryConfig
+
+    class UnionModel(BaseModel):
+        model_config = ConfigDict(arbitrary_types_allowed=True)
+
+        factory: FactoryConfig | PositionalTarget
+
+    source = PositionalTarget(12)
+
+    with pytest.raises(ValidationError, match="FactoryConfig"):
+        FactoryModel.model_validate({"factory": source})
+
+    assert UnionModel.model_validate({"factory": source}).factory is source
 
 
 def test_model_from_type_creates_ordered_config_fields() -> None:

@@ -3,9 +3,17 @@ from functools import singledispatch
 from types import ModuleType
 from typing import Any, cast
 
+import pendulum as pdt
 from pydantic import ImportString, TypeAdapter
 
-__all__ = ("get_import_string", "import_from_string", "is_runtime_jupyterlike")
+__all__ = (
+    "get_import_string",
+    "import_from_string",
+    "is_runtime_jupyterlike",
+    "parse_date",
+    "parse_datetime",
+    "parse_time",
+)
 
 
 def is_runtime_jupyterlike() -> bool:
@@ -78,3 +86,33 @@ def import_from_string(import_string: str, type_hint: Any = Any) -> Any:
     """
     import_type = cast(Any, ImportString)[type_hint]
     return TypeAdapter(import_type).validate_python(import_string)
+
+
+def parse_date(d: Any) -> pdt.Date:
+    """Parse a date from a string or return the date if already a Date."""
+    if isinstance(d, pdt.Date):
+        return d
+    date_str = str(d)
+    try:
+        return pdt.Date.fromisoformat(date_str)
+    except ValueError:
+        return pdt.DateTime.fromisoformat(date_str).date()
+
+
+def parse_datetime(dt: Any) -> pdt.DateTime:
+    """Parse a datetime from a string or return the datetime if already a DateTime."""
+    if isinstance(dt, pdt.DateTime):
+        return dt
+    dt_str = str(dt)
+    return pdt.DateTime.fromisoformat(dt_str)
+
+
+def parse_time(t: Any) -> pdt.Time:
+    """Parse a time from a string or return the time if already a Time."""
+    if isinstance(t, pdt.Time):
+        return t
+    t_str = str(t)
+    try:
+        return pdt.Time.fromisoformat(t_str)
+    except ValueError:
+        return pdt.DateTime.fromisoformat(t_str).time()

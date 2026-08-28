@@ -92,6 +92,9 @@ class FactoryConfig(BaseConfig):
         schema = handler(source_type)
 
         def validate(value: Any, next_validator: Callable[[Any], Any]) -> Any:
+            marker_key = cls.model_config.get("model_import_string")
+            if isinstance(value, Mapping) and marker_key in value:
+                return cls._resolve_model_import_string(value, next_validator)
             if isinstance(value, FactoryConfig):
                 return value
             if getattr(cls, "factory_target", None) is not None and isinstance(

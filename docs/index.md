@@ -112,3 +112,16 @@ The special key is configured with `model_import_string` in
 `SettingsConfigDict` and defaults to `"__model__"`. Set it to `None` to exclude
 a configuration class from this output. Nested `BaseConfig` instances receive
 their own marker; ordinary Pydantic models do not.
+
+Marked configuration data can be deserialized polymorphically with
+`model_validate()` or `model_validate_json()`:
+
+```python
+config = BaseConfig.model_validate(data)
+```
+
+The imported model must be a `BaseConfig` subclass of the requested type;
+otherwise validation raises an error. For validation through a base type, every
+participating configuration must use the same `model_import_string` key, which
+defaults to `"__model__"`. This feature is intended for trusted serialized data:
+the marker controls an import. Direct model construction is not polymorphic.

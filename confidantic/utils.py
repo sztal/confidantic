@@ -1,7 +1,7 @@
 import sys
 from functools import singledispatch
 from types import ModuleType
-from typing import Any
+from typing import Any, cast
 
 from pydantic import ImportString, TypeAdapter
 
@@ -76,4 +76,5 @@ def import_from_string(import_string: str, type_hint: Any = Any) -> Any:
     Any
         The imported object.
     """
-    return TypeAdapter(ImportString[type_hint]).validate_python(import_string)
+    import_type = cast(Any, ImportString)[type_hint]
+    return TypeAdapter(import_type).validate_python(import_string)

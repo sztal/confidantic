@@ -51,6 +51,37 @@ class SerializedParentConfig(BaseConfig):
     child: SerializedChildConfig = SerializedChildConfig()
 
 
+class PolymorphicConfig(BaseConfig):
+    """Base configuration for marker-driven validation tests."""
+
+    name: str
+
+
+class PolymorphicChildConfig(PolymorphicConfig):
+    """Concrete configuration with a child-only field."""
+
+    count: int = 1
+
+
+class PolymorphicSiblingConfig(PolymorphicConfig):
+    """Sibling configuration used to test subtype constraints."""
+
+    enabled: bool = True
+
+
+class StrictPolymorphicConfig(PolymorphicConfig):
+    """Concrete configuration that forbids undeclared fields."""
+
+    model_config = SettingsConfigDict(extra="forbid")
+
+
+class PolymorphicContainer(BaseModel):
+    """Pydantic model with polymorphic configuration fields."""
+
+    item: PolymorphicConfig
+    items: list[PolymorphicConfig]
+
+
 def _build_config(settings_cls: type[BaseConfig], **kwargs: Any) -> Any:
     return settings_cls(**kwargs)
 
@@ -152,24 +183,107 @@ def test_model_string_serialization_preserves_dump_options() -> None:
         SettingsConfigDict(extra="allow"),
     ],
 )
-def test_model_string_serialization_rejects_key_collisions(
+def test_model_import_string_rejects_input_key_collisions(
     settings_config: SettingsConfigDict,
 ) -> None:
-    """Serialization rejects fields or extras that use the marker key."""
+    """Input rejects fields or extras that use the reserved marker key."""
 
     class Config(BaseConfig):
         model_config = settings_config
 
         value: int = Field(1, alias="VALUE")
 
-    data: dict[str, object] = {"VALUE": 1}
+    values: dict[str, object] = {"VALUE": 1}
     if settings_config.get("extra") == "allow":
-        data["__model__"] = "extra"
-    with pytest.raises(ValueError, match="conflicts with serialized data"):
-        Config.model_validate(data).model_dump(
-            by_alias=True,
-            context={"model_string": True},
-        )
+        values["__model__"] = "extra"
+    with pytest.raises(ValidationError) as error:
+        Config.model_validate(values)
+
+    assert error.value.errors()[0]["type"] == "model_import_invalid"
+
+
+def test_model_import_string_deserializes_concrete_subclasses() -> None:
+    """Marked mappings and JSON resolve to their concrete configuration types."""
+    config = PolymorphicChildConfig(name="child", count=2)
+    data = config.model_dump(context={"model_string": True})
+
+    resolved = PolymorphicConfig.model_validate(data)
+    resolved_json = PolymorphicConfig.model_validate_json(
+        config.model_dump_json(context={"model_string": True})
+    )
+
+    assert type(resolved) is PolymorphicChildConfig
+    assert resolved == config
+    assert type(resolved_json) is PolymorphicChildConfig
+    assert resolved_json == config
+
+
+def test_model_import_string_deserializes_nested_subclasses() -> None:
+    """Fields and containers retain concrete types selected by their markers."""
+    child = PolymorphicChildConfig(name="child", count=2)
+    sibling = PolymorphicSiblingConfig(name="sibling", enabled=False)
+
+    resolved = PolymorphicContainer.model_validate(
+        {
+            "item": child.model_dump(context={"model_string": True}),
+            "items": [
+                child.model_dump(context={"model_string": True}),
+                sibling.model_dump(context={"model_string": True}),
+            ],
+        }
+    )
+
+    assert type(resolved.item) is PolymorphicChildConfig
+    assert type(resolved.items[0]) is PolymorphicChildConfig
+    assert type(resolved.items[1]) is PolymorphicSiblingConfig
+
+
+def test_model_import_string_preserves_unmarked_validation() -> None:
+    """Unmarked input retains ordinary validation against the requested type."""
+    resolved = PolymorphicConfig.model_validate({"name": "base"})
+
+    assert type(resolved) is PolymorphicConfig
+    assert resolved.name == "base"
+
+
+@pytest.mark.parametrize(
+    ("marker", "error_type"),
+    [
+        (1, "model_import_invalid"),
+        ("not-an-import-string", "model_import_invalid"),
+        ("builtins:dict", "model_import_invalid"),
+    ],
+)
+def test_model_import_string_rejects_invalid_targets(
+    marker: object,
+    error_type: str,
+) -> None:
+    """Invalid import markers are reported as structured validation errors."""
+    with pytest.raises(ValidationError) as error:
+        PolymorphicConfig.model_validate({"__model__": marker, "name": "base"})
+
+    assert error.value.errors()[0]["type"] == error_type
+
+
+def test_model_import_string_rejects_unrelated_configurations() -> None:
+    """Markers cannot select configuration types outside the requested hierarchy."""
+    data = SerializedChildConfig().model_dump(context={"model_string": True})
+
+    with pytest.raises(ValidationError) as error:
+        PolymorphicConfig.model_validate(data)
+
+    assert error.value.errors()[0]["type"] == "model_import_type_mismatch"
+
+
+def test_model_import_string_is_removed_before_subtype_validation() -> None:
+    """Marker metadata does not violate a concrete subtype's extra-field policy."""
+    data = StrictPolymorphicConfig(name="strict").model_dump(
+        context={"model_string": True}
+    )
+
+    resolved = PolymorphicConfig.model_validate(data)
+
+    assert type(resolved) is StrictPolymorphicConfig
 
 
 def test_base_config_is_frozen_by_default() -> None:

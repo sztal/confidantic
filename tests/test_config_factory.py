@@ -150,6 +150,21 @@ def test_factory_field_preserves_existing_config_instance() -> None:
     assert concrete.child is product_config
 
 
+def test_factory_field_deserializes_marked_concrete_config() -> None:
+    """Marked factory data resolves to its concrete configuration type."""
+
+    class Model(BaseModel):
+        factory: FactoryConfig
+
+    source = ChildConfig(value=6)
+    model = Model.model_validate(
+        {"factory": source.model_dump(context={"model_string": True})}
+    )
+
+    assert type(model.factory) is ChildConfig
+    assert model.factory == source
+
+
 def test_factory_field_validation_composes_with_annotations() -> None:
     """Factory conversion composes with containers, optionals, and unions."""
 

@@ -32,8 +32,10 @@ from pydantic import (
     ValidationInfo,
     field_validator,
     model_serializer,
+    model_validator,
 )
 from pydantic.fields import FieldInfo
+from pydantic_core import PydanticCustomError
 from pydantic_settings import (
     BaseSettings,
     CliSettingsSource,
@@ -58,7 +60,11 @@ from rich.style import Style
 from rich.table import Table
 from rich.text import Text
 
-from confidantic.utils import get_import_string, is_runtime_jupyterlike
+from confidantic.utils import (
+    get_import_string,
+    import_from_string,
+    is_runtime_jupyterlike,
+)
 
 __all__ = ("BaseConfig", "ClassDefaultsSource", "SettingsConfigDict")
 
@@ -270,6 +276,45 @@ class BaseConfig(BaseSettings):
     )
 
     _model_field_sources: dict[str, _FieldSource] = PrivateAttr(default_factory=dict)
+
+    @model_validator(mode="wrap")
+    @classmethod
+    def _validate_model_import_string(cls, value: Any, handler: Any) -> Any:
+        return cls._resolve_model_import_string(value, handler)
+
+    @classmethod
+    def _resolve_model_import_string(cls, value: Any, handler: Any) -> Any:
+        marker_key = cls.model_config.get("model_import_string")
+        if (
+            marker_key is None
+            or not isinstance(value, Mapping)
+            or marker_key not in value
+        ):
+            return handler(value)
+
+        marker = value[marker_key]
+        if not isinstance(marker, str):
+            raise PydanticCustomError(
+                "model_import_invalid",
+                "Model import string must be a string",
+            )
+        try:
+            model_type = import_from_string(marker, type_hint=type[BaseConfig])
+        except ValueError as error:
+            raise PydanticCustomError(
+                "model_import_invalid",
+                "Invalid model import string: {marker}",
+                {"marker": marker},
+            ) from error
+        if not issubclass(model_type, cls):
+            raise PydanticCustomError(
+                "model_import_type_mismatch",
+                "Model import {marker} is not a subclass of {expected}",
+                {"marker": marker, "expected": get_import_string(cls)},
+            )
+
+        data = {key: item for key, item in value.items() if key != marker_key}
+        return model_type.model_validate(data, by_alias=True, by_name=True)
 
     @model_serializer(mode="wrap")
     def _serialize_with_model_string(

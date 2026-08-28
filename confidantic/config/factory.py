@@ -127,9 +127,10 @@ class FactoryConfig(BaseConfig):
     ) -> type[Self]:
         """Create a concrete factory config from a target instance.
 
-        Constructor annotations define the generated fields. Values available
-        on ``source`` replace constructor defaults; mutable and unhashable
-        values are copied through field default factories.
+        Constructor annotations must match the target signature. Annotated
+        keyword parameters define the generated fields. Values available on
+        ``source`` replace constructor defaults; mutable and unhashable values
+        are copied through field default factories.
 
         Parameters
         ----------
@@ -167,14 +168,31 @@ class FactoryConfig(BaseConfig):
     ) -> type[Self]:
         init = target.__init__
         annotations = get_type_hints(init, include_extras=True)
+        parameters = tuple(signature(init).parameters.items())
+        parameter_names = {
+            field_name
+            for index, (field_name, _) in enumerate(parameters)
+            if index != 0 or field_name not in {"self", "cls"}
+        }
+        annotation_names = set(annotations) - {"return"}
+        if parameter_names != annotation_names:
+            missing = ", ".join(sorted(parameter_names - annotation_names))
+            unexpected = ", ".join(sorted(annotation_names - parameter_names))
+            details = []
+            if missing:
+                details.append(f"missing annotations for: {missing}")
+            if unexpected:
+                details.append(f"annotations without parameters: {unexpected}")
+            msg = (
+                f"{target.__qualname__}.__init__ type annotations do not match "
+                f"its signature ({'; '.join(details)}); cannot create a model "
+                "factory config"
+            )
+            raise TypeError(msg)
         fields: dict[str, tuple[Any, Any]] = {}
 
-        for index, (field_name, parameter) in enumerate(
-            signature(init).parameters.items()
-        ):
+        for index, (field_name, parameter) in enumerate(parameters):
             if index == 0 and field_name in {"self", "cls"}:
-                continue
-            if field_name not in annotations:
                 continue
             if parameter.kind is Parameter.POSITIONAL_ONLY:
                 msg = (

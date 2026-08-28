@@ -9,8 +9,6 @@ from pydantic.fields import FieldInfo
 
 from confidantic import BaseConfig, FactoryConfig, SettingsConfigDict
 
-_UNTYPED_DEFAULT = object()
-
 
 class Product:
     """Target with representative constructor parameter kinds."""
@@ -19,20 +17,15 @@ class Product:
         self,
         count: int,
         label: str = "default",
-        untyped: Any = _UNTYPED_DEFAULT,
         *args: Any,
         enabled: bool = True,
         **kwargs: Any,
     ) -> None:
         self.count = count
         self.label = label
-        self.untyped = untyped
         self.args = args
         self.enabled = enabled
         self.kwargs = kwargs
-
-
-Product.__init__.__annotations__.pop("untyped")
 
 
 class Basket:
@@ -213,7 +206,7 @@ def test_factory_field_failure_allows_union_fallback() -> None:
 
 
 def test_model_from_type_creates_ordered_config_fields() -> None:
-    """Only annotated keyword-capable constructor parameters become fields."""
+    """Annotated keyword-capable constructor parameters become fields."""
     config_type = cast(Any, FactoryConfig.model_from(Product))
 
     assert config_type.__name__ == "ProductConfig"
@@ -224,6 +217,25 @@ def test_model_from_type_creates_ordered_config_fields() -> None:
     assert config_type.model_fields["count"].is_required()
     assert config_type.model_fields["label"].default == "default"
     assert config_type.model_fields["enabled"].default is True
+
+
+def test_model_from_rejects_mismatched_init_annotations() -> None:
+    """Unannotated constructor parameters cannot be represented by a factory."""
+
+    class UntypedTarget:
+        def __init__(self, value: int, label="default") -> None:
+            self.value = value
+            self.label = label
+
+    with pytest.raises(
+        TypeError,
+        match=(
+            r"UntypedTarget.__init__ type annotations do not match its signature "
+            r"\(missing annotations for: label\); cannot create a model factory "
+            r"config"
+        ),
+    ):
+        FactoryConfig.model_from(UntypedTarget)
 
 
 def test_cli_help_omits_generated_factory_attributes(

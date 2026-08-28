@@ -31,6 +31,7 @@ from pydantic.fields import FieldInfo
 from pydantic_settings import (
     BaseSettings,
     CliSettingsSource,
+    EnvSettingsSource,
     InitSettingsSource,
     PydanticBaseSettingsSource,
 )
@@ -72,6 +73,11 @@ _DISABLE_CLI_PARSE_ARGS: ContextVar[bool] = ContextVar(
     "_DISABLE_CLI_PARSE_ARGS",
     default=False,
 )
+
+
+class _CliHelpDisabledSettingsSource(CliSettingsSource[Any]):
+    def _add_default_help(self) -> None:
+        pass
 
 
 def _field_has_discriminator(field: FieldInfo) -> bool:
@@ -145,9 +151,12 @@ class SettingsConfigDict(PydanticSettingsConfigDict, total=False):
         Whether model fields replace the class docstring's ``Attributes``
         section when a configuration subclass is created. ``None`` enables
         this by default except for models with ``cli_parse_args=True``.
+    cli_help
+        Whether a configuration with ``cli_parse_args=True`` displays CLI help.
     """
 
     docstring_set_attributes_section: bool | None
+    cli_help: bool
 
 
 class ClassDefaultsSource(PydanticBaseSettingsSource):
@@ -292,12 +301,25 @@ class BaseConfig(BaseSettings):
         cli_show_env_vars=True,
         cli_use_class_docs_for_group=True,
         cli_ignore_unknown_args=True,
+        cli_help=True,
         use_attribute_docstrings=True,
         docstring_set_attributes_section=None,
         dotenv_filtering="match_prefix",
     )
 
     _model_field_sources: dict[str, _FieldSource] = PrivateAttr(default_factory=dict)
+
+    def __init_subclass__(
+        cls,
+        *,
+        cli_help: bool | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init_subclass__(**kwargs)
+        if cli_help is not None:
+            cls.model_config = SettingsConfigDict(
+                cls.model_config | {"cli_help": cli_help}
+            )
 
     def model_factory(
         self,
@@ -786,9 +808,44 @@ class BaseConfig(BaseSettings):
             source_builder = BaseSettings.__dict__["_settings_init_sources"].__get__(
                 None, level
             )
+            cli_source_options = {
+                name: local_options[f"_{name}"]
+                for name in signature(CliSettingsSource).parameters
+                if f"_{name}" in local_options
+            }
+            env_source_options = {
+                name: local_options[f"_{name}"]
+                for name in signature(EnvSettingsSource).parameters
+                if f"_{name}" in local_options
+            }
+            cli_source_options = {
+                name: value if value is not None else level.model_config.get(name)
+                for name, value in cli_source_options.items()
+            }
+            env_source_options = {
+                name: value if value is not None else level.model_config.get(name)
+                for name, value in env_source_options.items()
+            }
+            if env_source_options["env_parse_none_str"] is not None:
+                cli_source_options["cli_parse_none_str"] = env_source_options[
+                    "env_parse_none_str"
+                ]
+            cli_settings_source = _cli_settings_source if index == 0 else None
+            if (
+                index == 0
+                and not level.model_config.get("cli_help", True)
+                and cli_source_options["cli_parse_args"] is not None
+                and cli_source_options["cli_parse_args"] is not False
+                and cli_settings_source is None
+            ):
+                cli_settings_source = _CliHelpDisabledSettingsSource(
+                    level,
+                    **cli_source_options,
+                    _env_settings_source=EnvSettingsSource(level, **env_source_options),
+                )
             level_options = source_options | {
                 "_cli_parse_args": _cli_parse_args if index == 0 else False,
-                "_cli_settings_source": (_cli_settings_source if index == 0 else None),
+                "_cli_settings_source": cli_settings_source,
                 "_init_kwargs": init_kwargs,
             }
             level_sources, _ = source_builder(**level_options)

@@ -481,6 +481,99 @@ def test_cli_parsing_is_disabled_in_jupyterlike_runtime(
     assert Config().value == "from-default"
 
 
+def test_cli_help_is_enabled_by_default(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """CLI-enabled configs retain Pydantic's standard help behavior."""
+
+    class Config(BaseConfig, cli_parse_args=True):
+        value: int = 1
+
+    assert BaseConfig.model_config["cli_help"] is True
+    with pytest.raises(SystemExit, match="0"):
+        _build_config(Config, _cli_parse_args=["--help"])
+
+    assert "--value int" in capsys.readouterr().out
+
+
+def test_cli_help_can_be_disabled_without_consuming_arguments(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Disabled help leaves process arguments for a subsequent config."""
+
+    class SuppressedConfig(BaseConfig):
+        model_config = SettingsConfigDict(
+            cli_parse_args=True,
+            cli_help=False,
+        )
+
+        value: int = 1
+
+    class SubsequentConfig(BaseConfig, cli_parse_args=True):
+        value: int = 2
+
+    arguments = ["config.py", "--help"]
+    monkeypatch.setattr(sys, "argv", arguments)
+
+    assert SuppressedConfig().value == 1
+    assert capsys.readouterr().out == ""
+    assert sys.argv == arguments
+
+    with pytest.raises(SystemExit, match="0"):
+        SubsequentConfig()
+
+    assert "--value int" in capsys.readouterr().out
+    assert sys.argv == arguments
+
+
+def test_cli_help_routing_preserves_option_parsing(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A help-disabled config can select the subsequent help-enabled config."""
+
+    class HelpRouter(BaseConfig, cli_parse_args=True, cli_prefix="help"):
+        model_config = SettingsConfigDict(cli_help=False)
+
+        types: bool = False
+
+    arguments = ["config.py", "--help", "--help.types"]
+    monkeypatch.setattr(sys, "argv", arguments)
+    router = HelpRouter()
+
+    class Types(BaseConfig, cli_parse_args=True, cli_prefix="types"):
+        model_config = SettingsConfigDict(cli_help=router.types)
+
+        value: int = 1
+
+    assert router.types is True
+    assert capsys.readouterr().out == ""
+    assert sys.argv == arguments
+    with pytest.raises(SystemExit, match="0"):
+        Types()
+
+    assert "--types.value int" in capsys.readouterr().out
+    assert sys.argv == arguments
+
+
+def test_cli_help_does_not_enable_cli_parsing(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The CLI help option is inert when CLI parsing is disabled."""
+
+    class Config(BaseConfig, cli_parse_args=False, cli_help=False):
+        value: int = 1
+
+    arguments = ["config.py", "--help"]
+    monkeypatch.setattr(sys, "argv", arguments)
+
+    assert Config().value == 1
+    assert capsys.readouterr().out == ""
+    assert sys.argv == arguments
+
+
 def test_class_defaults_source_is_public() -> None:
     """The public source loads only defaults declared at its class level."""
 

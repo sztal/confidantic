@@ -44,30 +44,6 @@ _RESOLVED_MODEL_TYPES: dict[type[BaseModel], type[BaseModel]] = {}
 _RESOLVING_MODEL_TYPES: set[type[BaseModel]] = set()
 
 
-class _ArbitraryTypesModel(BaseModel):
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-
-def _cloned_default(value: Any) -> Callable[[], Any]:
-    def default_factory() -> Any:
-        return deepcopy(value)
-
-    return default_factory
-
-
-def _requires_default_factory(value: Any) -> bool:
-    if isinstance(
-        value,
-        MutableMapping | MutableSequence | MutableSet | bytearray,
-    ):
-        return True
-    try:
-        hash(value)
-    except TypeError:
-        return True
-    return False
-
-
 class FactoryConfig(BaseConfig):
     """Configuration generated from a target type's constructor.
 
@@ -128,17 +104,18 @@ class FactoryConfig(BaseConfig):
         *,
         name: str | None = None,
     ) -> type[Self]:
-        """Create a concrete factory config from a target instance.
+        """Create a concrete factory config from a target type or instance.
 
-        Constructor annotations define the generated fields. Values available
-        on ``source`` replace constructor defaults; mutable and unhashable
-        values are copied through field default factories.
+        Constructor annotations define the generated fields. When ``source``
+        is an instance, its available values replace constructor defaults;
+        mutable and unhashable values are copied through field default
+        factories.
 
         Parameters
         ----------
         source
-                Target instance whose type and current attribute values define the
-                generated configuration model.
+            Target type, or an instance whose type and current attribute values
+            define the generated configuration model.
         name
                 Optional generated model name. By default, append ``Config`` to
                 the target type name.
@@ -149,6 +126,25 @@ class FactoryConfig(BaseConfig):
                 Generated concrete configuration class.
         """
         return cls._model_from(source, type(source), name=name)
+
+    def materialize(self) -> Any:
+        """Create the target object from the validated configuration values.
+
+        CLI parsing is disabled throughout materialization, including any
+        configuration models constructed by the target.
+
+        Returns
+        -------
+        Any
+            Instance of the target type recorded by :meth:`model_from`.
+        """
+        token = _DISABLE_CLI_PARSE_ARGS.set(True)
+        try:
+            return _materialize_factory(self, set())
+        finally:
+            _DISABLE_CLI_PARSE_ARGS.reset(token)
+
+    __call__ = materialize
 
     @model_from.register(type)
     @classmethod
@@ -209,24 +205,29 @@ class FactoryConfig(BaseConfig):
         model.factory_fields = tuple(fields)
         return model
 
-    def materialize(self) -> Any:
-        """Create the target object from the validated configuration values.
 
-        CLI parsing is disabled throughout materialization, including any
-        configuration models constructed by the target.
+class _ArbitraryTypesModel(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
-        Returns
-        -------
-        Any
-                Instance of the target type recorded by :meth:`model_from`.
-        """
-        token = _DISABLE_CLI_PARSE_ARGS.set(True)
-        try:
-            return _materialize_factory(self, set())
-        finally:
-            _DISABLE_CLI_PARSE_ARGS.reset(token)
 
-    __call__ = materialize
+def _cloned_default(value: Any) -> Callable[[], Any]:
+    def default_factory() -> Any:
+        return deepcopy(value)
+
+    return default_factory
+
+
+def _requires_default_factory(value: Any) -> bool:
+    if isinstance(
+        value,
+        MutableMapping | MutableSequence | MutableSet | bytearray,
+    ):
+        return True
+    try:
+        hash(value)
+    except TypeError:
+        return True
+    return False
 
 
 def _resolved_annotation(annotation: Any) -> Any:

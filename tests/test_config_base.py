@@ -342,6 +342,34 @@ def test_model_dump_toml_forwards_model_dump_options() -> None:
     }
 
 
+@pytest.mark.parametrize(
+    ("method_name", "arguments", "extra"),
+    [
+        ("model_dump_yaml", (), "yaml"),
+        ("model_validate_yaml", ("",), "yaml"),
+        ("model_dump_toml", (), "toml"),
+    ],
+)
+def test_format_methods_require_optional_dependencies(
+    monkeypatch: pytest.MonkeyPatch,
+    method_name: str,
+    arguments: tuple[str, ...],
+    extra: str,
+) -> None:
+    """Format methods provide install guidance when their dependencies are absent."""
+
+    def missing_module(_: str) -> Any:
+        raise ImportError
+
+    monkeypatch.setattr("confidantic.config.base.import_module", missing_module)
+    target: Any = (
+        FormatConfig if method_name.startswith("model_validate") else FormatConfig()
+    )
+
+    with pytest.raises(ImportError, match=rf"install confidantic\[{extra}\]"):
+        getattr(target, method_name)(*arguments)
+
+
 def test_model_dump_toml_requires_nulls_to_be_excluded() -> None:
     """TOML serialization leaves unsupported null values to its writer."""
     with pytest.raises(TypeError, match="NoneType"):

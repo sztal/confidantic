@@ -32,6 +32,17 @@ class DynamicPath(_DynamicPathBase):
     True
     """
 
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls,
+        _source_type: Any,
+        handler: GetCoreSchemaHandler,
+    ) -> CoreSchema:
+        return core_schema.no_info_after_validator_function(
+            cls,
+            handler.generate_schema(Path),
+        )
+
     def __call__(self, *pathsegments: str | PathLike[str]) -> Self:
         """Join path segments and return a dynamic path.
 
@@ -46,27 +57,6 @@ class DynamicPath(_DynamicPathBase):
                 Joined path.
         """
         return type(self)(self.joinpath(*pathsegments))
-
-    @classmethod
-    def __get_pydantic_core_schema__(
-        cls,
-        _source_type: Any,
-        handler: GetCoreSchemaHandler,
-    ) -> CoreSchema:
-        return core_schema.no_info_after_validator_function(
-            cls,
-            handler.generate_schema(Path),
-        )
-
-
-def _canonicalize_path(
-    path: DynamicPath,
-    root: DynamicPath | None = None,
-) -> DynamicPath:
-    expanded = path.expanduser()
-    if root is not None and not expanded.is_absolute():
-        expanded = root.joinpath(expanded)
-    return DynamicPath(expanded.resolve(strict=False))
 
 
 class BasePaths(BaseConfig):
@@ -123,3 +113,13 @@ class BasePaths(BaseConfig):
                 self.__pydantic_extra__[name] = _canonicalize_path(value, root)
 
         return self
+
+
+def _canonicalize_path(
+    path: DynamicPath,
+    root: DynamicPath | None = None,
+) -> DynamicPath:
+    expanded = path.expanduser()
+    if root is not None and not expanded.is_absolute():
+        expanded = root.joinpath(expanded)
+    return DynamicPath(expanded.resolve(strict=False))

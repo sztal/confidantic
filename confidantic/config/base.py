@@ -100,68 +100,6 @@ _DISABLE_CLI_PARSE_ARGS: ContextVar[bool] = ContextVar(
 )
 
 
-def _field_has_discriminator(field: FieldInfo) -> bool:
-    return field.discriminator is not None or any(
-        isinstance(metadata, Discriminator) for metadata in field.metadata
-    )
-
-
-def _annotation_has_model(annotation: Any) -> bool:
-    if isinstance(annotation, type):
-        return issubclass(annotation, BaseModel)
-    origin = get_origin(annotation)
-    if origin is Annotated:
-        return _annotation_has_model(get_args(annotation)[0])
-    if origin in (Union, UnionType):
-        return any(_annotation_has_model(item) for item in get_args(annotation))
-    return False
-
-
-def _update_nested_model(
-    model: BaseModel,
-    update: Mapping[str, Any],
-) -> BaseModel:
-    model_type = type(model)
-    values = {
-        field_name: getattr(model, field_name) for field_name in model_type.model_fields
-    }
-    remaining = dict(update)
-    updated_fields: set[str] = set()
-
-    for field_name, field in model_type.model_fields.items():
-        aliases, _ = _get_alias_names(
-            field_name,
-            field,
-            populate_by_name=True,
-        )
-        key = next((alias for alias in aliases if alias in update), None)
-        if key is None:
-            continue
-
-        value = update[key]
-        current = values[field_name]
-        if (
-            isinstance(current, BaseModel)
-            and isinstance(value, Mapping)
-            and not _field_has_discriminator(field)
-        ):
-            value = _update_nested_model(current, value)
-        values[field_name] = value
-        updated_fields.add(field_name)
-        for alias in aliases:
-            remaining.pop(alias, None)
-
-    values.update(model.model_extra or {})
-    values.update(remaining)
-    updated = model_type.model_validate(values, by_alias=True, by_name=True)
-    object.__setattr__(
-        updated,
-        "__pydantic_fields_set__",
-        model.model_fields_set | updated_fields,
-    )
-    return updated
-
-
 class SettingsConfigDict(PydanticSettingsConfigDict, total=False):
     """Configuration options for :class:`BaseConfig`.
 
@@ -291,67 +229,89 @@ class BaseConfig(BaseSettings):
 
     _model_field_sources: dict[str, _FieldSource] = PrivateAttr(default_factory=dict)
 
-    @model_validator(mode="wrap")
-    @classmethod
-    def _validate_model_import_string(cls, value: Any, handler: Any) -> Any:
-        return cls._resolve_model_import_string(value, handler)
+    def __init__(self, **kwargs: Any) -> None:
+        if _DISABLE_CLI_PARSE_ARGS.get() or is_runtime_jupyterlike():
+            kwargs["_cli_parse_args"] = False
 
-    @classmethod
-    def _resolve_model_import_string(cls, value: Any, handler: Any) -> Any:
-        marker_key = cls.model_config.get("model_import_string")
-        if (
-            marker_key is None
-            or not isinstance(value, Mapping)
-            or marker_key not in value
-        ):
-            return handler(value)
-
-        marker = value[marker_key]
-        if not isinstance(marker, str):
-            raise PydanticCustomError(
-                "model_import_invalid",
-                "Model import string must be a string",
+        build_sources = kwargs.pop("_build_sources", None)
+        if build_sources is None:
+            option_names = signature(self._settings_init_sources).parameters.keys()
+            source_options = {
+                key: kwargs.pop(key)
+                for key in tuple(kwargs)
+                if key in option_names and key != "_init_kwargs"
+            }
+            build_sources = self._settings_init_sources(
+                **source_options,
+                _init_kwargs=kwargs,
             )
+
+        token = _NESTED_MODEL_BASELINES.set({})
         try:
-            model_type = import_from_string(marker, type_hint=type[BaseConfig])
-        except ValueError as error:
-            raise PydanticCustomError(
-                "model_import_invalid",
-                "Invalid model import string: {marker}",
-                {"marker": marker},
-            ) from error
-        if not issubclass(model_type, cls):
-            raise PydanticCustomError(
-                "model_import_type_mismatch",
-                "Model import {marker} is not a subclass of {expected}",
-                {"marker": marker, "expected": get_import_string(cls)},
-            )
+            super().__init__(_build_sources=build_sources)
+        finally:
+            _NESTED_MODEL_BASELINES.reset(token)
 
-        data = {key: item for key, item in value.items() if key != marker_key}
-        return model_type.model_validate(data, by_alias=True, by_name=True)
+        sources, _ = build_sources
+        resolved_source = next(
+            (
+                source
+                for source in reversed(sources)
+                if isinstance(source, _ResolvedSettingsSource)
+            ),
+            None,
+        )
+        if resolved_source is not None:
+            self._model_field_sources = resolved_source.field_sources.copy()
 
-    @model_serializer(mode="wrap")
-    def _serialize_with_model_string(
-        self,
-        handler: Any,
-        info: SerializationInfo,
-    ) -> Any:
-        data = handler(self)
-        context = info.context
-        marker_key = self.model_config.get("model_import_string")
-        if (
-            not isinstance(context, Mapping)
-            or not context.get("model_string")
-            or marker_key is None
-        ):
-            return data
-        if not isinstance(data, Mapping):  # pragma: no cover
-            raise TypeError("Model serialization must produce a mapping")
-        if marker_key in data:
-            raise ValueError(
-                f"Model string key {marker_key!r} conflicts with serialized data"
+    def __copy__(self) -> Self:
+        """Return a shallow structural copy of this configuration."""
+        return super().__copy__()
+
+    def __deepcopy__(self, memo: dict[int, Any] | None = None) -> Self:
+        """Return a deep structural copy of this configuration."""
+        return super().__deepcopy__(memo)
+
+    @classmethod
+    def __pydantic_init_subclass__(cls, **kwargs: Any) -> None:
+        super().__pydantic_init_subclass__(**kwargs)
+        set_attributes_section = cls.model_config.get(
+            "docstring_set_attributes_section"
+        )
+        if set_attributes_section is None:
+            set_attributes_section = (
+                cls.__doc__ is not None
+                and not cls.model_config.get("cli_parse_args", False)
             )
-        return {marker_key: get_import_string(self), **data}
+        if not set_attributes_section:
+            return
+
+        parsed = parse(cls.__doc__, style=DocstringStyle.NUMPYDOC)
+        attributes = [
+            item
+            for item in parsed.meta
+            if isinstance(item, DocstringParam) and item.args[0] == "attribute"
+        ]
+        if not cls.model_fields and not attributes:
+            return
+
+        parsed.meta = [item for item in parsed.meta if item not in attributes]
+        parsed.meta.extend(
+            DocstringParam(
+                args=["attribute", field_name],
+                description=field.description,
+                arg_name=field_name,
+                type_name=None,
+                is_optional=None,
+                default=None,
+            )
+            for field_name, field in cls.model_fields.items()
+        )
+        cls.__doc__ = compose(
+            parsed,
+            style=DocstringStyle.NUMPYDOC,
+            indent="    ",
+        )
 
     def model_dump_yaml(
         self,
@@ -574,90 +534,6 @@ class BaseConfig(BaseSettings):
             context=context,
             by_alias=by_alias,
             by_name=by_name,
-        )
-
-    def __init__(self, **kwargs: Any) -> None:
-        if _DISABLE_CLI_PARSE_ARGS.get() or is_runtime_jupyterlike():
-            kwargs["_cli_parse_args"] = False
-
-        build_sources = kwargs.pop("_build_sources", None)
-        if build_sources is None:
-            option_names = signature(self._settings_init_sources).parameters.keys()
-            source_options = {
-                key: kwargs.pop(key)
-                for key in tuple(kwargs)
-                if key in option_names and key != "_init_kwargs"
-            }
-            build_sources = self._settings_init_sources(
-                **source_options,
-                _init_kwargs=kwargs,
-            )
-
-        token = _NESTED_MODEL_BASELINES.set({})
-        try:
-            super().__init__(_build_sources=build_sources)
-        finally:
-            _NESTED_MODEL_BASELINES.reset(token)
-
-        sources, _ = build_sources
-        resolved_source = next(
-            (
-                source
-                for source in reversed(sources)
-                if isinstance(source, _ResolvedSettingsSource)
-            ),
-            None,
-        )
-        if resolved_source is not None:
-            self._model_field_sources = resolved_source.field_sources.copy()
-
-    def __copy__(self) -> Self:
-        """Return a shallow structural copy of this configuration."""
-        return super().__copy__()
-
-    def __deepcopy__(self, memo: dict[int, Any] | None = None) -> Self:
-        """Return a deep structural copy of this configuration."""
-        return super().__deepcopy__(memo)
-
-    @classmethod
-    def __pydantic_init_subclass__(cls, **kwargs: Any) -> None:
-        super().__pydantic_init_subclass__(**kwargs)
-        set_attributes_section = cls.model_config.get(
-            "docstring_set_attributes_section"
-        )
-        if set_attributes_section is None:
-            set_attributes_section = (
-                cls.__doc__ is not None
-                and not cls.model_config.get("cli_parse_args", False)
-            )
-        if not set_attributes_section:
-            return
-
-        parsed = parse(cls.__doc__, style=DocstringStyle.NUMPYDOC)
-        attributes = [
-            item
-            for item in parsed.meta
-            if isinstance(item, DocstringParam) and item.args[0] == "attribute"
-        ]
-        if not cls.model_fields and not attributes:
-            return
-
-        parsed.meta = [item for item in parsed.meta if item not in attributes]
-        parsed.meta.extend(
-            DocstringParam(
-                args=["attribute", field_name],
-                description=field.description,
-                arg_name=field_name,
-                type_name=None,
-                is_optional=None,
-                default=None,
-            )
-            for field_name, field in cls.model_fields.items()
-        )
-        cls.__doc__ = compose(
-            parsed,
-            style=DocstringStyle.NUMPYDOC,
-            indent="    ",
         )
 
     def copy(self, **kwargs: Any) -> Self:
@@ -1234,6 +1110,68 @@ class BaseConfig(BaseSettings):
         )
         return copied
 
+    @model_validator(mode="wrap")
+    @classmethod
+    def _validate_model_import_string(cls, value: Any, handler: Any) -> Any:
+        return cls._resolve_model_import_string(value, handler)
+
+    @classmethod
+    def _resolve_model_import_string(cls, value: Any, handler: Any) -> Any:
+        marker_key = cls.model_config.get("model_import_string")
+        if (
+            marker_key is None
+            or not isinstance(value, Mapping)
+            or marker_key not in value
+        ):
+            return handler(value)
+
+        marker = value[marker_key]
+        if not isinstance(marker, str):
+            raise PydanticCustomError(
+                "model_import_invalid",
+                "Model import string must be a string",
+            )
+        try:
+            model_type = import_from_string(marker, type_hint=type[BaseConfig])
+        except ValueError as error:
+            raise PydanticCustomError(
+                "model_import_invalid",
+                "Invalid model import string: {marker}",
+                {"marker": marker},
+            ) from error
+        if not issubclass(model_type, cls):
+            raise PydanticCustomError(
+                "model_import_type_mismatch",
+                "Model import {marker} is not a subclass of {expected}",
+                {"marker": marker, "expected": get_import_string(cls)},
+            )
+
+        data = {key: item for key, item in value.items() if key != marker_key}
+        return model_type.model_validate(data, by_alias=True, by_name=True)
+
+    @model_serializer(mode="wrap")
+    def _serialize_with_model_string(
+        self,
+        handler: Any,
+        info: SerializationInfo,
+    ) -> Any:
+        data = handler(self)
+        context = info.context
+        marker_key = self.model_config.get("model_import_string")
+        if (
+            not isinstance(context, Mapping)
+            or not context.get("model_string")
+            or marker_key is None
+        ):
+            return data
+        if not isinstance(data, Mapping):  # pragma: no cover
+            raise TypeError("Model serialization must produce a mapping")
+        if marker_key in data:
+            raise ValueError(
+                f"Model string key {marker_key!r} conflicts with serialized data"
+            )
+        return {marker_key: get_import_string(self), **data}
+
     @field_validator("*", mode="before", check_fields=False)
     @classmethod
     def _apply_nested_model_partial_update(
@@ -1302,3 +1240,65 @@ class _ResolvedSettingsSource(PydanticBaseSettingsSource):
         self, field: FieldInfo, field_name: str
     ) -> tuple[Any, str, bool]:
         return None, "", False  # pragma: no cover
+
+
+def _field_has_discriminator(field: FieldInfo) -> bool:
+    return field.discriminator is not None or any(
+        isinstance(metadata, Discriminator) for metadata in field.metadata
+    )
+
+
+def _annotation_has_model(annotation: Any) -> bool:
+    if isinstance(annotation, type):
+        return issubclass(annotation, BaseModel)
+    origin = get_origin(annotation)
+    if origin is Annotated:
+        return _annotation_has_model(get_args(annotation)[0])
+    if origin in (Union, UnionType):
+        return any(_annotation_has_model(item) for item in get_args(annotation))
+    return False
+
+
+def _update_nested_model(
+    model: BaseModel,
+    update: Mapping[str, Any],
+) -> BaseModel:
+    model_type = type(model)
+    values = {
+        field_name: getattr(model, field_name) for field_name in model_type.model_fields
+    }
+    remaining = dict(update)
+    updated_fields: set[str] = set()
+
+    for field_name, field in model_type.model_fields.items():
+        aliases, _ = _get_alias_names(
+            field_name,
+            field,
+            populate_by_name=True,
+        )
+        key = next((alias for alias in aliases if alias in update), None)
+        if key is None:
+            continue
+
+        value = update[key]
+        current = values[field_name]
+        if (
+            isinstance(current, BaseModel)
+            and isinstance(value, Mapping)
+            and not _field_has_discriminator(field)
+        ):
+            value = _update_nested_model(current, value)
+        values[field_name] = value
+        updated_fields.add(field_name)
+        for alias in aliases:
+            remaining.pop(alias, None)
+
+    values.update(model.model_extra or {})
+    values.update(remaining)
+    updated = model_type.model_validate(values, by_alias=True, by_name=True)
+    object.__setattr__(
+        updated,
+        "__pydantic_fields_set__",
+        model.model_fields_set | updated_fields,
+    )
+    return updated

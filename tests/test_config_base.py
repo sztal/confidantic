@@ -192,6 +192,43 @@ def test_copy_methods_validate_updates_and_retain_provenance() -> None:
         config.copy(value="invalid")
 
 
+def test_mutate_validates_frozen_configuration_in_place() -> None:
+    """Frozen configurations can be validated and updated in place explicitly."""
+
+    class Config(BaseConfig):
+        value: int = 1
+        defaulted: str = "default"
+
+        _state: list[str] = PrivateAttr(default_factory=list)
+
+        @field_validator("value")
+        @classmethod
+        def double_value(cls, value: int) -> int:
+            return value * 2
+
+    config = Config()
+    state = config._state
+    original_hash = hash(config)
+
+    assert config.mutate(value="3") is config
+    assert config.value == 6
+    assert hash(config) != original_hash
+    assert config.model_field_sources == {
+        "value": (InitSettingsSource, Config),
+        "defaulted": (ClassDefaultsSource, Config),
+    }
+    assert config.model_fields_set == {"value"}
+    assert config._state is state
+    with pytest.raises(ValidationError):
+        config.value = 2
+
+    with pytest.raises(ValidationError):
+        config.mutate(value="invalid")
+
+    assert config.value == 6
+    assert config.model_fields_set == {"value"}
+
+
 def test_model_info_builds_table_without_evaluating_factories(
     capsys: pytest.CaptureFixture[str],
 ) -> None:

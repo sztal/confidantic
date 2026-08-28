@@ -42,6 +42,17 @@ updated = config.copy(retries=5)
 methods accept validated keyword updates. The standard-library `copy.copy()`
 and `copy.deepcopy()` functions are also supported.
 
+Use `mutate()` to apply validated updates to the same instance, including a
+frozen configuration:
+
+```python
+config.mutate(retries=5)
+```
+
+Take care when mutating a frozen configuration: changing its fields may
+invalidate its hash. Do not continue to use a mutated configuration as a
+dictionary key or set member.
+
 Pydantic's frozen behavior is shallow: mutable values stored in fields are not
 recursively frozen. A subclass that intentionally requires field reassignment
 can opt out:

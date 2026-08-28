@@ -281,9 +281,9 @@ class BaseConfig(BaseSettings):
     class for which that source was constructed through ``model_field_sources``.
 
     Instances are frozen by default, so model fields cannot be reassigned after
-    validation. Use ``model_copy(update=...)`` to derive a modified copy from
-    trusted values, or set ``frozen=False`` in ``model_config`` when a subclass
-    intentionally requires mutable fields.
+    validation. Use :meth:`copy` or :meth:`deepcopy` to derive a modified copy,
+    or :meth:`mutate` to update an instance in place. Set ``frozen=False`` in
+    ``model_config`` when a subclass intentionally requires mutable fields.
 
     Subclass docstrings receive a NumPy-style ``Attributes`` section generated
     from the effective model field names and descriptions. Set
@@ -351,6 +351,46 @@ class BaseConfig(BaseSettings):
         """
         copied = deep_copy(self)
         return copied if not kwargs else copied._copy_with_updates(kwargs)
+
+    def mutate(self, **kwargs: Any) -> Self:
+        """Update this configuration in place with validated field values.
+
+        Parameters
+        ----------
+        **kwargs
+            Field values to update. Updates are validated as normal model input.
+
+        Returns
+        -------
+        Self
+            This configuration after the updates are applied.
+
+        Raises
+        ------
+        ValidationError
+            If any update fails validation.
+
+        Notes
+        -----
+        Use this carefully on frozen configurations. Changing their fields may
+        invalidate their hashes, so they must not remain dictionary keys or set
+        members after mutation.
+        """
+        if not kwargs:
+            return self
+
+        updated = self._copy_with_updates(kwargs)
+        for field_name in type(self).model_fields:
+            object.__setattr__(self, field_name, getattr(updated, field_name))
+        object.__setattr__(self, "__pydantic_extra__", updated.__pydantic_extra__)
+        object.__setattr__(
+            self,
+            "__pydantic_fields_set__",
+            updated.__pydantic_fields_set__,
+        )
+        self._model_field_sources.clear()
+        self._model_field_sources.update(updated._model_field_sources)
+        return self
 
     def _copy_with_updates(self, updates: Mapping[str, Any]) -> Self:
         cls = type(self)

@@ -1,5 +1,6 @@
 """Base configuration model."""
 
+import tomllib
 from collections.abc import Collection, Mapping
 from contextvars import ContextVar
 from copy import copy as shallow_copy
@@ -79,6 +80,8 @@ _NestedModelBaselines = dict[str, BaseModel | object]
 
 class _YamlModule(Protocol):
     def safe_dump(self, data: Any, **kwargs: Any) -> str: ...
+
+    def safe_load(self, stream: str | bytes) -> Any: ...
 
 
 class _TomlModule(Protocol):
@@ -487,6 +490,90 @@ class BaseConfig(BaseSettings):
                 serialize_as_any=serialize_as_any,
                 polymorphic_serialization=polymorphic_serialization,
             )
+        )
+
+    @classmethod
+    def model_validate_yaml(
+        cls,
+        yaml_data: str | bytes,
+        *,
+        strict: bool | None = None,
+        extra: Any = None,
+        from_attributes: bool | None = None,
+        context: Any = None,
+        by_alias: bool | None = None,
+        by_name: bool | None = None,
+    ) -> Self:
+        """Validate a configuration from YAML data.
+
+        Parameters
+        ----------
+        yaml_data
+            YAML data to parse and validate.
+        strict, extra, from_attributes, context, by_alias, by_name
+            Options forwarded to :meth:`model_validate`.
+
+        Returns
+        -------
+        Self
+            The validated configuration.
+
+        Raises
+        ------
+        ImportError
+            If PyYAML is not installed.
+        """
+        try:
+            yaml = cast(_YamlModule, import_module("yaml"))
+        except ImportError as error:
+            raise ImportError(
+                "model_validate_yaml() requires PyYAML; install confidantic[yaml]"
+            ) from error
+
+        return cls.model_validate(
+            yaml.safe_load(yaml_data),
+            strict=strict,
+            extra=extra,
+            from_attributes=from_attributes,
+            context=context,
+            by_alias=by_alias,
+            by_name=by_name,
+        )
+
+    @classmethod
+    def model_validate_toml(
+        cls,
+        toml_data: str,
+        *,
+        strict: bool | None = None,
+        extra: Any = None,
+        from_attributes: bool | None = None,
+        context: Any = None,
+        by_alias: bool | None = None,
+        by_name: bool | None = None,
+    ) -> Self:
+        """Validate a configuration from TOML data.
+
+        Parameters
+        ----------
+        toml_data
+            TOML data to parse and validate.
+        strict, extra, from_attributes, context, by_alias, by_name
+            Options forwarded to :meth:`model_validate`.
+
+        Returns
+        -------
+        Self
+            The validated configuration.
+        """
+        return cls.model_validate(
+            tomllib.loads(toml_data),
+            strict=strict,
+            extra=extra,
+            from_attributes=from_attributes,
+            context=context,
+            by_alias=by_alias,
+            by_name=by_name,
         )
 
     def __init__(self, **kwargs: Any) -> None:

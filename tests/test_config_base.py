@@ -348,6 +348,30 @@ def test_model_dump_toml_requires_nulls_to_be_excluded() -> None:
         FormatConfig().model_dump_toml()
 
 
+def test_model_validate_yaml_parses_and_dispatches_model_strings() -> None:
+    """YAML validation parses content before resolving its concrete model type."""
+    config = PolymorphicChildConfig(name="child", count=2)
+
+    resolved = PolymorphicConfig.model_validate_yaml(
+        config.model_dump_yaml(context={"model_string": True})
+    )
+
+    assert type(resolved) is PolymorphicChildConfig
+    assert resolved == config
+
+
+def test_model_validate_toml_parses_and_dispatches_model_strings() -> None:
+    """TOML validation parses content before resolving its concrete model type."""
+    config = PolymorphicChildConfig(name="child", count=2)
+
+    resolved = PolymorphicConfig.model_validate_toml(
+        config.model_dump_toml(context={"model_string": True})
+    )
+
+    assert type(resolved) is PolymorphicChildConfig
+    assert resolved == config
+
+
 def test_base_config_is_frozen_by_default() -> None:
     """Configuration fields cannot be reassigned by default."""
 

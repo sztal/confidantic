@@ -141,8 +141,13 @@ options as `model_dump_json()` and return a string:
 ```python
 yaml_text = config.model_dump_yaml(context={"model_string": True})
 toml_text = config.model_dump_toml(exclude_none=True)
+
+loaded_yaml = AppConfig.model_validate_yaml(yaml_text)
+loaded_toml = AppConfig.model_validate_toml(toml_text)
 ```
 
 YAML uses block formatting and preserves model field order, including a leading
 model string. TOML has no null representation, so use `exclude_none=True` when
-the configuration can contain `None` values.
+the configuration can contain `None` values. The YAML loader requires the YAML
+extra; TOML loading uses Python's standard library. Both loaders forward their
+validation options to `model_validate()`, including model-string dispatch.

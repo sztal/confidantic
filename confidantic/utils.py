@@ -1,13 +1,14 @@
 import sys
 from functools import singledispatch
 from types import ModuleType
-from typing import Any, cast
+from typing import Any, cast, get_args, get_origin
 
 import pendulum as pdt
 from pydantic import ImportString, TypeAdapter
 
 __all__ = (
     "get_import_string",
+    "get_proper_args",
     "import_from_string",
     "is_runtime_jupyterlike",
     "parse_date",
@@ -116,3 +117,29 @@ def parse_time(t: Any) -> pdt.Time:
         return pdt.Time.fromisoformat(t_str)
     except ValueError:
         return pdt.DateTime.fromisoformat(t_str).time()
+
+
+def get_proper_args(annotation: Any) -> type:
+    """Iterate over the concrete types inside an annotation.
+
+    For example, for a union annotation like ``int | str``, this yields
+    ``int`` and ``str``. For an annotated annotation like
+    ``Annotated[int, SomeValidator()]``, this yields ``int``.
+
+    Parameters
+    ----------
+    annotation
+        The annotation to iterate over.
+
+    Yields
+    ------
+    type
+        The next proper type in the annotation.
+    """
+    origin = get_origin(annotation)
+    if not origin:
+        if isinstance(annotation, type):
+            yield annotation
+        return
+    for arg in get_args(annotation):
+        yield from get_proper_args(arg)

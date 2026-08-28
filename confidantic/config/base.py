@@ -27,9 +27,11 @@ from pydantic import (
     Discriminator,
     PrivateAttr,
     PydanticUserError,
+    SerializationInfo,
     TypeAdapter,
     ValidationInfo,
     field_validator,
+    model_serializer,
 )
 from pydantic.fields import FieldInfo
 from pydantic_settings import (
@@ -56,7 +58,7 @@ from rich.style import Style
 from rich.table import Table
 from rich.text import Text
 
-from confidantic.utils import is_runtime_jupyterlike
+from confidantic.utils import get_import_string, is_runtime_jupyterlike
 
 __all__ = ("BaseConfig", "ClassDefaultsSource", "SettingsConfigDict")
 
@@ -149,9 +151,13 @@ class SettingsConfigDict(PydanticSettingsConfigDict, total=False):
         Whether model fields replace the class docstring's ``Attributes``
         section when a configuration subclass is created. ``None`` enables
         this by default except for models with ``cli_parse_args=True``.
+    model_import_string
+        Key used for an optional model import string in serialized output.
+        Set to ``None`` to disable the marker for a configuration class.
     """
 
     docstring_set_attributes_section: bool | None
+    model_import_string: str | None
 
 
 class ClassDefaultsSource(PydanticBaseSettingsSource):
@@ -260,9 +266,33 @@ class BaseConfig(BaseSettings):
         use_attribute_docstrings=True,
         docstring_set_attributes_section=None,
         dotenv_filtering="match_prefix",
+        model_import_string="__model__",
     )
 
     _model_field_sources: dict[str, _FieldSource] = PrivateAttr(default_factory=dict)
+
+    @model_serializer(mode="wrap")
+    def _serialize_with_model_string(
+        self,
+        handler: Any,
+        info: SerializationInfo,
+    ) -> Any:
+        data = handler(self)
+        context = info.context
+        marker_key = self.model_config.get("model_import_string")
+        if (
+            not isinstance(context, Mapping)
+            or not context.get("model_string")
+            or marker_key is None
+        ):
+            return data
+        if not isinstance(data, Mapping):  # pragma: no cover
+            raise TypeError("Model serialization must produce a mapping")
+        if marker_key in data:
+            raise ValueError(
+                f"Model string key {marker_key!r} conflicts with serialized data"
+            )
+        return {marker_key: get_import_string(self), **data}
 
     def __init__(self, **kwargs: Any) -> None:
         if _DISABLE_CLI_PARSE_ARGS.get() or is_runtime_jupyterlike():

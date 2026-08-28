@@ -39,6 +39,18 @@ class DocumentedConfig(BaseConfig):
     """The name of the configuration."""
 
 
+class SerializedChildConfig(BaseConfig):
+    """Configuration nested in a serialized parent."""
+
+    value: int = 1
+
+
+class SerializedParentConfig(BaseConfig):
+    """Configuration containing another configuration."""
+
+    child: SerializedChildConfig = SerializedChildConfig()
+
+
 def _build_config(settings_cls: type[BaseConfig], **kwargs: Any) -> Any:
     return settings_cls(**kwargs)
 
@@ -67,6 +79,97 @@ def _docstring_attributes(
 def test_base_config_can_be_instantiated() -> None:
     """The public base class is also a valid empty settings model."""
     assert BaseConfig().model_dump() == {}
+
+
+def test_model_string_serialization_is_opt_in_and_recursive() -> None:
+    """Dump context adds ordered import strings to nested configurations."""
+    config = SerializedParentConfig()
+
+    assert config.model_dump() == {"child": {"value": 1}}
+    assert config.model_dump(context={"model_string": True}) == {
+        "__model__": "tests.test_config_base:SerializedParentConfig",
+        "child": {
+            "__model__": "tests.test_config_base:SerializedChildConfig",
+            "value": 1,
+        },
+    }
+    assert config.model_dump_json(context={"model_string": True}) == (
+        '{"__model__":"tests.test_config_base:SerializedParentConfig",'
+        '"child":{"__model__":"tests.test_config_base:SerializedChildConfig",'
+        '"value":1}}'
+    )
+
+
+def test_model_string_serialization_honors_model_config() -> None:
+    """Configuration classes can rename or disable their serialization marker."""
+
+    class CustomConfig(BaseConfig):
+        model_config = SettingsConfigDict(model_import_string="__type__")
+
+        value: int = 1
+
+    class DisabledConfig(BaseConfig):
+        model_config = SettingsConfigDict(model_import_string=None)
+
+        value: int = 1
+
+    class ParentConfig(BaseConfig):
+        child: CustomConfig = CustomConfig()
+
+    assert CustomConfig().model_dump(context={"model_string": True}) == {
+        "__type__": "tests.test_config_base:test_model_string_serialization_honors_model_config.<locals>.CustomConfig",
+        "value": 1,
+    }
+    assert DisabledConfig().model_dump(context={"model_string": True}) == {"value": 1}
+    assert ParentConfig().model_dump(context={"model_string": True}) == {
+        "__model__": "tests.test_config_base:test_model_string_serialization_honors_model_config.<locals>.ParentConfig",
+        "child": {
+            "__type__": "tests.test_config_base:test_model_string_serialization_honors_model_config.<locals>.CustomConfig",
+            "value": 1,
+        },
+    }
+
+
+def test_model_string_serialization_preserves_dump_options() -> None:
+    """Markers remain independent from aliases and exclusions."""
+
+    class Config(BaseConfig):
+        value: int = Field(1, alias="VALUE")
+
+    assert Config(VALUE=1).model_dump(
+        by_alias=True,
+        exclude={"value"},
+        context={"model_string": True},
+    ) == {
+        "__model__": "tests.test_config_base:test_model_string_serialization_preserves_dump_options.<locals>.Config"
+    }
+
+
+@pytest.mark.parametrize(
+    "settings_config",
+    [
+        SettingsConfigDict(model_import_string="VALUE"),
+        SettingsConfigDict(extra="allow"),
+    ],
+)
+def test_model_string_serialization_rejects_key_collisions(
+    settings_config: SettingsConfigDict,
+) -> None:
+    """Serialization rejects fields or extras that use the marker key."""
+
+    class Config(BaseConfig):
+        model_config = settings_config
+
+        value: int = Field(1, alias="VALUE")
+
+    data: dict[str, object] = {"VALUE": 1}
+    if settings_config.get("extra") == "allow":
+        data["__model__"] = "extra"
+    with pytest.raises(ValueError, match="conflicts with serialized data"):
+        Config.model_validate(data).model_dump(
+            by_alias=True,
+            context={"model_string": True},
+        )
 
 
 def test_base_config_is_frozen_by_default() -> None:

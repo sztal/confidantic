@@ -97,3 +97,18 @@ class AppConfig(BaseConfig):
 		docstring_set_attributes_section=False,
 	)
 ```
+
+## Model strings
+
+Pass `context={"model_string": True}` to `model_dump()` or
+`model_dump_json()` to add an import string for each serialized `BaseConfig`:
+
+```python
+config.model_dump(context={"model_string": True})
+# {"__model__": "package.module:AppConfig", "retries": 3}
+```
+
+The special key is configured with `model_import_string` in
+`SettingsConfigDict` and defaults to `"__model__"`. Set it to `None` to exclude
+a configuration class from this output. Nested `BaseConfig` instances receive
+their own marker; ordinary Pydantic models do not.

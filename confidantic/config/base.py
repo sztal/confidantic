@@ -60,14 +60,14 @@ from confidantic.utils import is_runtime_jupyterlike
 
 __all__ = ("BaseConfig", "ClassDefaultsSource", "SettingsConfigDict")
 
-_FACTORY_DEFAULT = object()
-_DEFERRED_MODEL_DEFAULT = object()
-
 _FieldSource = tuple[
     type[PydanticBaseSettingsSource],
     type[BaseSettings],
 ]
 _NestedModelBaselines = dict[str, BaseModel | object]
+
+_FACTORY_DEFAULT = object()
+_DEFERRED_MODEL_DEFAULT = object()
 _NESTED_MODEL_BASELINES: ContextVar[_NestedModelBaselines | None] = ContextVar(
     "_NESTED_MODEL_BASELINES",
     default=None,
@@ -211,61 +211,13 @@ class ClassDefaultsSource(PydanticBaseSettingsSource):
                     adapter = TypeAdapter(field.annotation)
                 self.defaults[key] = adapter.dump_python(default)
 
-    def get_field_value(
-        self, field: FieldInfo, field_name: str
-    ) -> tuple[Any, str, bool]:
-        return None, "", False  # pragma: no cover
-
     def __call__(self) -> dict[str, Any]:
         return self.defaults
 
-
-class _ResolvedSettingsSource(PydanticBaseSettingsSource):
-    def __init__(
-        self,
-        settings_cls: type[BaseSettings],
-        sources: tuple[PydanticBaseSettingsSource, ...],
-        _init_state: InitState,
-        nested_model_default_partial_update: bool,
-    ) -> None:
-        super().__init__(settings_cls, _init_state)
-        self.sources = sources
-        self.nested_model_default_partial_update = nested_model_default_partial_update
-        self.field_sources: dict[str, _FieldSource] = {}
-
     def get_field_value(
         self, field: FieldInfo, field_name: str
     ) -> tuple[Any, str, bool]:
         return None, "", False  # pragma: no cover
-
-    def __call__(self) -> dict[str, Any]:
-        self.field_sources.clear()
-        if not all(
-            isinstance(source, PydanticBaseSettingsSource) for source in self.sources
-        ):
-            return {}
-
-        for field_name, field in self.settings_cls.model_fields.items():
-            aliases, _ = _get_alias_names(field_name, field)
-            keys = aliases or (field_name,)
-
-            for index, source in enumerate(self.sources):
-                next_state = (
-                    self.sources[index + 1].current_state
-                    if index + 1 < len(self.sources)
-                    else self.current_state
-                )
-                if any(
-                    key not in source.current_state and key in next_state
-                    for key in keys
-                ):
-                    self.field_sources[field_name] = (
-                        type(source),
-                        source.settings_cls,
-                    )
-                    break
-
-        return {}
 
 
 class BaseConfig(BaseSettings):
@@ -312,6 +264,41 @@ class BaseConfig(BaseSettings):
 
     _model_field_sources: dict[str, _FieldSource] = PrivateAttr(default_factory=dict)
 
+    def __init__(self, **kwargs: Any) -> None:
+        if _DISABLE_CLI_PARSE_ARGS.get() or is_runtime_jupyterlike():
+            kwargs["_cli_parse_args"] = False
+
+        build_sources = kwargs.pop("_build_sources", None)
+        if build_sources is None:
+            option_names = signature(self._settings_init_sources).parameters.keys()
+            source_options = {
+                key: kwargs.pop(key)
+                for key in tuple(kwargs)
+                if key in option_names and key != "_init_kwargs"
+            }
+            build_sources = self._settings_init_sources(
+                **source_options,
+                _init_kwargs=kwargs,
+            )
+
+        token = _NESTED_MODEL_BASELINES.set({})
+        try:
+            super().__init__(_build_sources=build_sources)
+        finally:
+            _NESTED_MODEL_BASELINES.reset(token)
+
+        sources, _ = build_sources
+        resolved_source = next(
+            (
+                source
+                for source in reversed(sources)
+                if isinstance(source, _ResolvedSettingsSource)
+            ),
+            None,
+        )
+        if resolved_source is not None:
+            self._model_field_sources = resolved_source.field_sources.copy()
+
     def __copy__(self) -> Self:
         """Return a shallow structural copy of this configuration."""
         return super().__copy__()
@@ -319,6 +306,47 @@ class BaseConfig(BaseSettings):
     def __deepcopy__(self, memo: dict[int, Any] | None = None) -> Self:
         """Return a deep structural copy of this configuration."""
         return super().__deepcopy__(memo)
+
+    @classmethod
+    def __pydantic_init_subclass__(cls, **kwargs: Any) -> None:
+        super().__pydantic_init_subclass__(**kwargs)
+        set_attributes_section = cls.model_config.get(
+            "docstring_set_attributes_section"
+        )
+        if set_attributes_section is None:
+            set_attributes_section = (
+                cls.__doc__ is not None
+                and not cls.model_config.get("cli_parse_args", False)
+            )
+        if not set_attributes_section:
+            return
+
+        parsed = parse(cls.__doc__, style=DocstringStyle.NUMPYDOC)
+        attributes = [
+            item
+            for item in parsed.meta
+            if isinstance(item, DocstringParam) and item.args[0] == "attribute"
+        ]
+        if not cls.model_fields and not attributes:
+            return
+
+        parsed.meta = [item for item in parsed.meta if item not in attributes]
+        parsed.meta.extend(
+            DocstringParam(
+                args=["attribute", field_name],
+                description=field.description,
+                arg_name=field_name,
+                type_name=None,
+                is_optional=None,
+                default=None,
+            )
+            for field_name, field in cls.model_fields.items()
+        )
+        cls.__doc__ = compose(
+            parsed,
+            style=DocstringStyle.NUMPYDOC,
+            indent="    ",
+        )
 
     def copy(self, **kwargs: Any) -> Self:
         """Return a shallow copy, optionally with validated field updates.
@@ -392,32 +420,6 @@ class BaseConfig(BaseSettings):
         self._model_field_sources.update(updated._model_field_sources)
         return self
 
-    def _copy_with_updates(self, updates: Mapping[str, Any]) -> Self:
-        cls = type(self)
-        values = {
-            field_name: getattr(self, field_name) for field_name in cls.model_fields
-        }
-        values.update(self.model_extra or {})
-        values.update(updates)
-        copied = cls.model_validate(values, by_alias=True, by_name=True)
-
-        updated_fields = {
-            field_name
-            for field_name, field in cls.model_fields.items()
-            if field_name in updates
-            or any(alias in updates for alias in _get_alias_names(field_name, field)[0])
-        }
-        copied._model_field_sources = self._model_field_sources.copy()
-        copied._model_field_sources.update(
-            dict.fromkeys(updated_fields, (InitSettingsSource, cls))
-        )
-        object.__setattr__(
-            copied,
-            "__pydantic_fields_set__",
-            self.model_fields_set | updated_fields,
-        )
-        return copied
-
     def model_resolve(self) -> Self:
         """Materialize factory fields in a generated resolved model.
 
@@ -434,103 +436,6 @@ class BaseConfig(BaseSettings):
         from confidantic.config.factory import _model_resolve
 
         return cast(Self, _model_resolve(self))
-
-    @field_validator("*", mode="before", check_fields=False)
-    @classmethod
-    def _apply_nested_model_partial_update(
-        cls,
-        value: Any,
-        info: ValidationInfo,
-    ) -> Any:
-        baselines = _NESTED_MODEL_BASELINES.get()
-        if baselines is None or info.field_name not in baselines:
-            return value
-
-        baseline = baselines[info.field_name]
-        if baseline is _DEFERRED_MODEL_DEFAULT:
-            baseline = cls.model_fields[info.field_name].get_default(
-                call_default_factory=True,
-                validated_data=info.data,
-            )
-        if isinstance(baseline, BaseModel) and isinstance(value, Mapping):
-            return _update_nested_model(baseline, value)
-        return value
-
-    @classmethod
-    def __pydantic_init_subclass__(cls, **kwargs: Any) -> None:
-        super().__pydantic_init_subclass__(**kwargs)
-        set_attributes_section = cls.model_config.get(
-            "docstring_set_attributes_section"
-        )
-        if set_attributes_section is None:
-            set_attributes_section = (
-                cls.__doc__ is not None
-                and not cls.model_config.get("cli_parse_args", False)
-            )
-        if not set_attributes_section:
-            return
-
-        parsed = parse(cls.__doc__, style=DocstringStyle.NUMPYDOC)
-        attributes = [
-            item
-            for item in parsed.meta
-            if isinstance(item, DocstringParam) and item.args[0] == "attribute"
-        ]
-        if not cls.model_fields and not attributes:
-            return
-
-        parsed.meta = [item for item in parsed.meta if item not in attributes]
-        parsed.meta.extend(
-            DocstringParam(
-                args=["attribute", field_name],
-                description=field.description,
-                arg_name=field_name,
-                type_name=None,
-                is_optional=None,
-                default=None,
-            )
-            for field_name, field in cls.model_fields.items()
-        )
-        cls.__doc__ = compose(
-            parsed,
-            style=DocstringStyle.NUMPYDOC,
-            indent="    ",
-        )
-
-    def __init__(self, **kwargs: Any) -> None:
-        if _DISABLE_CLI_PARSE_ARGS.get() or is_runtime_jupyterlike():
-            kwargs["_cli_parse_args"] = False
-
-        build_sources = kwargs.pop("_build_sources", None)
-        if build_sources is None:
-            option_names = signature(self._settings_init_sources).parameters.keys()
-            source_options = {
-                key: kwargs.pop(key)
-                for key in tuple(kwargs)
-                if key in option_names and key != "_init_kwargs"
-            }
-            build_sources = self._settings_init_sources(
-                **source_options,
-                _init_kwargs=kwargs,
-            )
-
-        token = _NESTED_MODEL_BASELINES.set({})
-        try:
-            super().__init__(_build_sources=build_sources)
-        finally:
-            _NESTED_MODEL_BASELINES.reset(token)
-
-        sources, _ = build_sources
-        resolved_source = next(
-            (
-                source
-                for source in reversed(sources)
-                if isinstance(source, _ResolvedSettingsSource)
-            ),
-            None,
-        )
-        if resolved_source is not None:
-            self._model_field_sources = resolved_source.field_sources.copy()
 
     @property
     def model_field_sources(self) -> Mapping[str, _FieldSource]:
@@ -990,3 +895,98 @@ class BaseConfig(BaseSettings):
                             baselines[field_name] = baseline
 
         return values
+
+    def _copy_with_updates(self, updates: Mapping[str, Any]) -> Self:
+        cls = type(self)
+        values = {
+            field_name: getattr(self, field_name) for field_name in cls.model_fields
+        }
+        values.update(self.model_extra or {})
+        values.update(updates)
+        copied = cls.model_validate(values, by_alias=True, by_name=True)
+
+        updated_fields = {
+            field_name
+            for field_name, field in cls.model_fields.items()
+            if field_name in updates
+            or any(alias in updates for alias in _get_alias_names(field_name, field)[0])
+        }
+        copied._model_field_sources = self._model_field_sources.copy()
+        copied._model_field_sources.update(
+            dict.fromkeys(updated_fields, (InitSettingsSource, cls))
+        )
+        object.__setattr__(
+            copied,
+            "__pydantic_fields_set__",
+            self.model_fields_set | updated_fields,
+        )
+        return copied
+
+    @field_validator("*", mode="before", check_fields=False)
+    @classmethod
+    def _apply_nested_model_partial_update(
+        cls,
+        value: Any,
+        info: ValidationInfo,
+    ) -> Any:
+        baselines = _NESTED_MODEL_BASELINES.get()
+        if baselines is None or info.field_name not in baselines:
+            return value
+
+        baseline = baselines[info.field_name]
+        if baseline is _DEFERRED_MODEL_DEFAULT:
+            baseline = cls.model_fields[info.field_name].get_default(
+                call_default_factory=True,
+                validated_data=info.data,
+            )
+        if isinstance(baseline, BaseModel) and isinstance(value, Mapping):
+            return _update_nested_model(baseline, value)
+        return value
+
+
+class _ResolvedSettingsSource(PydanticBaseSettingsSource):
+    def __init__(
+        self,
+        settings_cls: type[BaseSettings],
+        sources: tuple[PydanticBaseSettingsSource, ...],
+        _init_state: InitState,
+        nested_model_default_partial_update: bool,
+    ) -> None:
+        super().__init__(settings_cls, _init_state)
+        self.sources = sources
+        self.nested_model_default_partial_update = nested_model_default_partial_update
+        self.field_sources: dict[str, _FieldSource] = {}
+
+    def __call__(self) -> dict[str, Any]:
+        self.field_sources.clear()
+        if not all(
+            isinstance(source, PydanticBaseSettingsSource) for source in self.sources
+        ):
+            return {}
+
+        for field_name, field in self.settings_cls.model_fields.items():
+            aliases, _ = _get_alias_names(field_name, field)
+            keys = aliases or (field_name,)
+
+            for index, source in enumerate(self.sources):
+                next_state = (
+                    self.sources[index + 1].current_state
+                    if index + 1 < len(self.sources)
+                    else self.current_state
+                )
+                if any(
+                    key not in source.current_state and key in next_state
+                    for key in keys
+                ):
+                    self.field_sources[field_name] = (
+                        type(source),
+                        source.settings_cls,
+                    )
+                    break
+
+        return {}
+
+    def get_field_value(
+        self, field: FieldInfo, field_name: str
+    ) -> tuple[Any, str, bool]:
+        return None, "", False  # pragma: no cover

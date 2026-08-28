@@ -38,8 +38,6 @@ dynamic = [
 ]
 dependencies = [
   "docstring-parser>=0.18",
-  "pendulum>=3.2",
-  "pydantic-extra-types>=2.11.1",
   "pydantic-settings>=2.15",
   "rich>=15",
 ]

@@ -1,11 +1,11 @@
-from collections.abc import Callable, Sequence
-from datetime import date, datetime, time
-from io import TextIOBase
+from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
 from typing import (
     Annotated,
     Any,
     TypeVar,
+    get_args,
+    get_origin,
 )
 
 from pydantic import (
@@ -25,29 +25,16 @@ from pydantic.functional_validators import (
     BeforeValidator,
     WrapValidator,
 )
-from pydantic_extra_types import pendulum_dt
-from pydantic_extra_types.country import CountryAlpha2
-from pydantic_extra_types.currency_code import Currency
-from pydantic_extra_types.language_code import LanguageAlpha2
-from pydantic_extra_types.timezone_name import TimeZoneName
 from pydantic_settings import NoDecode
-
-from .utils import parse_date, parse_datetime, parse_time
 
 __all__ = (
     "AbsolutePath",
     "AfterValidator",
     "BeforeValidator",
     "CommaDelimited",
-    "Country",
-    "Currency",
-    "Date",
-    "DateTime",
     "Delimited",
-    "Duration",
     "Json",
     "JsonValue",
-    "Language",
     "NegativeFloat",
     "NegativeInt",
     "NoDecode",
@@ -58,28 +45,38 @@ __all__ = (
     "PositiveFloat",
     "PositiveInt",
     "SemiColonDelimited",
-    "Time",
-    "TimeZoneName",
     "WhitespaceDelimited",
+    "get_proper_args",
 )
 
 T = TypeVar("T")
-S = TypeVar("S", bound=str)
-C = TypeVar("C", bound=Callable)
-
 AbsolutePath = Annotated[Path, AfterValidator(Path.absolute)]
-SerializationTarget = str | Path | TextIOBase
-SerializationSource = str | bytes | bytearray | Path | TextIOBase
 
-Country = CountryAlpha2
-Language = LanguageAlpha2
 
-Date = Annotated[pendulum_dt.Date | str | date, BeforeValidator(parse_date)]
-Time = Annotated[pendulum_dt.Time | str | time, BeforeValidator(parse_time)]
-DateTime = Annotated[
-    pendulum_dt.DateTime | str | datetime, BeforeValidator(parse_datetime)
-]
-Duration = pendulum_dt.Duration
+def get_proper_args(annotation: Any) -> Iterator[type]:
+    """Iterate over the concrete types inside an annotation.
+
+    For example, for a union annotation like ``int | str``, this yields
+    ``int`` and ``str``. For an annotated annotation like
+    ``Annotated[int, SomeValidator()]``, this yields ``int``.
+
+    Parameters
+    ----------
+    annotation
+        The annotation to iterate over.
+
+    Yields
+    ------
+    type
+        The next proper type in the annotation.
+    """
+    origin = get_origin(annotation)
+    if not origin:
+        if isinstance(annotation, type):
+            yield annotation
+        return
+    for arg in get_args(annotation):
+        yield from get_proper_args(arg)
 
 
 # ------------------------------------------------------------------------------------

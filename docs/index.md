@@ -125,3 +125,24 @@ otherwise validation raises an error. For validation through a base type, every
 participating configuration must use the same `model_import_string` key, which
 defaults to `"__model__"`. This feature is intended for trusted serialized data:
 the marker controls an import. Direct model construction is not polymorphic.
+
+## YAML and TOML
+
+Install an optional writer to serialize configurations as YAML or TOML:
+
+```console
+pip install "confidantic[yaml]"
+pip install "confidantic[toml]"
+```
+
+Both methods accept the same model-dump filtering, context, and serialization
+options as `model_dump_json()` and return a string:
+
+```python
+yaml_text = config.model_dump_yaml(context={"model_string": True})
+toml_text = config.model_dump_toml(exclude_none=True)
+```
+
+YAML uses block formatting and preserves model field order, including a leading
+model string. TOML has no null representation, so use `exclude_none=True` when
+the configuration can contain `None` values.

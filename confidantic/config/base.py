@@ -4,6 +4,7 @@ from collections.abc import Collection, Mapping
 from contextvars import ContextVar
 from copy import copy as shallow_copy
 from copy import deepcopy as deep_copy
+from importlib import import_module
 from inspect import get_annotations, signature
 from io import StringIO
 from types import MappingProxyType, UnionType
@@ -12,6 +13,7 @@ from typing import (
     Any,
     ClassVar,
     Literal,
+    Protocol,
     Self,
     Union,
     cast,
@@ -73,6 +75,15 @@ _FieldSource = tuple[
     type[BaseSettings],
 ]
 _NestedModelBaselines = dict[str, BaseModel | object]
+
+
+class _YamlModule(Protocol):
+    def safe_dump(self, data: Any, **kwargs: Any) -> str: ...
+
+
+class _TomlModule(Protocol):
+    def dumps(self, data: Any) -> str: ...
+
 
 _FACTORY_DEFAULT = object()
 _DEFERRED_MODEL_DEFAULT = object()
@@ -338,6 +349,145 @@ class BaseConfig(BaseSettings):
                 f"Model string key {marker_key!r} conflicts with serialized data"
             )
         return {marker_key: get_import_string(self), **data}
+
+    def model_dump_yaml(
+        self,
+        *,
+        indent: int | None = None,
+        include: Any = None,
+        exclude: Any = None,
+        context: Any = None,
+        by_alias: bool | None = None,
+        exclude_unset: bool = False,
+        exclude_defaults: bool = False,
+        exclude_none: bool = False,
+        exclude_computed_fields: bool = False,
+        round_trip: bool = False,
+        warnings: bool | Literal["none", "warn", "error"] = True,
+        fallback: Any = None,
+        serialize_as_any: bool = False,
+        polymorphic_serialization: bool | None = None,
+    ) -> str:
+        """Serialize this configuration as YAML.
+
+        Parameters
+        ----------
+        indent
+            Number of spaces used to indent nested YAML collections.
+        include, exclude, context, by_alias, exclude_unset, exclude_defaults
+            Options forwarded to :meth:`model_dump`.
+        exclude_none, exclude_computed_fields, round_trip, warnings, fallback
+            Options forwarded to :meth:`model_dump`.
+        serialize_as_any, polymorphic_serialization
+            Options forwarded to :meth:`model_dump`.
+
+        Returns
+        -------
+        str
+            Block-style YAML serialization of the configuration.
+
+        Raises
+        ------
+        ImportError
+            If PyYAML is not installed.
+        """
+        try:
+            yaml = cast(_YamlModule, import_module("yaml"))
+        except ImportError as error:
+            raise ImportError(
+                "model_dump_yaml() requires PyYAML; install confidantic[yaml]"
+            ) from error
+
+        dump_options = {
+            "include": include,
+            "exclude": exclude,
+            "context": context,
+            "by_alias": by_alias,
+            "exclude_unset": exclude_unset,
+            "exclude_defaults": exclude_defaults,
+            "exclude_none": exclude_none,
+            "exclude_computed_fields": exclude_computed_fields,
+            "round_trip": round_trip,
+            "warnings": warnings,
+            "fallback": fallback,
+            "serialize_as_any": serialize_as_any,
+            "polymorphic_serialization": polymorphic_serialization,
+        }
+        yaml_options: dict[str, Any] = {
+            "allow_unicode": True,
+            "default_flow_style": False,
+            "sort_keys": False,
+        }
+        if indent is not None:
+            yaml_options["indent"] = indent
+        return yaml.safe_dump(
+            self.model_dump(mode="json", **dump_options),
+            **yaml_options,
+        )
+
+    def model_dump_toml(
+        self,
+        *,
+        include: Any = None,
+        exclude: Any = None,
+        context: Any = None,
+        by_alias: bool | None = None,
+        exclude_unset: bool = False,
+        exclude_defaults: bool = False,
+        exclude_none: bool = False,
+        exclude_computed_fields: bool = False,
+        round_trip: bool = False,
+        warnings: bool | Literal["none", "warn", "error"] = True,
+        fallback: Any = None,
+        serialize_as_any: bool = False,
+        polymorphic_serialization: bool | None = None,
+    ) -> str:
+        """Serialize this configuration as TOML.
+
+        Parameters
+        ----------
+        include, exclude, context, by_alias, exclude_unset, exclude_defaults
+            Options forwarded to :meth:`model_dump`.
+        exclude_none, exclude_computed_fields, round_trip, warnings, fallback
+            Options forwarded to :meth:`model_dump`.
+        serialize_as_any, polymorphic_serialization
+            Options forwarded to :meth:`model_dump`.
+
+        Returns
+        -------
+        str
+            TOML serialization of the configuration.
+
+        Raises
+        ------
+        ImportError
+            If tomli-w is not installed.
+        """
+        try:
+            tomli_w = cast(_TomlModule, import_module("tomli_w"))
+        except ImportError as error:
+            raise ImportError(
+                "model_dump_toml() requires tomli-w; install confidantic[toml]"
+            ) from error
+
+        return tomli_w.dumps(
+            self.model_dump(
+                mode="json",
+                include=include,
+                exclude=exclude,
+                context=context,
+                by_alias=by_alias,
+                exclude_unset=exclude_unset,
+                exclude_defaults=exclude_defaults,
+                exclude_none=exclude_none,
+                exclude_computed_fields=exclude_computed_fields,
+                round_trip=round_trip,
+                warnings=warnings,
+                fallback=fallback,
+                serialize_as_any=serialize_as_any,
+                polymorphic_serialization=polymorphic_serialization,
+            )
+        )
 
     def __init__(self, **kwargs: Any) -> None:
         if _DISABLE_CLI_PARSE_ARGS.get() or is_runtime_jupyterlike():

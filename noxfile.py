@@ -24,6 +24,7 @@ nox.options.sessions = [
 
 PYPROJECT = nox.project.load_toml()
 PROJECT_NAME = PYPROJECT["project"]["name"]
+OPTIONAL_DEPENDENCY_NAMES = tuple(PYPROJECT["project"].get("optional-dependencies", {}))
 SUPPORTED_PYTHON_VERSIONS = nox.project.python_versions(PYPROJECT)
 DEFAULT_PYTHON_VERSION = Path(".python-version").read_text().rstrip()
 
@@ -31,7 +32,8 @@ DEFAULT_PYTHON_VERSION = Path(".python-version").read_text().rstrip()
 @nox.session(python=SUPPORTED_PYTHON_VERSIONS, tags=["tests"])
 def tests(session: nox.Session) -> None:
     """Run the test suite."""
-    session.install(".", "--group", "test")
+    extras = f"[{','.join(OPTIONAL_DEPENDENCY_NAMES)}]"
+    session.install(f".{extras}", "--group", "test")
     tmp_dir = Path(session.create_tmp())
 
     if os.getenv("COVERAGE_FILE") is None:

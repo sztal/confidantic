@@ -1,11 +1,13 @@
 """Tests for the base configuration model."""
 
 import sys
+import tomllib
 from copy import copy, deepcopy
 from enum import Enum
+from importlib import import_module
 from io import StringIO
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import pytest
 from docstring_parser import DocstringStyle, parse
@@ -80,6 +82,14 @@ class PolymorphicContainer(BaseModel):
 
     item: PolymorphicConfig
     items: list[PolymorphicConfig]
+
+
+class FormatConfig(BaseConfig):
+    """Configuration used to test YAML and TOML serialization."""
+
+    name: str = "example"
+    nested: dict[str, int] = Field(default_factory=lambda: {"value": 1})
+    optional: str | None = None
 
 
 def _build_config(settings_cls: type[BaseConfig], **kwargs: Any) -> Any:
@@ -284,6 +294,58 @@ def test_model_import_string_is_removed_before_subtype_validation() -> None:
     resolved = PolymorphicConfig.model_validate(data)
 
     assert type(resolved) is StrictPolymorphicConfig
+
+
+def test_model_dump_yaml_forwards_model_dump_options() -> None:
+    """YAML dumps preserve marker ordering and forwarded dump options."""
+    yaml = cast(Any, import_module("yaml"))
+    config = FormatConfig()
+
+    result = config.model_dump_yaml(
+        context={"model_string": True},
+        exclude_none=True,
+        indent=4,
+    )
+
+    assert result == (
+        "__model__: tests.test_config_base:FormatConfig\n"
+        "name: example\n"
+        "nested:\n"
+        "    value: 1\n"
+    )
+    assert yaml.safe_load(result) == {
+        "__model__": "tests.test_config_base:FormatConfig",
+        "name": "example",
+        "nested": {"value": 1},
+    }
+
+
+def test_model_dump_toml_forwards_model_dump_options() -> None:
+    """TOML dumps preserve marker ordering and forwarded dump options."""
+    config = FormatConfig()
+
+    result = config.model_dump_toml(
+        context={"model_string": True},
+        exclude_none=True,
+    )
+
+    assert result == (
+        '__model__ = "tests.test_config_base:FormatConfig"\n'
+        'name = "example"\n\n'
+        "[nested]\n"
+        "value = 1\n"
+    )
+    assert tomllib.loads(result) == {
+        "__model__": "tests.test_config_base:FormatConfig",
+        "name": "example",
+        "nested": {"value": 1},
+    }
+
+
+def test_model_dump_toml_requires_nulls_to_be_excluded() -> None:
+    """TOML serialization leaves unsupported null values to its writer."""
+    with pytest.raises(TypeError, match="NoneType"):
+        FormatConfig().model_dump_toml()
 
 
 def test_base_config_is_frozen_by_default() -> None:

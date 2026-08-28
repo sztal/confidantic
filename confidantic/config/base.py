@@ -1,7 +1,9 @@
 """Base configuration model."""
 
-from collections.abc import Callable, Collection, Mapping
+from collections.abc import Collection, Mapping
 from contextvars import ContextVar
+from copy import copy as shallow_copy
+from copy import deepcopy as deep_copy
 from inspect import get_annotations, signature
 from io import StringIO
 from types import MappingProxyType, UnionType
@@ -33,7 +35,6 @@ from pydantic.fields import FieldInfo
 from pydantic_settings import (
     BaseSettings,
     CliSettingsSource,
-    EnvSettingsSource,
     InitSettingsSource,
     PydanticBaseSettingsSource,
 )
@@ -75,11 +76,6 @@ _DISABLE_CLI_PARSE_ARGS: ContextVar[bool] = ContextVar(
     "_DISABLE_CLI_PARSE_ARGS",
     default=False,
 )
-
-
-class _CliHelpDisabledSettingsSource(CliSettingsSource[Any]):
-    def _add_default_help(self) -> None:
-        pass
 
 
 def _field_has_discriminator(field: FieldInfo) -> bool:
@@ -153,12 +149,9 @@ class SettingsConfigDict(PydanticSettingsConfigDict, total=False):
         Whether model fields replace the class docstring's ``Attributes``
         section when a configuration subclass is created. ``None`` enables
         this by default except for models with ``cli_parse_args=True``.
-    cli_help
-        Whether a configuration with ``cli_parse_args=True`` displays CLI help.
     """
 
     docstring_set_attributes_section: bool | None
-    cli_help: bool
 
 
 class ClassDefaultsSource(PydanticBaseSettingsSource):
@@ -300,8 +293,6 @@ class BaseConfig(BaseSettings):
 
     model_config: ClassVar[SettingsConfigDict] = SettingsConfigDict(
         frozen=True,
-        validate_default=True,
-        arbitrary_types_allowed=True,
         env_nested_delimiter="__",
         env_ignore_empty=True,
         env_parse_enums=True,
@@ -313,9 +304,7 @@ class BaseConfig(BaseSettings):
         cli_kebab_case=True,
         cli_hide_none_type=True,
         cli_show_env_vars=True,
-        cli_use_class_docs_for_group=True,
-        cli_ignore_unknown_args=True,
-        cli_help=True,
+        cli_use_class_docs_for_groups=True,
         use_attribute_docstrings=True,
         docstring_set_attributes_section=None,
         dotenv_filtering="match_prefix",
@@ -323,56 +312,71 @@ class BaseConfig(BaseSettings):
 
     _model_field_sources: dict[str, _FieldSource] = PrivateAttr(default_factory=dict)
 
-    def __init_subclass__(
-        cls,
-        *,
-        cli_help: bool | None = None,
-        **kwargs: Any,
-    ) -> None:
-        super().__init_subclass__(**kwargs)
-        if cli_help is not None:
-            cls.model_config = SettingsConfigDict(
-                cls.model_config | {"cli_help": cli_help}
-            )
+    def __copy__(self) -> Self:
+        """Return a shallow structural copy of this configuration."""
+        return super().__copy__()
 
-    def model_factory(
-        self,
-        selector: Callable[[str], bool]
-        | Callable[[str, FieldInfo], bool]
-        | None = None,
-        *,
-        clear_metadata: bool = True,
-    ) -> type[Self]:
-        """Create a subclass with generated factory configuration defaults.
+    def __deepcopy__(self, memo: dict[int, Any] | None = None) -> Self:
+        """Return a deep structural copy of this configuration."""
+        return super().__deepcopy__(memo)
 
-        Selection uses each field's current validated value to generate its
-        factory configuration annotation and default instance. A one-argument
-        selector receives the field name; a two-argument selector also receives
-        its field information. Without a selector, all fields are selected.
-        Existing factory configuration values remain unchanged. The generated
-        subclass uses a copy of :class:`BaseConfig`'s default model configuration.
+    def copy(self, **kwargs: Any) -> Self:
+        """Return a shallow copy, optionally with validated field updates.
 
         Parameters
         ----------
-        selector
-            Optional predicate accepting a field name or a field name and its
-            field information. It must declare exactly one or two positional
-            parameters.
-        clear_metadata
-            Whether to remove metadata inherited from selected source fields.
+        **kwargs
+            Field values to update. Updates are validated as normal model input.
 
         Returns
         -------
-        type[Self]
-            ``<Source>Factory`` subclass whose selected fields use generated
-            factory configurations, or this instance's type if none are selected.
+        Self
+            A shallow copy of this configuration, with any updates applied.
         """
-        from confidantic.config.factory import _model_factory
+        copied = shallow_copy(self)
+        return copied if not kwargs else copied._copy_with_updates(kwargs)
 
-        return cast(
-            type[Self],
-            _model_factory(self, selector, clear_metadata=clear_metadata),
+    def deepcopy(self, **kwargs: Any) -> Self:
+        """Return a deep copy, optionally with validated field updates.
+
+        Parameters
+        ----------
+        **kwargs
+            Field values to update. Updates are validated as normal model input.
+
+        Returns
+        -------
+        Self
+            A deep copy of this configuration, with any updates applied.
+        """
+        copied = deep_copy(self)
+        return copied if not kwargs else copied._copy_with_updates(kwargs)
+
+    def _copy_with_updates(self, updates: Mapping[str, Any]) -> Self:
+        cls = type(self)
+        values = {
+            field_name: getattr(self, field_name) for field_name in cls.model_fields
+        }
+        values.update(self.model_extra or {})
+        values.update(updates)
+        copied = cls.model_validate(values, by_alias=True, by_name=True)
+
+        updated_fields = {
+            field_name
+            for field_name, field in cls.model_fields.items()
+            if field_name in updates
+            or any(alias in updates for alias in _get_alias_names(field_name, field)[0])
+        }
+        copied._model_field_sources = self._model_field_sources.copy()
+        copied._model_field_sources.update(
+            dict.fromkeys(updated_fields, (InitSettingsSource, cls))
         )
+        object.__setattr__(
+            copied,
+            "__pydantic_fields_set__",
+            self.model_fields_set | updated_fields,
+        )
+        return copied
 
     def model_resolve(self) -> Self:
         """Materialize factory fields in a generated resolved model.
@@ -822,44 +826,9 @@ class BaseConfig(BaseSettings):
             source_builder = BaseSettings.__dict__["_settings_init_sources"].__get__(
                 None, level
             )
-            cli_source_options = {
-                name: local_options[f"_{name}"]
-                for name in signature(CliSettingsSource).parameters
-                if f"_{name}" in local_options
-            }
-            env_source_options = {
-                name: local_options[f"_{name}"]
-                for name in signature(EnvSettingsSource).parameters
-                if f"_{name}" in local_options
-            }
-            cli_source_options = {
-                name: value if value is not None else level.model_config.get(name)
-                for name, value in cli_source_options.items()
-            }
-            env_source_options = {
-                name: value if value is not None else level.model_config.get(name)
-                for name, value in env_source_options.items()
-            }
-            if env_source_options["env_parse_none_str"] is not None:
-                cli_source_options["cli_parse_none_str"] = env_source_options[
-                    "env_parse_none_str"
-                ]
-            cli_settings_source = _cli_settings_source if index == 0 else None
-            if (
-                index == 0
-                and not level.model_config.get("cli_help", True)
-                and cli_source_options["cli_parse_args"] is not None
-                and cli_source_options["cli_parse_args"] is not False
-                and cli_settings_source is None
-            ):
-                cli_settings_source = _CliHelpDisabledSettingsSource(
-                    level,
-                    **cli_source_options,
-                    _env_settings_source=EnvSettingsSource(level, **env_source_options),
-                )
             level_options = source_options | {
                 "_cli_parse_args": _cli_parse_args if index == 0 else False,
-                "_cli_settings_source": cli_settings_source,
+                "_cli_settings_source": (_cli_settings_source if index == 0 else None),
                 "_init_kwargs": init_kwargs,
             }
             level_sources, _ = source_builder(**level_options)

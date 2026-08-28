@@ -1,6 +1,7 @@
 """Tests for the base configuration model."""
 
 import sys
+from copy import copy, deepcopy
 from enum import Enum
 from io import StringIO
 from pathlib import Path
@@ -11,6 +12,7 @@ from docstring_parser import DocstringStyle, parse
 from pydantic import (
     BaseModel,
     Field,
+    PrivateAttr,
     SecretStr,
     ValidationError,
     field_validator,
@@ -75,7 +77,7 @@ def test_base_config_is_frozen_by_default() -> None:
 
     config = Config()
 
-    assert Config.model_config["frozen"] is True
+    assert Config.model_config["frozen"] is True  # type: ignore[truthy-function]
     with pytest.raises(ValidationError) as error:
         config.value = "changed"
 
@@ -106,7 +108,7 @@ def test_frozen_default_is_inherited_with_other_model_options() -> None:
 
         value: str = "initial"
 
-    assert Config.model_config["frozen"] is True
+    assert Config.model_config["frozen"] is True  # type: ignore[truthy-function]
     with pytest.raises(ValidationError):
         Config().value = "changed"
 
@@ -123,6 +125,71 @@ def test_frozen_default_can_be_disabled() -> None:
     config.value = "changed"
 
     assert config.value == "changed"
+
+
+def test_copy_protocol_preserves_configuration_state() -> None:
+    """Copy protocols retain model state with their standard depth semantics."""
+
+    class Config(BaseConfig):
+        value: int = 1
+        items: list[int]
+
+        _state: dict[str, list[int]] = PrivateAttr(
+            default_factory=lambda: {"items": [1]}
+        )
+
+    config = Config(items=[1])
+
+    shallow = copy(config)
+    deep = deepcopy(config)
+    convenience_shallow = config.copy()
+    convenience_deep = config.deepcopy()
+
+    assert isinstance(shallow, Config)
+    assert shallow is not config
+    assert shallow.items is config.items
+    assert shallow._state is config._state
+    assert shallow.model_fields_set == config.model_fields_set
+    assert shallow.model_field_sources == config.model_field_sources
+    assert deep.items == config.items
+    assert deep.items is not config.items
+    assert deep._state == config._state
+    assert deep._state is not config._state
+    assert convenience_shallow.items is config.items
+    assert convenience_deep.items is not config.items
+    with pytest.raises(ValidationError):
+        shallow.value = 2
+
+
+def test_copy_methods_validate_updates_and_retain_provenance() -> None:
+    """Convenience copies validate updates without replacing inherited sources."""
+
+    class Config(BaseConfig):
+        value: int = 1
+        defaulted: str = "default"
+        items: list[int]
+
+        @field_validator("value")
+        @classmethod
+        def double_value(cls, value: int) -> int:
+            return value * 2
+
+    config = Config(value=2, items=[1])
+
+    shallow = config.copy(value="3")
+    deep = config.deepcopy(value="4")
+
+    assert shallow.value == 6
+    assert deep.value == 8
+    assert shallow.model_field_sources == {
+        "value": (InitSettingsSource, Config),
+        "defaulted": (ClassDefaultsSource, Config),
+        "items": (InitSettingsSource, Config),
+    }
+    assert shallow.model_fields_set == {"value", "items"}
+    assert shallow._model_field_sources is not config._model_field_sources
+    with pytest.raises(ValidationError):
+        config.copy(value="invalid")
 
 
 def test_model_info_builds_table_without_evaluating_factories(
@@ -481,99 +548,6 @@ def test_cli_parsing_is_disabled_in_jupyterlike_runtime(
     assert Config().value == "from-default"
 
 
-def test_cli_help_is_enabled_by_default(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """CLI-enabled configs retain Pydantic's standard help behavior."""
-
-    class Config(BaseConfig, cli_parse_args=True):
-        value: int = 1
-
-    assert BaseConfig.model_config["cli_help"] is True
-    with pytest.raises(SystemExit, match="0"):
-        _build_config(Config, _cli_parse_args=["--help"])
-
-    assert "--value int" in capsys.readouterr().out
-
-
-def test_cli_help_can_be_disabled_without_consuming_arguments(
-    capsys: pytest.CaptureFixture[str],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Disabled help leaves process arguments for a subsequent config."""
-
-    class SuppressedConfig(BaseConfig):
-        model_config = SettingsConfigDict(
-            cli_parse_args=True,
-            cli_help=False,
-        )
-
-        value: int = 1
-
-    class SubsequentConfig(BaseConfig, cli_parse_args=True):
-        value: int = 2
-
-    arguments = ["config.py", "--help"]
-    monkeypatch.setattr(sys, "argv", arguments)
-
-    assert SuppressedConfig().value == 1
-    assert capsys.readouterr().out == ""
-    assert sys.argv == arguments
-
-    with pytest.raises(SystemExit, match="0"):
-        SubsequentConfig()
-
-    assert "--value int" in capsys.readouterr().out
-    assert sys.argv == arguments
-
-
-def test_cli_help_routing_preserves_option_parsing(
-    capsys: pytest.CaptureFixture[str],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A help-disabled config can select the subsequent help-enabled config."""
-
-    class HelpRouter(BaseConfig, cli_parse_args=True, cli_prefix="help"):
-        model_config = SettingsConfigDict(cli_help=False)
-
-        types: bool = False
-
-    arguments = ["config.py", "--help", "--help.types"]
-    monkeypatch.setattr(sys, "argv", arguments)
-    router = HelpRouter()
-
-    class Types(BaseConfig, cli_parse_args=True, cli_prefix="types"):
-        model_config = SettingsConfigDict(cli_help=router.types)
-
-        value: int = 1
-
-    assert router.types is True
-    assert capsys.readouterr().out == ""
-    assert sys.argv == arguments
-    with pytest.raises(SystemExit, match="0"):
-        Types()
-
-    assert "--types.value int" in capsys.readouterr().out
-    assert sys.argv == arguments
-
-
-def test_cli_help_does_not_enable_cli_parsing(
-    capsys: pytest.CaptureFixture[str],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The CLI help option is inert when CLI parsing is disabled."""
-
-    class Config(BaseConfig, cli_parse_args=False, cli_help=False):
-        value: int = 1
-
-    arguments = ["config.py", "--help"]
-    monkeypatch.setattr(sys, "argv", arguments)
-
-    assert Config().value == 1
-    assert capsys.readouterr().out == ""
-    assert sys.argv == arguments
-
-
 def test_class_defaults_source_is_public() -> None:
     """The public source loads only defaults declared at its class level."""
 
@@ -590,17 +564,19 @@ def test_class_defaults_source_is_public() -> None:
     assert ClassDefaultsSource(Config, {"unknown"})() == {}
 
 
-def test_class_defaults_source_supports_arbitrary_type_annotations() -> None:
-    """Defaults with arbitrary type annotations retain the model configuration."""
+def test_class_defaults_source_supports_arbitrary_types() -> None:
+    """Static defaults respect a model's arbitrary-types configuration."""
 
-    class External:
+    class Dependency:
         pass
 
-    class Config(BaseConfig):
-        value: External | None = None
+    dependency = Dependency()
 
-    assert Config().value is None
-    assert ClassDefaultsSource(Config)() == {"value": None}
+    class Config(BaseConfig, arbitrary_types_allowed=True):
+        value: Dependency = dependency
+
+    assert isinstance(ClassDefaultsSource(Config)()["value"], Dependency)
+    assert isinstance(Config().value, Dependency)
 
 
 def test_model_field_sources_track_defaults_and_init() -> None:

@@ -127,10 +127,9 @@ class FactoryConfig(BaseConfig):
     ) -> type[Self]:
         """Create a concrete factory config from a target instance.
 
-        Constructor annotations must match the target signature. Annotated
-        keyword parameters define the generated fields. Values available on
-        ``source`` replace constructor defaults; mutable and unhashable values
-        are copied through field default factories.
+        Constructor annotations define the generated fields. Values available
+        on ``source`` replace constructor defaults; mutable and unhashable
+        values are copied through field default factories.
 
         Parameters
         ----------
@@ -168,31 +167,14 @@ class FactoryConfig(BaseConfig):
     ) -> type[Self]:
         init = target.__init__
         annotations = get_type_hints(init, include_extras=True)
-        parameters = tuple(signature(init).parameters.items())
-        parameter_names = {
-            field_name
-            for index, (field_name, _) in enumerate(parameters)
-            if index != 0 or field_name not in {"self", "cls"}
-        }
-        annotation_names = set(annotations) - {"return"}
-        if parameter_names != annotation_names:
-            missing = ", ".join(sorted(parameter_names - annotation_names))
-            unexpected = ", ".join(sorted(annotation_names - parameter_names))
-            details = []
-            if missing:
-                details.append(f"missing annotations for: {missing}")
-            if unexpected:
-                details.append(f"annotations without parameters: {unexpected}")
-            msg = (
-                f"{target.__qualname__}.__init__ type annotations do not match "
-                f"its signature ({'; '.join(details)}); cannot create a model "
-                "factory config"
-            )
-            raise TypeError(msg)
         fields: dict[str, tuple[Any, Any]] = {}
 
-        for index, (field_name, parameter) in enumerate(parameters):
+        for index, (field_name, parameter) in enumerate(
+            signature(init).parameters.items()
+        ):
             if index == 0 and field_name in {"self", "cls"}:
+                continue
+            if field_name not in annotations:
                 continue
             if parameter.kind is Parameter.POSITIONAL_ONLY:
                 msg = (
@@ -323,59 +305,6 @@ def _resolved_field(field: FieldInfo, annotation: Any) -> FieldInfo:
         resolved.default = PydanticUndefined
         resolved.default_factory = _resolved_default_factory(field)
     return resolved
-
-
-def _model_factory(
-    config: BaseConfig,
-    selector: Callable[[str], bool] | Callable[[str, FieldInfo], bool] | None = None,
-    *,
-    clear_metadata: bool = True,
-) -> type[BaseConfig]:
-    selector_arity = 1
-    if selector is not None:
-        parameters = tuple(signature(selector).parameters.values())
-        if len(parameters) not in {1, 2} or any(
-            parameter.kind
-            not in {Parameter.POSITIONAL_ONLY, Parameter.POSITIONAL_OR_KEYWORD}
-            for parameter in parameters
-        ):
-            msg = "selector must declare exactly one or two positional parameters"
-            raise TypeError(msg)
-        selector_arity = len(parameters)
-
-    source_type = type(config)
-    fields: dict[str, tuple[Any, Any]] = {}
-    for field_name, field in source_type.model_fields.items():
-        value = getattr(config, field_name)
-        selected = selector is None or (
-            selector(field_name) if selector_arity == 1 else selector(field_name, field)
-        )
-        if not selected or isinstance(value, FactoryConfig):
-            continue
-
-        factory_type = FactoryConfig.model_from(value)
-        factory_default = factory_type()
-        factory_field = copy(field)
-        factory_field.annotation = factory_type
-        factory_field.default = factory_default
-        factory_field.default_factory = None
-        if clear_metadata:
-            factory_field.metadata = []
-        fields[field_name] = (factory_type, factory_field)
-
-    if not fields:
-        return source_type
-
-    return cast(
-        type[BaseConfig],
-        create_model(
-            f"{source_type.__name__}Factory",
-            __base__=source_type,
-            __config__=copy(BaseConfig.model_config),
-            __module__=source_type.__module__,
-            **cast(dict[str, Any], fields),
-        ),
-    )
 
 
 def _resolved_model_type(

@@ -23,8 +23,8 @@ pip install confidantic
 ## Frozen configuration
 
 `BaseConfig` instances are frozen by default, so model fields cannot be
-reassigned after validation. Create a modified copy from trusted values with
-Pydantic's `model_copy` method:
+reassigned after validation. Create a modified copy with `copy`; supplied
+updates are validated as normal model input:
 
 ```python
 from confidantic import BaseConfig
@@ -35,8 +35,12 @@ class AppConfig(BaseConfig):
 
 
 config = AppConfig()
-updated = config.model_copy(update={"retries": 5})
+updated = config.copy(retries=5)
 ```
+
+`copy()` is shallow and `deepcopy()` recursively copies field values. Both
+methods accept validated keyword updates. The standard-library `copy.copy()`
+and `copy.deepcopy()` functions are also supported.
 
 Pydantic's frozen behavior is shallow: mutable values stored in fields are not
 recursively frozen. A subclass that intentionally requires field reassignment

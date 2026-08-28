@@ -5,9 +5,10 @@ from typing import Annotated, Any, cast, get_args
 
 import pytest
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
-from pydantic.fields import FieldInfo
 
 from confidantic import BaseConfig, FactoryConfig, SettingsConfigDict
+
+_UNTYPED_DEFAULT = object()
 
 
 class Product:
@@ -17,15 +18,20 @@ class Product:
         self,
         count: int,
         label: str = "default",
+        untyped: Any = _UNTYPED_DEFAULT,
         *args: Any,
         enabled: bool = True,
         **kwargs: Any,
     ) -> None:
         self.count = count
         self.label = label
+        self.untyped = untyped
         self.args = args
         self.enabled = enabled
         self.kwargs = kwargs
+
+
+Product.__init__.__annotations__.pop("untyped")
 
 
 class Basket:
@@ -206,7 +212,7 @@ def test_factory_field_failure_allows_union_fallback() -> None:
 
 
 def test_model_from_type_creates_ordered_config_fields() -> None:
-    """Annotated keyword-capable constructor parameters become fields."""
+    """Only annotated keyword-capable constructor parameters become fields."""
     config_type = cast(Any, FactoryConfig.model_from(Product))
 
     assert config_type.__name__ == "ProductConfig"
@@ -217,25 +223,6 @@ def test_model_from_type_creates_ordered_config_fields() -> None:
     assert config_type.model_fields["count"].is_required()
     assert config_type.model_fields["label"].default == "default"
     assert config_type.model_fields["enabled"].default is True
-
-
-def test_model_from_rejects_mismatched_init_annotations() -> None:
-    """Unannotated constructor parameters cannot be represented by a factory."""
-
-    class UntypedTarget:
-        def __init__(self, value: int, label="default") -> None:
-            self.value = value
-            self.label = label
-
-    with pytest.raises(
-        TypeError,
-        match=(
-            r"UntypedTarget.__init__ type annotations do not match its signature "
-            r"\(missing annotations for: label\); cannot create a model factory "
-            r"config"
-        ),
-    ):
-        FactoryConfig.model_from(UntypedTarget)
 
 
 def test_cli_help_omits_generated_factory_attributes(
@@ -337,240 +324,6 @@ def test_model_from_instance_clones_unhashable_attribute_defaults() -> None:
     assert source.payload.value == 1
     assert first.payload is not second.payload
     assert first.payload is not source.payload
-
-
-def test_model_factory_wraps_current_values_and_resolves_them() -> None:
-    """Selected values define concrete factory annotations and defaults."""
-
-    class Config(BaseConfig):
-        product: Product
-
-    product = Product(4, "source", enabled=False)
-    source = Config(product=product)
-
-    factory_type = source.model_factory()
-
-    assert factory_type.__name__ == "ConfigFactory"
-    assert issubclass(factory_type, Config)
-    field = factory_type.model_fields["product"]
-    assert issubclass(field.annotation, FactoryConfig)
-    assert isinstance(field.default, FactoryConfig)
-    assert field.default.model_dump() == {
-        "count": 4,
-        "label": "source",
-        "enabled": False,
-    }
-    factory = factory_type()
-    assert isinstance(factory.product, FactoryConfig)
-    assert factory.product.model_dump() == {
-        "count": 4,
-        "label": "source",
-        "enabled": False,
-    }
-    assert source.product is product
-    resolved = factory.model_resolve()
-    assert isinstance(resolved.product, Product)
-    assert resolved.product.count == 4
-    assert resolved.product.label == "source"
-    assert resolved.product.enabled is False
-    assert factory.model_factory() is factory_type
-
-
-def test_model_factory_selects_fields_by_name() -> None:
-    """One-argument selectors receive names and choose a field subset."""
-
-    class Config(BaseConfig):
-        product: Product
-        child: Child
-
-    selected: list[str] = []
-
-    def select(field_name: str) -> bool:
-        selected.append(field_name)
-        return field_name == "child"
-
-    product = Product(1)
-    source = Config(product=product, child=Child(2))
-    factory_type = source.model_factory(select)
-    factory = factory_type(product=product)
-
-    assert selected == ["product", "child"]
-    assert factory.product is product
-    assert isinstance(factory.child, FactoryConfig)
-    assert factory_type.model_fields["product"].annotation is Product
-
-
-def test_model_factory_selects_fields_by_field_info() -> None:
-    """Two-argument selectors receive source field information."""
-
-    class Config(BaseConfig):
-        product: Product = Field(description="factorize")
-        child: Child = Field(description="retain")
-
-    observed: dict[str, Any] = {}
-
-    def select(field_name: str, field: FieldInfo) -> bool:
-        observed[field_name] = field
-        return field.description == "factorize"
-
-    source = Config(product=Product(1), child=Child(2))
-    factory_type = source.model_factory(select)
-    factory = factory_type(child=source.child)
-
-    assert observed == Config.model_fields
-    assert isinstance(factory.product, FactoryConfig)
-    assert factory.child is source.child
-    assert factory_type.model_fields["product"].description == "factorize"
-
-
-def test_model_factory_controls_inherited_annotation_metadata() -> None:
-    """Derived fields clear metadata by default or preserve it on request."""
-
-    class Config(BaseConfig):
-        product: Annotated[Product, "marker"] = Field(description="Product.")
-
-    source = Config(product=Product(1))
-
-    cleared_type = source.model_factory()
-    preserved_type = source.model_factory(clear_metadata=False)
-
-    source_field = Config.model_fields["product"]
-    cleared_field = cleared_type.model_fields["product"]
-    preserved_field = preserved_type.model_fields["product"]
-    assert source_field.metadata == ["marker"]
-    assert cleared_field.metadata == []
-    assert preserved_field.metadata == ["marker"]
-    assert cleared_field.description == "Product."
-    assert preserved_field.description == "Product."
-    with pytest.raises(TypeError, match="positional argument"):
-        cast(Any, source).model_factory(None, False)
-
-
-@pytest.mark.parametrize(
-    "selector",
-    [
-        pytest.param(lambda: True, id="zero"),
-        pytest.param(
-            lambda _name, _field, _value: True,
-            id="three",
-        ),
-        pytest.param(lambda *_args: True, id="variadic"),
-        pytest.param(lambda *, name: bool(name), id="keyword-only"),
-    ],
-)
-def test_model_factory_rejects_invalid_selector_signatures(selector: Any) -> None:
-    """Selectors must declare exactly one or two positional parameters."""
-
-    class Config(BaseConfig):
-        child: Child
-
-    with pytest.raises(
-        TypeError,
-        match="selector must declare exactly one or two positional parameters",
-    ):
-        Config(child=Child(1)).model_factory(selector)
-
-
-def test_model_factory_propagates_selector_errors() -> None:
-    """Selector failures retain their original exception."""
-
-    class Config(BaseConfig):
-        child: Child
-
-    def select(_field_name: str) -> bool:
-        raise RuntimeError("selection failed")
-
-    with pytest.raises(RuntimeError, match="selection failed"):
-        Config(child=Child(1)).model_factory(select)
-
-
-def test_model_factory_requires_constructible_generated_config() -> None:
-    """Missing captured constructor values fail during factorization."""
-
-    class OpaqueTarget:
-        def __init__(self, value: int) -> None:
-            self.hidden = value
-
-    class Config(BaseConfig):
-        target: OpaqueTarget
-
-    with pytest.raises(ValidationError, match="value"):
-        Config(target=OpaqueTarget(1)).model_factory()
-
-
-def test_model_factory_leaves_existing_factories_unchanged() -> None:
-    """Already-factorized and unselected models return their existing type."""
-
-    class Config(BaseConfig):
-        child: ChildConfig
-
-    source = Config(child=ChildConfig(value=1))
-
-    assert source.model_factory() is Config
-    assert source.model_factory(lambda _name: False) is Config
-
-
-def test_model_factory_preserves_aliases_and_validates_instances() -> None:
-    """Generated subclasses retain field metadata and model validation."""
-    validator_calls = 0
-
-    class Config(BaseConfig):
-        product: Any = Field(alias="PRODUCT", description="Configured product.")
-
-        @field_validator("product")
-        @classmethod
-        def count_validation(cls, value: Any) -> Any:
-            nonlocal validator_calls
-            validator_calls += 1
-            return value
-
-    source = Config(PRODUCT=Product(3))
-    calls_after_construction = validator_calls
-    factory_type = source.model_factory()
-
-    assert validator_calls == calls_after_construction
-    field = factory_type.model_fields["product"]
-    assert field.alias == "PRODUCT"
-    assert field.description == "Configured product."
-    assert isinstance(field.default, FactoryConfig)
-    factory = factory_type()
-    assert validator_calls == calls_after_construction + 1
-    assert isinstance(factory.product, FactoryConfig)
-
-
-def test_model_factory_resets_model_config_to_base_defaults() -> None:
-    """Generated subclasses own a copy of the base configuration defaults."""
-
-    class Config(
-        BaseConfig,
-        cli_parse_args=True,
-        cli_prefix="types",
-        frozen=False,
-    ):
-        product: Product
-
-    factory_type = Config(product=Product(1)).model_factory()
-
-    assert factory_type.model_config == BaseConfig.model_config
-    assert factory_type.model_config is not BaseConfig.model_config
-    assert factory_type.model_config.get("cli_parse_args") is None
-    assert factory_type.model_config.get("cli_prefix") == ""
-    assert factory_type.model_config["frozen"] is True
-
-
-def test_model_factory_does_not_construct_generated_model() -> None:
-    """Generating a model type does not trigger its settings sources."""
-
-    class Config(BaseConfig, cli_parse_args=True):
-        product: Product = Field(default_factory=lambda: Product(1))
-
-    source = Config()
-
-    factory_type = source.model_factory()
-
-    default = factory_type.model_fields["product"].default
-    assert isinstance(default, FactoryConfig)
-    assert default.count == 1
 
 
 def test_materialize_validates_values_and_calls_target() -> None:
@@ -677,7 +430,7 @@ def test_model_resolve_uses_instance_values() -> None:
     assert resolved.primary.value == 10
     assert isinstance(source.primary, ChildConfig)
     assert source.primary.value == 10
-    assert resolved.model_config["frozen"] is True
+    assert resolved.model_config["frozen"] is True  # type: ignore[truthy-function]
     assert resolved.primary_value() == 10
     assert source.label == "custom!"
     assert resolved.label == "custom!!"
@@ -798,9 +551,9 @@ def test_model_resolve_transforms_nested_models_and_containers() -> None:
     )
     source = source.model_copy(
         update={
-            "keyed": {ChildConfig(value=8): "child"},
-            "unique": {ChildConfig(value=9)},
-            "frozen_unique": frozenset({ChildConfig(value=10)}),
+            "keyed": {ChildConfig(value=8): "child"},  # type: ignore[dict-item]
+            "unique": {ChildConfig(value=9)},  # type: ignore[dict-item]
+            "frozen_unique": frozenset({ChildConfig(value=10)}),  # type: ignore[dict-item]
         }
     )
 

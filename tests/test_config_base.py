@@ -590,6 +590,19 @@ def test_class_defaults_source_is_public() -> None:
     assert ClassDefaultsSource(Config, {"unknown"})() == {}
 
 
+def test_class_defaults_source_supports_arbitrary_type_annotations() -> None:
+    """Defaults with arbitrary type annotations retain the model configuration."""
+
+    class External:
+        pass
+
+    class Config(BaseConfig):
+        value: External | None = None
+
+    assert Config().value is None
+    assert ClassDefaultsSource(Config)() == {"value": None}
+
+
 def test_model_field_sources_track_defaults_and_init() -> None:
     """Field sources identify both resolution and inheritance coordinates."""
 

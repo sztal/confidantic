@@ -21,8 +21,10 @@ from typing import (
 from docstring_parser import DocstringParam, DocstringStyle, compose, parse
 from pydantic import (
     BaseModel,
+    ConfigDict,
     Discriminator,
     PrivateAttr,
+    PydanticUserError,
     TypeAdapter,
     ValidationInfo,
     field_validator,
@@ -203,7 +205,18 @@ class ClassDefaultsSource(PydanticBaseSettingsSource):
                 self.defaults[key] = _FACTORY_DEFAULT
             else:
                 default = field.get_default(call_default_factory=False)
-                self.defaults[key] = TypeAdapter(field.annotation).dump_python(default)
+                adapter_config = (
+                    ConfigDict(arbitrary_types_allowed=True)
+                    if settings_cls.model_config.get("arbitrary_types_allowed")
+                    else None
+                )
+                try:
+                    adapter = TypeAdapter(field.annotation, config=adapter_config)
+                except PydanticUserError as error:
+                    if error.code != "type-adapter-config-unused":
+                        raise
+                    adapter = TypeAdapter(field.annotation)
+                self.defaults[key] = adapter.dump_python(default)
 
     def get_field_value(
         self, field: FieldInfo, field_name: str
@@ -288,6 +301,7 @@ class BaseConfig(BaseSettings):
     model_config: ClassVar[SettingsConfigDict] = SettingsConfigDict(
         frozen=True,
         validate_default=True,
+        arbitrary_types_allowed=True,
         env_nested_delimiter="__",
         env_ignore_empty=True,
         env_parse_enums=True,

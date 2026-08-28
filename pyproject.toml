@@ -179,6 +179,9 @@ run.omit = [
 run.patch = [
   "subprocess",
 ]
+run.disable_warnings = [
+  "module-not-imported",
+]
 run.source_dirs = [
   "tests",
 ]

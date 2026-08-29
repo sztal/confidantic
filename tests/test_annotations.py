@@ -11,6 +11,7 @@ from confidantic.annotations import (
     AbsolutePath,
     Call,
     Import,
+    Make,
     get_proper_args,
 )
 
@@ -100,3 +101,22 @@ def test_call_rejects_mappings_without_a_call_target() -> None:
 
     with raises(ValidationError, match="Call mappings require an '@call' key"):
         Settings.model_validate({"value": {"answer": 42}})
+
+
+def test_make_recursively_evaluates_nested_call_mappings() -> None:
+    """Make evaluates nested call mappings while preserving ordinary mappings."""
+
+    class Settings(BaseModel):
+        value: Make[dict[str, list[dict[str, int]]]]
+
+    settings = Settings.model_validate(
+        {
+            "value": {
+                "items": [
+                    {"@call": "builtins:dict", "answer": 42},
+                ]
+            }
+        }
+    )
+
+    assert settings.value == {"items": [{"answer": 42}]}

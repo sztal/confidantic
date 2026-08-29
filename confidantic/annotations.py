@@ -26,6 +26,7 @@ __all__ = (
     "CommaDelimited",
     "Delimited",
     "Import",
+    "Make",
     "NoDecode",
     "SemiColonDelimited",
     "WhitespaceDelimited",
@@ -156,21 +157,23 @@ class Import(Generic[T]):
 
 def _call(value: Any, handler: Callable) -> Any:
     if isinstance(value, Mapping):
-        if "@call" not in value:
-            errmsg = "Call mappings require an '@call' key"
-            raise ValueError(errmsg)
-        target = value["@call"]
-        args = value.get("@args", ())
-        kwargs = {
-            key: item for key, item in value.items() if key not in {"@args", "@call"}
-        }
-        callable_value = (
-            import_from_string(target, Callable) if isinstance(target, str) else target
-        )
-        return handler(callable_value(*args, **kwargs))
+        return handler(_call_mapping(value))
     if isinstance(value, str):
         return handler(import_from_string(value, Callable)())
     return handler(value())
+
+
+def _call_mapping(value: Mapping[Any, Any]) -> Any:
+    if "@call" not in value:
+        errmsg = "Call mappings require an '@call' key"
+        raise ValueError(errmsg)
+    target = value["@call"]
+    args = value.get("@args", ())
+    kwargs = {key: item for key, item in value.items() if key not in {"@args", "@call"}}
+    callable_value = (
+        import_from_string(target, Callable) if isinstance(target, str) else target
+    )
+    return callable_value(*args, **kwargs)
 
 
 class Call(Generic[T]):
@@ -191,5 +194,33 @@ class Call(Generic[T]):
 # -----------------------------------------------------------------------------------
 # Make directive annotation
 # -----------------------------------------------------------------------------------
-# TODO: the same as 'Call' but build nested objects from mappings if they contain the
-# special '@call' key
+
+
+def _make(value: Any, handler: Callable) -> Any:
+    def build(item: Any) -> Any:
+        if isinstance(item, Mapping):
+            built = {key: build(value) for key, value in item.items()}
+            return _call_mapping(built) if "@call" in built else built
+        if isinstance(item, list):
+            return [build(value) for value in item]
+        if isinstance(item, tuple):
+            return tuple(build(value) for value in item)
+        return item
+
+    if isinstance(value, Mapping):
+        return handler(build(value))
+    return _call(value, handler)
+
+
+class Make(Generic[T]):
+    """A Pydantic annotation that evaluates nested call mappings.
+
+    The annotation behaves like :class:`Call` for a callable or import string.
+    Mappings and sequences are otherwise traversed recursively; mappings with an
+    ``@call`` key are invoked after their arguments and keyword values are built.
+    """
+
+    @classmethod
+    def __class_getitem__(cls, item_type: type[T]) -> Any:
+        """Return a make annotation whose result is validated as ``item_type``."""
+        return Annotated[item_type, WrapValidator(_make)]

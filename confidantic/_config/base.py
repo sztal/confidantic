@@ -615,7 +615,7 @@ class BaseConfig(BaseSettings):
             Instance of a cached ``<Source>Resolved`` subclass whose declared
             concrete factory config annotations are replaced by target types.
         """
-        from confidantic.config.factory import _model_resolve
+        from confidantic._config.factory import _model_resolve
 
         return cast(Self, _model_resolve(self))
 

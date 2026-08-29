@@ -368,7 +368,7 @@ def test_format_methods_require_optional_dependencies(
     def missing_module(_: str) -> Any:
         raise ImportError
 
-    monkeypatch.setattr("confidantic.config.base.import_module", missing_module)
+    monkeypatch.setattr("confidantic._config.base.import_module", missing_module)
     target: Any = (
         FormatConfig if method_name.startswith("model_validate") else FormatConfig()
     )

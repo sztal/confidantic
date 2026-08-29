@@ -5,7 +5,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any, ClassVar, Self
 
-from confidantic.config.base import BaseConfig
+from confidantic._config.base import BaseConfig
 
 __all__ = ("BaseContext",)
 

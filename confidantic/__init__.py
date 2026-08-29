@@ -3,10 +3,7 @@
 __all__ = (
     "BaseConfig",
     "BaseContext",
-    "BaseLogging",
-    "BasePaths",
     "ClassDefaultsSource",
-    "DynamicPath",
     "FactoryConfig",
     "SettingsConfigDict",
     "__version__",
@@ -14,15 +11,12 @@ __all__ = (
 
 import importlib.metadata
 
-from confidantic.config import (
+from confidantic._config import (
     BaseConfig,
     BaseContext,
-    BasePaths,
     ClassDefaultsSource,
-    DynamicPath,
     FactoryConfig,
     SettingsConfigDict,
 )
-from confidantic.logging import BaseLogging
 
 __version__ = importlib.metadata.version("confidantic")

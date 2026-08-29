@@ -11,7 +11,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import AfterValidator, BeforeValidator, PositiveInt
 
-from .config import BaseConfig, SettingsConfigDict
+from ._config import BaseConfig, SettingsConfigDict
 
 __all__ = ("BaseLogging",)
 

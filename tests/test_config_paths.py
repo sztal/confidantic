@@ -7,7 +7,8 @@ import pytest
 from pydantic import ValidationError
 from pydantic_settings import EnvSettingsSource
 
-from confidantic import BasePaths, DynamicPath, SettingsConfigDict
+from confidantic import SettingsConfigDict
+from confidantic.paths import BasePaths, DynamicPath
 
 
 def _build_paths(

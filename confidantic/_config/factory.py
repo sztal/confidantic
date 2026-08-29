@@ -33,7 +33,7 @@ from pydantic_core import (
     core_schema,
 )
 
-from confidantic.config.base import (
+from confidantic._config.base import (
     _DISABLE_CLI_PARSE_ARGS,
     BaseConfig,
 )

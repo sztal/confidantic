@@ -9,7 +9,7 @@ Run cells in VS Code or execute this file. The rotating log is written to
 import os
 from pathlib import Path
 
-from confidantic import BaseLogging
+from confidantic.logging import BaseLogging
 
 # %% Declare console and file settings -----------------------------------------------
 

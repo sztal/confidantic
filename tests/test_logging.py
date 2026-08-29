@@ -8,7 +8,8 @@ from unittest.mock import patch
 import pytest
 from pydantic import ValidationError
 
-from confidantic import BaseLogging, SettingsConfigDict
+from confidantic import SettingsConfigDict
+from confidantic.logging import BaseLogging
 
 
 class AppLogging(BaseLogging):

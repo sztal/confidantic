@@ -15,6 +15,7 @@ EXAMPLES_DIRECTORY = Path(__file__).parents[1] / "examples"
         ("basic.py", []),
         ("cli.py", ["--name", "command-line", "--number", "5"]),
         ("configurable.py", []),
+        ("context.py", []),
         (
             "delimited.py",
             [

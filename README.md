@@ -52,6 +52,7 @@ guides with the details:
 - [`delimited.py`](examples/delimited.py): comma-delimited lists and flexible `key=value` mappings from environment values or standard Pydantic Settings CLI input.
 - [`nested.py`](examples/nested.py), [`factory.py`](examples/factory.py), and [`factory_gated.py`](examples/factory_gated.py): nested, path-aware, and constructor-derived configuration.
 - [`configurable.py`](examples/configurable.py): instance configuration for configurable classes.
+- [`context.py`](examples/context.py): context-local configuration and scoped overrides.
 - [`logging_config.py`](examples/logging_config.py): logging configuration.
 - [`directive_annotations.py`](examples/directive_annotations.py) and [`serialization.py`](examples/serialization.py): trusted portable documents and YAML/TOML serialization.
 

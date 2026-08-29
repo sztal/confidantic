@@ -9,25 +9,25 @@ from pydantic_core import CoreSchema, core_schema
 
 from confidantic._config.base import BaseConfig, ConfigModelDict
 
-__all__ = ("BasePaths", "DynamicPath")
+__all__ = ("BasePaths", "ExtensiblePath")
 
 if TYPE_CHECKING:
-    from pathlib import Path as _DynamicPathBase
+    from pathlib import Path as _ExtensiblePathBase
 
 else:
-    _DynamicPathBase = type(Path())
+    _ExtensiblePathBase = type(Path())
 
 
-class DynamicPath(_DynamicPathBase):
+class ExtensiblePath(_ExtensiblePathBase):
     """Concrete path with callable ``joinpath`` shorthand.
 
     Calling an instance appends the supplied path segments and returns another
-    ``DynamicPath``. All standard :class:`pathlib.Path` operations remain
+    ``ExtensiblePath``. All standard :class:`pathlib.Path` operations remain
     available.
 
     Examples
     --------
-    >>> path = DynamicPath("data")
+    >>> path = ExtensiblePath("data")
     >>> path("raw", "items.json") == Path("data/raw/items.json")
     True
     """
@@ -53,7 +53,7 @@ class DynamicPath(_DynamicPathBase):
 
         Returns
         -------
-        DynamicPath
+        ExtensiblePath
                 Joined path.
         """
         return type(self)(self.joinpath(*pathsegments))
@@ -63,11 +63,14 @@ class BasePaths(BaseConfig):
     """Base configuration containing canonical filesystem paths.
 
     ``root`` is required. It is expanded and canonicalized first. Every other
-    relative path is joined to that root before being canonicalized. Absolute
-    paths bypass joining but are still canonicalized. Paths need not exist.
+    relative path is joined to that root before being canonicalized. A path
+    beginning with ``@field/`` resolves relative to a previously defined path
+    field or extra. Absolute paths bypass joining but are still canonicalized.
+    Paths need not exist.
 
-    Subclasses may declare additional ``DynamicPath`` fields. Undeclared path
-    values are accepted as Pydantic extra fields by default.
+    Subclasses may declare additional :class:`pathlib.Path`-compatible fields.
+    Their validated values are canonicalized to ``ExtensiblePath``. Undeclared
+    path values are accepted as Pydantic extra fields by default.
 
     Examples
     --------
@@ -78,9 +81,9 @@ class BasePaths(BaseConfig):
 
     model_config = ConfigModelDict(extra="allow", validate_default=True)
 
-    __pydantic_extra__: dict[str, DynamicPath] = Field(init=False)
+    __pydantic_extra__: dict[str, ExtensiblePath] = Field(init=False)
 
-    root: DynamicPath
+    root: ExtensiblePath
     """Root directory used to resolve relative path definitions."""
 
     @classmethod
@@ -89,37 +92,51 @@ class BasePaths(BaseConfig):
         invalid_fields = [
             name
             for name, field in cls.model_fields.items()
-            if field.annotation is not DynamicPath
+            if not isinstance(field.annotation, type)
+            or not issubclass(field.annotation, Path)
         ]
         if invalid_fields:
             fields = ", ".join(invalid_fields)
             raise TypeError(
-                f"{cls.__name__} fields must use DynamicPath annotations: {fields}"
+                f"{cls.__name__} fields must use Path-compatible annotations: {fields}"
             )
 
     @model_validator(mode="after")
     def _canonicalize_paths(self) -> Self:
         root = _canonicalize_path(self.root)
         object.__setattr__(self, "root", root)
+        anchors = {"root": root}
 
         for name in type(self).model_fields:
             if name == "root":
                 continue
             value = object.__getattribute__(self, name)
-            object.__setattr__(self, name, _canonicalize_path(value, root))
+            path = _canonicalize_path(value, root, anchors)
+            object.__setattr__(self, name, path)
+            anchors[name] = path
 
         if self.__pydantic_extra__ is not None:
             for name, value in self.__pydantic_extra__.items():
-                self.__pydantic_extra__[name] = _canonicalize_path(value, root)
+                path = _canonicalize_path(value, root, anchors)
+                self.__pydantic_extra__[name] = path
+                anchors[name] = path
 
         return self
 
 
 def _canonicalize_path(
-    path: DynamicPath,
-    root: DynamicPath | None = None,
-) -> DynamicPath:
+    path: ExtensiblePath,
+    root: ExtensiblePath | None = None,
+    anchors: dict[str, ExtensiblePath] | None = None,
+) -> ExtensiblePath:
     expanded = path.expanduser()
     if root is not None and not expanded.is_absolute():
-        expanded = root.joinpath(expanded)
-    return DynamicPath(expanded.resolve(strict=False))
+        anchor, *segments = expanded.parts
+        if anchor.startswith("@"):
+            anchor_name = anchor[1:]
+            if anchors is None or anchor_name not in anchors:
+                raise ValueError(f"Unknown or forward path anchor: {anchor}")
+            expanded = anchors[anchor_name].joinpath(*segments)
+        else:
+            expanded = root.joinpath(expanded)
+    return ExtensiblePath(expanded.resolve(strict=False))

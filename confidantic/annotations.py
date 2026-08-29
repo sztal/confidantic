@@ -17,7 +17,6 @@ from pydantic.functional_validators import (
     AfterValidator,
     WrapValidator,
 )
-from pydantic_core import core_schema
 from pydantic_settings import NoDecode
 from typing_extensions import TypeVar as TypeVarWithDefault
 
@@ -77,28 +76,11 @@ def _resolve_absolute_path(value: Path) -> Path:
     return value.resolve()
 
 
-class AbsolutePath(Path, Generic[P]):
-    """A Pydantic annotation for resolved absolute paths.
-
-    Used without a type parameter, validates values as :class:`pathlib.Path`.
-    A path annotation can be provided to retain its validation, for example
-    ``AbsolutePath[FilePath]`` or ``AbsolutePath[DirectoryPath]``.
-    """
-
-    @classmethod
-    def __get_pydantic_core_schema__(
-        cls,
-        source_type: Any,
-        handler: Any,
-    ) -> core_schema.CoreSchema:
-        return core_schema.no_info_after_validator_function(
-            _resolve_absolute_path,
-            handler(Path),
-        )
-
-    def __class_getitem__(cls, path_type: type[P]) -> Any:
-        """Return an absolute-path annotation retaining ``path_type`` validation."""
-        return Annotated[path_type, AfterValidator(_resolve_absolute_path)]
+#: A Pydantic annotation for resolved absolute paths.
+#: Used without a type parameter, validates values as :class:`pathlib.Path`.
+#: A path annotation can be provided to retain its validation, for example
+#: ``AbsolutePath[FilePath]`` or ``AbsolutePath[DirectoryPath]``.
+AbsolutePath: TypeAlias = Annotated[P, AfterValidator(_resolve_absolute_path)]
 
 
 # ------------------------------------------------------------------------------------

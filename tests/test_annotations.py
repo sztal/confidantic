@@ -23,6 +23,13 @@ from confidantic.annotations import (
 )
 
 
+def test_absolute_path_annotation_accepts_path_values() -> None:
+    """The default annotation is assignable from ordinary paths."""
+    path: AbsolutePath = Path(".")
+
+    assert path == Path(".")
+
+
 def test_get_proper_args_extracts_types_from_nested_annotations() -> None:
     """Concrete types are extracted from unions and annotated types."""
     annotation = list[Annotated[int | str, "metadata"]]

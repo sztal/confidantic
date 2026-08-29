@@ -3,40 +3,47 @@ from pathlib import Path
 from typing import (
     Annotated,
     Any,
+    Generic,
     TypeVar,
     get_args,
     get_origin,
 )
 
 from pydantic import (
+    DirectoryPath,
+    FilePath,
     Json,
     JsonValue,
     NegativeFloat,
     NegativeInt,
+    NewPath,
     NonNegativeFloat,
     NonNegativeInt,
     NonPositiveFloat,
     NonPositiveInt,
     PositiveFloat,
     PositiveInt,
+    SocketPath,
 )
 from pydantic.functional_validators import (
     AfterValidator,
-    BeforeValidator,
     WrapValidator,
 )
+from pydantic_core import core_schema
 from pydantic_settings import NoDecode
+from typing_extensions import TypeVar as TypeVarWithDefault
 
 __all__ = (
     "AbsolutePath",
-    "AfterValidator",
-    "BeforeValidator",
     "CommaDelimited",
     "Delimited",
+    "DirectoryPath",
+    "FilePath",
     "Json",
     "JsonValue",
     "NegativeFloat",
     "NegativeInt",
+    "NewPath",
     "NoDecode",
     "NonNegativeFloat",
     "NonNegativeInt",
@@ -45,12 +52,13 @@ __all__ = (
     "PositiveFloat",
     "PositiveInt",
     "SemiColonDelimited",
+    "SocketPath",
     "WhitespaceDelimited",
     "get_proper_args",
 )
 
 T = TypeVar("T")
-AbsolutePath = Annotated[Path, AfterValidator(Path.absolute)]
+P = TypeVarWithDefault("P", bound=Path, default=Path)
 
 
 def get_proper_args(annotation: Any) -> Iterator[type]:
@@ -77,6 +85,39 @@ def get_proper_args(annotation: Any) -> Iterator[type]:
         return
     for arg in get_args(annotation):
         yield from get_proper_args(arg)
+
+
+# -----------------------------------------------------------------------------------
+# AbsolutePath
+# ----------------------------------------------------------------------------------
+
+
+def _resolve_absolute_path(value: Path) -> Path:
+    return value.resolve()
+
+
+class AbsolutePath(Path, Generic[P]):
+    """A Pydantic annotation for resolved absolute paths.
+
+    Used without a type parameter, validates values as :class:`pathlib.Path`.
+    A path annotation can be provided to retain its validation, for example
+    ``AbsolutePath[FilePath]`` or ``AbsolutePath[DirectoryPath]``.
+    """
+
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls,
+        source_type: Any,
+        handler: Any,
+    ) -> core_schema.CoreSchema:
+        return core_schema.no_info_after_validator_function(
+            _resolve_absolute_path,
+            handler(Path),
+        )
+
+    def __class_getitem__(cls, path_type: type[P]) -> Any:
+        """Return an absolute-path annotation retaining ``path_type`` validation."""
+        return Annotated[path_type, AfterValidator(_resolve_absolute_path)]
 
 
 # ------------------------------------------------------------------------------------

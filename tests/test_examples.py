@@ -15,6 +15,10 @@ EXAMPLES_DIRECTORY = Path(__file__).parents[1] / "examples"
         ("basic.py", []),
         ("cli.py", ["--name", "command-line", "--number", "5"]),
         ("configurable.py", []),
+        (
+            "delimited.py",
+            ["--ports", "[8000, 9000]", "--features", "api", "--features", "worker"],
+        ),
         ("directive_annotations.py", []),
         ("factory.py", []),
         ("factory_gated.py", []),

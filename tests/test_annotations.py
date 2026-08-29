@@ -8,6 +8,7 @@ import pytest
 from pydantic import BaseModel, DirectoryPath, FilePath, TypeAdapter, ValidationError
 from pytest import MonkeyPatch, raises
 
+from confidantic import BaseConfig
 from confidantic.annotations import (
     AbsolutePath,
     Call,
@@ -90,6 +91,44 @@ def test_delimited_annotations_preserve_item_validation_errors() -> None:
 
     with raises(ValidationError):
         adapter.validate_python("one, two")
+
+
+@pytest.mark.parametrize(
+    ("arguments", "expected"),
+    [
+        (["--values", "[1, 2]"], [1, 2]),
+        (["--values", "1", "--values", "2"], [1, 2]),
+        (["--values", "1,2"], [1, 2]),
+    ],
+)
+def test_delimited_annotations_support_standard_cli_list_formats(
+    arguments: list[str],
+    expected: list[int],
+) -> None:
+    """Delimited annotations retain Pydantic Settings CLI list formats."""
+
+    class Settings(BaseConfig, cli_parse_args=True):
+        values: CommaDelimited[list[int]]
+
+    assert Settings(_cli_parse_args=arguments).values == expected
+
+
+def test_delimited_annotations_parse_environment_and_dotenv_values(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Delimited annotations parse comma-separated environment and dotenv values."""
+
+    class Settings(BaseConfig, env_prefix="DELIMITED_"):
+        values: CommaDelimited[list[int]]
+
+    monkeypatch.setenv("DELIMITED_VALUES", "1,2")
+    assert Settings().values == [1, 2]
+
+    monkeypatch.delenv("DELIMITED_VALUES")
+    dotenv_path = tmp_path / ".env"
+    dotenv_path.write_text("DELIMITED_VALUES=1,2\n", encoding="utf-8")
+    assert Settings(_env_file=dotenv_path).values == [1, 2]
 
 
 def test_import_resolves_import_strings_and_serializes_objects() -> None:

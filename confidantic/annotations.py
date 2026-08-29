@@ -1,3 +1,4 @@
+import json
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import (
@@ -115,6 +116,10 @@ def Delimited(sep: str | None = None) -> type[Sequence]:
         except Exception as e1:
             try:
                 if isinstance(value, str):
+                    try:
+                        return handler(json.loads(value))
+                    except Exception:
+                        pass
                     values = [v.strip() for v in value.split(sep)]
                     return handler(values)
                 raise e1

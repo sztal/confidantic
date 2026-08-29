@@ -49,6 +49,7 @@ The [examples/](examples/) directory contains runnable, VS Code cell-delimited
 guides with the details:
 
 - [`basic.py`](examples/basic.py), [`cli.py`](examples/cli.py), and [`multilevel_cli.py`](examples/multilevel_cli.py): settings sources, environment variables, and CLI input.
+- [`delimited.py`](examples/delimited.py): comma-delimited environment values and JSON-style, repeated, or lazy CLI list input.
 - [`nested.py`](examples/nested.py), [`factory.py`](examples/factory.py), and [`factory_gated.py`](examples/factory_gated.py): nested, path-aware, and constructor-derived configuration.
 - [`configurable.py`](examples/configurable.py): instance configuration for configurable classes.
 - [`logging_config.py`](examples/logging_config.py): logging configuration.

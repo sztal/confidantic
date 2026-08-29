@@ -98,33 +98,35 @@ class AppConfig(BaseConfig):
 	)
 ```
 
-## Model strings
+## Make directives
 
-Pass `context={"model_string": True}` to `model_dump()` or
-`model_dump_json()` to add an import string for each serialized `BaseConfig`:
-
-```python
-config.model_dump(context={"model_string": True})
-# {"__model__": "package.module:AppConfig", "retries": 3}
-```
-
-The special key is configured with `model_import_string` in
-`SettingsConfigDict` and defaults to `"__model__"`. Set it to `None` to exclude
-a configuration class from this output. Nested `BaseConfig` instances receive
-their own marker; ordinary Pydantic models do not.
-
-Marked configuration data can be deserialized polymorphically with
-`model_validate()` or `model_validate_json()`:
+Pass `context={"make": True}` to `model_dump()` or `model_dump_json()` to add
+a `Make` directive for each serialized `BaseConfig`:
 
 ```python
-config = BaseConfig.model_validate(data)
+config.model_dump(context={"make": True})
+# {"@call": "package.module:AppConfig", "retries": 3}
 ```
 
-The imported model must be a `BaseConfig` subclass of the requested type;
-otherwise validation raises an error. For validation through a base type, every
-participating configuration must use the same `model_import_string` key, which
-defaults to `"__model__"`. This feature is intended for trusted serialized data:
-the marker controls an import. Direct model construction is not polymorphic.
+Nested `BaseConfig` instances receive their own directive; ordinary Pydantic
+models do not.
+
+Deserialize the result with the `Make` annotation:
+
+```python
+from confidantic.annotations import Make
+from pydantic import BaseModel
+
+
+class Container(BaseModel):
+	config: Make[AppConfig]
+
+
+config = Container.model_validate({"config": data}).config
+```
+
+This feature is intended for trusted serialized data: the directive controls an
+import and invokes the selected class constructor.
 
 ## YAML and TOML
 
@@ -139,7 +141,7 @@ Both methods accept the same model-dump filtering, context, and serialization
 options as `model_dump_json()` and return a string:
 
 ```python
-yaml_text = config.model_dump_yaml(context={"model_string": True})
+yaml_text = config.model_dump_yaml(context={"make": True})
 toml_text = config.model_dump_toml(exclude_none=True)
 
 loaded_yaml = AppConfig.model_validate_yaml(yaml_text)
@@ -147,7 +149,7 @@ loaded_toml = AppConfig.model_validate_toml(toml_text)
 ```
 
 YAML uses block formatting and preserves model field order, including a leading
-model string. TOML has no null representation, so use `exclude_none=True` when
+Make directive. TOML has no null representation, so use `exclude_none=True` when
 the configuration can contain `None` values. The YAML loader requires the YAML
 extra; TOML loading uses Python's standard library. Both loaders forward their
-validation options to `model_validate()`, including model-string dispatch.
+validation options to `model_validate()`.

@@ -120,3 +120,27 @@ def test_make_recursively_evaluates_nested_call_mappings() -> None:
     )
 
     assert settings.value == {"items": [{"answer": 42}]}
+
+
+def test_make_preserves_nested_constructed_values() -> None:
+    """Make passes values built by nested directives to normal validation."""
+
+    class Child(BaseModel):
+        value: int
+
+    class Parent(BaseModel):
+        child: Make[Child]
+
+    class Settings(BaseModel):
+        parent: Make[Parent]
+
+    settings = Settings.model_validate(
+        {
+            "parent": {
+                "@call": Parent,
+                "child": {"@call": Child, "value": 42},
+            }
+        }
+    )
+
+    assert settings.parent.child == Child(value=42)

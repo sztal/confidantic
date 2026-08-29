@@ -1150,27 +1150,22 @@ class BaseConfig(BaseSettings):
         return model_type.model_validate(data, by_alias=True, by_name=True)
 
     @model_serializer(mode="wrap")
-    def _serialize_with_model_string(
+    def _serialize_with_make(
         self,
         handler: Any,
         info: SerializationInfo,
     ) -> Any:
         data = handler(self)
         context = info.context
-        marker_key = self.model_config.get("model_import_string")
-        if (
-            not isinstance(context, Mapping)
-            or not context.get("model_string")
-            or marker_key is None
-        ):
+        if not isinstance(context, Mapping) or not context.get("make"):
             return data
         if not isinstance(data, Mapping):  # pragma: no cover
             raise TypeError("Model serialization must produce a mapping")
-        if marker_key in data:
+        if "@call" in data:
             raise ValueError(
-                f"Model string key {marker_key!r} conflicts with serialized data"
+                "Make directive key '@call' conflicts with serialized data"
             )
-        return {marker_key: get_import_string(self), **data}
+        return {"@call": get_import_string(self), **data}
 
     @field_validator("*", mode="before", check_fields=False)
     @classmethod

@@ -209,7 +209,9 @@ def _make(value: Any, handler: Callable) -> Any:
 
     if isinstance(value, Mapping):
         return handler(build(value))
-    return _call(value, handler)
+    if isinstance(value, str) or callable(value):
+        return _call(value, handler)
+    return handler(value)
 
 
 class Make(Generic[T]):

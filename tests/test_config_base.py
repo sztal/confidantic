@@ -32,6 +32,7 @@ from rich.console import Console
 from rich.table import Table
 
 from confidantic import BaseConfig, ClassDefaultsSource, SettingsConfigDict
+from confidantic.annotations import Make
 
 
 class DocumentedConfig(BaseConfig):
@@ -80,8 +81,8 @@ class StrictPolymorphicConfig(PolymorphicConfig):
 class PolymorphicContainer(BaseModel):
     """Pydantic model with polymorphic configuration fields."""
 
-    item: PolymorphicConfig
-    items: list[PolymorphicConfig]
+    item: Make[PolymorphicConfig]
+    items: list[Make[PolymorphicConfig]]
 
 
 class FormatConfig(BaseConfig):
@@ -122,27 +123,27 @@ def test_base_config_can_be_instantiated() -> None:
     assert BaseConfig().model_dump() == {}
 
 
-def test_model_string_serialization_is_opt_in_and_recursive() -> None:
-    """Dump context adds ordered import strings to nested configurations."""
+def test_make_serialization_is_opt_in_and_recursive() -> None:
+    """Dump context adds ordered Make directives to nested configurations."""
     config = SerializedParentConfig()
 
     assert config.model_dump() == {"child": {"value": 1}}
-    assert config.model_dump(context={"model_string": True}) == {
-        "__model__": "tests.test_config_base:SerializedParentConfig",
+    assert config.model_dump(context={"make": True}) == {
+        "@call": "tests.test_config_base:SerializedParentConfig",
         "child": {
-            "__model__": "tests.test_config_base:SerializedChildConfig",
+            "@call": "tests.test_config_base:SerializedChildConfig",
             "value": 1,
         },
     }
-    assert config.model_dump_json(context={"model_string": True}) == (
-        '{"__model__":"tests.test_config_base:SerializedParentConfig",'
-        '"child":{"__model__":"tests.test_config_base:SerializedChildConfig",'
+    assert config.model_dump_json(context={"make": True}) == (
+        '{"@call":"tests.test_config_base:SerializedParentConfig",'
+        '"child":{"@call":"tests.test_config_base:SerializedChildConfig",'
         '"value":1}}'
     )
 
 
-def test_model_string_serialization_honors_model_config() -> None:
-    """Configuration classes can rename or disable their serialization marker."""
+def test_make_serialization_ignores_legacy_marker_configuration() -> None:
+    """Make directives consistently use the reserved @call key."""
 
     class CustomConfig(BaseConfig):
         model_config = SettingsConfigDict(model_import_string="__type__")
@@ -157,22 +158,25 @@ def test_model_string_serialization_honors_model_config() -> None:
     class ParentConfig(BaseConfig):
         child: CustomConfig = CustomConfig()
 
-    assert CustomConfig().model_dump(context={"model_string": True}) == {
-        "__type__": "tests.test_config_base:test_model_string_serialization_honors_model_config.<locals>.CustomConfig",
+    assert CustomConfig().model_dump(context={"make": True}) == {
+        "@call": "tests.test_config_base:test_make_serialization_ignores_legacy_marker_configuration.<locals>.CustomConfig",
         "value": 1,
     }
-    assert DisabledConfig().model_dump(context={"model_string": True}) == {"value": 1}
-    assert ParentConfig().model_dump(context={"model_string": True}) == {
-        "__model__": "tests.test_config_base:test_model_string_serialization_honors_model_config.<locals>.ParentConfig",
+    assert DisabledConfig().model_dump(context={"make": True}) == {
+        "@call": "tests.test_config_base:test_make_serialization_ignores_legacy_marker_configuration.<locals>.DisabledConfig",
+        "value": 1,
+    }
+    assert ParentConfig().model_dump(context={"make": True}) == {
+        "@call": "tests.test_config_base:test_make_serialization_ignores_legacy_marker_configuration.<locals>.ParentConfig",
         "child": {
-            "__type__": "tests.test_config_base:test_model_string_serialization_honors_model_config.<locals>.CustomConfig",
+            "@call": "tests.test_config_base:test_make_serialization_ignores_legacy_marker_configuration.<locals>.CustomConfig",
             "value": 1,
         },
     }
 
 
-def test_model_string_serialization_preserves_dump_options() -> None:
-    """Markers remain independent from aliases and exclusions."""
+def test_make_serialization_preserves_dump_options() -> None:
+    """Make directives remain independent from aliases and exclusions."""
 
     class Config(BaseConfig):
         value: int = Field(1, alias="VALUE")
@@ -180,9 +184,9 @@ def test_model_string_serialization_preserves_dump_options() -> None:
     assert Config(VALUE=1).model_dump(
         by_alias=True,
         exclude={"value"},
-        context={"model_string": True},
+        context={"make": True},
     ) == {
-        "__model__": "tests.test_config_base:test_model_string_serialization_preserves_dump_options.<locals>.Config"
+        "@call": "tests.test_config_base:test_make_serialization_preserves_dump_options.<locals>.Config"
     }
 
 
@@ -212,15 +216,15 @@ def test_model_import_string_rejects_input_key_collisions(
     assert error.value.errors()[0]["type"] == "model_import_invalid"
 
 
-def test_model_import_string_deserializes_concrete_subclasses() -> None:
-    """Marked mappings and JSON resolve to their concrete configuration types."""
+def test_make_deserializes_concrete_subclasses() -> None:
+    """Make mappings and JSON resolve to their concrete configuration types."""
     config = PolymorphicChildConfig(name="child", count=2)
-    data = config.model_dump(context={"model_string": True})
+    data = config.model_dump(context={"make": True})
 
-    resolved = PolymorphicConfig.model_validate(data)
-    resolved_json = PolymorphicConfig.model_validate_json(
-        config.model_dump_json(context={"model_string": True})
-    )
+    resolved = PolymorphicContainer.model_validate({"item": data, "items": []}).item
+    resolved_json = PolymorphicContainer.model_validate_json(
+        '{"item":' + config.model_dump_json(context={"make": True}) + ',"items":[]}'
+    ).item
 
     assert type(resolved) is PolymorphicChildConfig
     assert resolved == config
@@ -228,17 +232,17 @@ def test_model_import_string_deserializes_concrete_subclasses() -> None:
     assert resolved_json == config
 
 
-def test_model_import_string_deserializes_nested_subclasses() -> None:
-    """Fields and containers retain concrete types selected by their markers."""
+def test_make_deserializes_nested_subclasses() -> None:
+    """Fields and containers retain concrete types selected by Make directives."""
     child = PolymorphicChildConfig(name="child", count=2)
     sibling = PolymorphicSiblingConfig(name="sibling", enabled=False)
 
     resolved = PolymorphicContainer.model_validate(
         {
-            "item": child.model_dump(context={"model_string": True}),
+            "item": child.model_dump(context={"make": True}),
             "items": [
-                child.model_dump(context={"model_string": True}),
-                sibling.model_dump(context={"model_string": True}),
+                child.model_dump(context={"make": True}),
+                sibling.model_dump(context={"make": True}),
             ],
         }
     )
@@ -277,21 +281,19 @@ def test_model_import_string_rejects_invalid_targets(
 
 def test_model_import_string_rejects_unrelated_configurations() -> None:
     """Markers cannot select configuration types outside the requested hierarchy."""
-    data = SerializedChildConfig().model_dump(context={"model_string": True})
+    data = SerializedChildConfig().model_dump(context={"make": True})
 
     with pytest.raises(ValidationError) as error:
-        PolymorphicConfig.model_validate(data)
+        PolymorphicContainer.model_validate({"item": data, "items": []})
 
-    assert error.value.errors()[0]["type"] == "model_import_type_mismatch"
+    assert error.value.errors()[0]["type"] == "model_type"
 
 
 def test_model_import_string_is_removed_before_subtype_validation() -> None:
     """Marker metadata does not violate a concrete subtype's extra-field policy."""
-    data = StrictPolymorphicConfig(name="strict").model_dump(
-        context={"model_string": True}
-    )
+    data = StrictPolymorphicConfig(name="strict").model_dump(context={"make": True})
 
-    resolved = PolymorphicConfig.model_validate(data)
+    resolved = PolymorphicContainer.model_validate({"item": data, "items": []}).item
 
     assert type(resolved) is StrictPolymorphicConfig
 
@@ -302,19 +304,19 @@ def test_model_dump_yaml_forwards_model_dump_options() -> None:
     config = FormatConfig()
 
     result = config.model_dump_yaml(
-        context={"model_string": True},
+        context={"make": True},
         exclude_none=True,
         indent=4,
     )
 
     assert result == (
-        "__model__: tests.test_config_base:FormatConfig\n"
+        "'@call': tests.test_config_base:FormatConfig\n"
         "name: example\n"
         "nested:\n"
         "    value: 1\n"
     )
     assert yaml.safe_load(result) == {
-        "__model__": "tests.test_config_base:FormatConfig",
+        "@call": "tests.test_config_base:FormatConfig",
         "name": "example",
         "nested": {"value": 1},
     }
@@ -325,18 +327,18 @@ def test_model_dump_toml_forwards_model_dump_options() -> None:
     config = FormatConfig()
 
     result = config.model_dump_toml(
-        context={"model_string": True},
+        context={"make": True},
         exclude_none=True,
     )
 
     assert result == (
-        '__model__ = "tests.test_config_base:FormatConfig"\n'
+        '"@call" = "tests.test_config_base:FormatConfig"\n'
         'name = "example"\n\n'
         "[nested]\n"
         "value = 1\n"
     )
     assert tomllib.loads(result) == {
-        "__model__": "tests.test_config_base:FormatConfig",
+        "@call": "tests.test_config_base:FormatConfig",
         "name": "example",
         "nested": {"value": 1},
     }
@@ -376,25 +378,32 @@ def test_model_dump_toml_requires_nulls_to_be_excluded() -> None:
         FormatConfig().model_dump_toml()
 
 
-def test_model_validate_yaml_parses_and_dispatches_model_strings() -> None:
-    """YAML validation parses content before resolving its concrete model type."""
+def test_make_deserializes_yaml_output() -> None:
+    """YAML output can be parsed and resolved through a Make annotation."""
     config = PolymorphicChildConfig(name="child", count=2)
+    yaml = cast(Any, import_module("yaml"))
 
-    resolved = PolymorphicConfig.model_validate_yaml(
-        config.model_dump_yaml(context={"model_string": True})
-    )
+    resolved = PolymorphicContainer.model_validate(
+        {
+            "item": yaml.safe_load(config.model_dump_yaml(context={"make": True})),
+            "items": [],
+        }
+    ).item
 
     assert type(resolved) is PolymorphicChildConfig
     assert resolved == config
 
 
-def test_model_validate_toml_parses_and_dispatches_model_strings() -> None:
-    """TOML validation parses content before resolving its concrete model type."""
+def test_make_deserializes_toml_output() -> None:
+    """TOML output can be parsed and resolved through a Make annotation."""
     config = PolymorphicChildConfig(name="child", count=2)
 
-    resolved = PolymorphicConfig.model_validate_toml(
-        config.model_dump_toml(context={"model_string": True})
-    )
+    resolved = PolymorphicContainer.model_validate(
+        {
+            "item": tomllib.loads(config.model_dump_toml(context={"make": True})),
+            "items": [],
+        }
+    ).item
 
     assert type(resolved) is PolymorphicChildConfig
     assert resolved == config

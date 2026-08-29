@@ -1,10 +1,12 @@
 import json
+import re
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import (
     Annotated,
     Any,
     Generic,
+    TypeAlias,
     TypeVar,
     get_args,
     get_origin,
@@ -28,6 +30,7 @@ __all__ = (
     "Delimited",
     "Import",
     "Make",
+    "Map",
     "NoDecode",
     "SemiColonDelimited",
     "TabDelimited",
@@ -133,6 +136,41 @@ CommaDelimited = Delimited(",")
 SemiColonDelimited = Delimited(";")
 WhitespaceDelimited = Delimited()
 TabDelimited = Delimited("\t")
+
+
+# -----------------------------------------------------------------------------------
+# Dict-like string mappings
+# -----------------------------------------------------------------------------------
+
+
+def _dict_like(value: Any, handler: Callable) -> Any:
+    try:
+        return handler(value)
+    except Exception as e1:
+        try:
+            if isinstance(value, str):
+                try:
+                    return handler(json.loads(value))
+                except Exception:
+                    pass
+                pairs = [
+                    item.strip().split("=", maxsplit=1)
+                    for item in re.split(
+                        r",\s*|\s+(?=[^,\s=]+\s*=)",
+                        value.strip().rstrip(",").rstrip(),
+                    )
+                ]
+                if any(len(pair) != 2 or not pair[0] for pair in pairs):
+                    raise ValueError(
+                        "Map values must contain key=value pairs separated by commas or whitespace"
+                    )
+                return handler({key.strip(): item.strip() for key, item in pairs})
+            raise e1
+        except Exception as e2:
+            raise e1 from e2
+
+
+Map: TypeAlias = Annotated[T, NoDecode, WrapValidator(_dict_like)]
 
 
 # -----------------------------------------------------------------------------------

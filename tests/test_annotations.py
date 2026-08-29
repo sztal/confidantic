@@ -16,6 +16,7 @@ from confidantic.annotations import (
     Delimited,
     Import,
     Make,
+    Map,
     SemiColonDelimited,
     WhitespaceDelimited,
     get_proper_args,
@@ -129,6 +130,74 @@ def test_delimited_annotations_parse_environment_and_dotenv_values(
     dotenv_path = tmp_path / ".env"
     dotenv_path.write_text("DELIMITED_VALUES=1,2\n", encoding="utf-8")
     assert Settings(_env_file=dotenv_path).values == [1, 2]
+
+
+def test_map_annotations_parse_strings_and_mappings() -> None:
+    """Map annotations parse flexible key-value strings and preserve mappings."""
+    adapter = TypeAdapter(Map[dict[str, int]])
+
+    assert adapter.validate_python("first=1, second=2") == {"first": 1, "second": 2}
+    assert adapter.validate_python("first=1, second=2, third=3,") == {
+        "first": 1,
+        "second": 2,
+        "third": 3,
+    }
+    assert adapter.validate_python("first=1 second=2") == {"first": 1, "second": 2}
+    assert adapter.validate_python('{"first": 1, "second": 2}') == {
+        "first": 1,
+        "second": 2,
+    }
+    assert adapter.validate_python({"first": 1, "second": 2}) == {
+        "first": 1,
+        "second": 2,
+    }
+
+
+def test_map_annotations_preserve_mapping_validation_errors() -> None:
+    """Map values retain validation errors for invalid keys and values."""
+    adapter = TypeAdapter(Map[dict[str, int]])
+
+    with raises(ValidationError):
+        adapter.validate_python("first=one")
+    with raises(ValidationError):
+        adapter.validate_python("first")
+
+
+@pytest.mark.parametrize(
+    ("arguments", "expected"),
+    [
+        (["--values", '{"first": 1, "second": 2}'], {"first": 1, "second": 2}),
+        (["--values", "first=1,second=2"], {"first": 1, "second": 2}),
+    ],
+)
+def test_map_annotations_support_standard_cli_mapping_formats(
+    arguments: list[str],
+    expected: dict[str, int],
+) -> None:
+    """Map annotations retain Pydantic Settings CLI mapping formats."""
+
+    class Settings(BaseConfig, cli_parse_args=True):
+        values: Map[dict[str, int]]
+
+    assert Settings(_cli_parse_args=arguments).values == expected
+
+
+def test_map_annotations_parse_environment_and_dotenv_values(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Map annotations parse key-value environment and dotenv values."""
+
+    class Settings(BaseConfig, env_prefix="DICT_LIKE_"):
+        values: Map[dict[str, int]]
+
+    monkeypatch.setenv("DICT_LIKE_VALUES", "first=1,second=2")
+    assert Settings().values == {"first": 1, "second": 2}
+
+    monkeypatch.delenv("DICT_LIKE_VALUES")
+    dotenv_path = tmp_path / ".env"
+    dotenv_path.write_text("DICT_LIKE_VALUES=first=1,second=2\n", encoding="utf-8")
+    assert Settings(_env_file=dotenv_path).values == {"first": 1, "second": 2}
 
 
 def test_import_resolves_import_strings_and_serializes_objects() -> None:

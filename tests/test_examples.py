@@ -17,7 +17,16 @@ EXAMPLES_DIRECTORY = Path(__file__).parents[1] / "examples"
         ("configurable.py", []),
         (
             "delimited.py",
-            ["--ports", "[8000, 9000]", "--features", "api", "--features", "worker"],
+            [
+                "--ports",
+                "[8000, 9000]",
+                "--features",
+                "api",
+                "--features",
+                "worker",
+                "--options",
+                "retries=3,mode=debug",
+            ],
         ),
         ("directive_annotations.py", []),
         ("factory.py", []),

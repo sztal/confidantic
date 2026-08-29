@@ -11,7 +11,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import AfterValidator, BeforeValidator, PositiveInt
 
-from ._config import BaseConfig, SettingsConfigDict
+from ._config import BaseConfig, ConfigModelDict
 
 __all__ = ("BaseLogging",)
 
@@ -46,7 +46,7 @@ class BaseLogging(BaseConfig):
     variable prefix, dotenv file, and CLI parsing policy.
     """
 
-    model_config = SettingsConfigDict(dotenv_filtering="only_existing")
+    model_config = ConfigModelDict(dotenv_filtering="only_existing")
 
     stream: str = "ext://sys.stderr"
     """The stream to which logging output will be sent."""

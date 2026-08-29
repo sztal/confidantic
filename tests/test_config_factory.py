@@ -6,7 +6,8 @@ from typing import Annotated, Any, cast, get_args
 import pytest
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
-from confidantic import BaseConfig, FactoryConfig, SettingsConfigDict
+from confidantic import BaseConfig, FactoryConfig
+from confidantic import ConfigModelDict as ConfigModelDict
 from confidantic.annotations import Make
 
 _UNTYPED_DEFAULT = object()
@@ -68,7 +69,7 @@ class NestedModel(BaseModel):
 class ResolvableConfig(BaseConfig):
     """Configuration exercising recursive factory resolution."""
 
-    model_config = SettingsConfigDict(frozen=True)
+    model_config = ConfigModelDict(frozen=True)
 
     primary: ChildConfig = Field(
         default_factory=lambda: ChildConfig(value=1),

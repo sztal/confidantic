@@ -69,7 +69,7 @@ from confidantic.utils import (
     is_runtime_jupyterlike,
 )
 
-__all__ = ("BaseConfig", "ClassDefaultsSource", "SettingsConfigDict")
+__all__ = ("BaseConfig", "ClassDefaultsSource", "ConfigModelDict")
 
 _FieldSource = tuple[
     type[PydanticBaseSettingsSource],
@@ -100,7 +100,7 @@ _DISABLE_CLI_PARSE_ARGS: ContextVar[bool] = ContextVar(
 )
 
 
-class SettingsConfigDict(PydanticSettingsConfigDict, total=False):
+class ConfigModelDict(PydanticSettingsConfigDict, total=False):
     """Configuration options for :class:`BaseConfig`.
 
     Attributes
@@ -206,7 +206,7 @@ class BaseConfig(BaseSettings):
     the replacement.
     """
 
-    model_config: ClassVar[SettingsConfigDict] = SettingsConfigDict(
+    model_config: ClassVar[ConfigModelDict] = ConfigModelDict(
         frozen=True,
         env_nested_delimiter="__",
         env_ignore_empty=True,

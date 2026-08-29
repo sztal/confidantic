@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any, Self
 from pydantic import Field, GetCoreSchemaHandler, model_validator
 from pydantic_core import CoreSchema, core_schema
 
-from confidantic._config.base import BaseConfig, SettingsConfigDict
+from confidantic._config.base import BaseConfig, ConfigModelDict
 
 __all__ = ("BasePaths", "DynamicPath")
 
@@ -76,7 +76,7 @@ class BasePaths(BaseConfig):
     True
     """
 
-    model_config = SettingsConfigDict(extra="allow", validate_default=True)
+    model_config = ConfigModelDict(extra="allow", validate_default=True)
 
     __pydantic_extra__: dict[str, DynamicPath] = Field(init=False)
 

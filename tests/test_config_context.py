@@ -7,7 +7,7 @@ import pytest
 from pydantic import Field, ValidationError, field_validator
 from pydantic_settings import EnvSettingsSource, InitSettingsSource
 
-from confidantic import SettingsConfigDict
+from confidantic import ConfigModelDict as ConfigModelDict
 from confidantic.context import BaseContext
 
 
@@ -45,7 +45,7 @@ def test_current_lazily_resolves_and_retains_settings_sources(
     """The first lookup resolves settings once and retains provenance."""
 
     class EnvironmentContext(BaseContext):
-        model_config = SettingsConfigDict(env_prefix="APP_")
+        model_config = ConfigModelDict(env_prefix="APP_")
 
         value: int = 1
 

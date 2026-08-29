@@ -57,11 +57,11 @@ recursively frozen. A subclass that intentionally requires field reassignment
 can opt out:
 
 ```python
-from confidantic import BaseConfig, SettingsConfigDict
+from confidantic import BaseConfig, ConfigModelDict
 
 
 class MutableAppConfig(BaseConfig):
-	model_config = SettingsConfigDict(frozen=False)
+	model_config = ConfigModelDict(frozen=False)
 
 	retries: int = 3
 ```
@@ -90,7 +90,7 @@ Set `docstring_set_attributes_section=False` to retain an `@attrs` marker
 without replacing it:
 
 ```python
-from confidantic import BaseConfig, SettingsConfigDict
+from confidantic import BaseConfig, ConfigModelDict
 
 
 class AppConfig(BaseConfig):
@@ -100,7 +100,7 @@ class AppConfig(BaseConfig):
 	----------
 	@attrs
 
-	model_config = SettingsConfigDict(
+	model_config = ConfigModelDict(
 		docstring_set_attributes_section=False,
 	)
 ```

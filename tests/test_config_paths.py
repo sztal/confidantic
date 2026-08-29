@@ -7,7 +7,7 @@ import pytest
 from pydantic import ValidationError
 from pydantic_settings import EnvSettingsSource
 
-from confidantic import SettingsConfigDict
+from confidantic import ConfigModelDict as ConfigModelDict
 from confidantic.paths import BasePaths, DynamicPath
 
 
@@ -134,7 +134,7 @@ def test_environment_paths_are_resolved_and_retain_source(
     """Environment strings use normal settings resolution before canonicalization."""
 
     class EnvironmentPaths(BasePaths):
-        model_config = SettingsConfigDict(env_prefix="APP_")
+        model_config = ConfigModelDict(env_prefix="APP_")
 
         data: DynamicPath
 

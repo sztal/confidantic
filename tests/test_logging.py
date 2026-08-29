@@ -8,14 +8,14 @@ from unittest.mock import patch
 import pytest
 from pydantic import ValidationError
 
-from confidantic import SettingsConfigDict
+from confidantic import ConfigModelDict as ConfigModelDict
 from confidantic.logging import BaseLogging
 
 
 class AppLogging(BaseLogging):
     """Logging configuration with an application-owned environment prefix."""
 
-    model_config = SettingsConfigDict(env_prefix="APP_LOG_")
+    model_config = ConfigModelDict(env_prefix="APP_LOG_")
 
 
 @pytest.mark.parametrize(

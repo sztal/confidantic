@@ -31,7 +31,8 @@ from pydantic_settings import (
 from rich.console import Console
 from rich.table import Table
 
-from confidantic import BaseConfig, ClassDefaultsSource, SettingsConfigDict
+from confidantic import BaseConfig, ClassDefaultsSource
+from confidantic import ConfigModelDict as ConfigModelDict
 from confidantic.annotations import Make
 
 
@@ -80,7 +81,7 @@ class PolymorphicSiblingConfig(PolymorphicConfig):
 class StrictPolymorphicConfig(PolymorphicConfig):
     """Concrete configuration that forbids undeclared fields."""
 
-    model_config = SettingsConfigDict(extra="forbid")
+    model_config = ConfigModelDict(extra="forbid")
 
 
 class PolymorphicContainer(BaseModel):
@@ -151,12 +152,12 @@ def test_make_serialization_ignores_legacy_marker_configuration() -> None:
     """Make directives consistently use the reserved @call key."""
 
     class CustomConfig(BaseConfig):
-        model_config = SettingsConfigDict(model_import_string="__type__")
+        model_config = ConfigModelDict(model_import_string="__type__")
 
         value: int = 1
 
     class DisabledConfig(BaseConfig):
-        model_config = SettingsConfigDict(model_import_string=None)
+        model_config = ConfigModelDict(model_import_string=None)
 
         value: int = 1
 
@@ -198,12 +199,12 @@ def test_make_serialization_preserves_dump_options() -> None:
 @pytest.mark.parametrize(
     "settings_config",
     [
-        SettingsConfigDict(model_import_string="VALUE"),
-        SettingsConfigDict(extra="allow"),
+        ConfigModelDict(model_import_string="VALUE"),
+        ConfigModelDict(extra="allow"),
     ],
 )
 def test_model_import_string_rejects_input_key_collisions(
-    settings_config: SettingsConfigDict,
+    settings_config: ConfigModelDict,
 ) -> None:
     """Input rejects fields or extras that use the reserved marker key."""
 
@@ -433,7 +434,7 @@ def test_frozen_config_retains_field_sources() -> None:
     """Frozen construction retains default and explicit field provenance."""
 
     class Config(BaseConfig):
-        model_config = SettingsConfigDict(frozen=True)
+        model_config = ConfigModelDict(frozen=True)
 
         value: str = "default"
 
@@ -449,7 +450,7 @@ def test_frozen_default_is_inherited_with_other_model_options() -> None:
     """Subclass model options preserve the inherited frozen default."""
 
     class Config(BaseConfig):
-        model_config = SettingsConfigDict(env_prefix="APP_")
+        model_config = ConfigModelDict(env_prefix="APP_")
 
         value: str = "initial"
 
@@ -462,7 +463,7 @@ def test_frozen_default_can_be_disabled() -> None:
     """Subclasses can opt into mutable configuration fields."""
 
     class Config(BaseConfig):
-        model_config = SettingsConfigDict(frozen=False)
+        model_config = ConfigModelDict(frozen=False)
 
         value: str = "initial"
 
@@ -726,7 +727,7 @@ def test_model_docstring_generation_can_be_disabled() -> None:
 
     class DisabledConfig(BaseConfig):
         __doc__ = original_docstring
-        model_config = SettingsConfigDict(
+        model_config = ConfigModelDict(
             docstring_set_attributes_section=False,
         )
 
@@ -1052,14 +1053,14 @@ def test_model_field_sources_track_mro_and_nested_priority(
     monkeypatch.setenv("PARENT_INHERITED", "environment")
 
     class ParentConfig(BaseConfig):
-        model_config = SettingsConfigDict(env_prefix="PARENT_")
+        model_config = ConfigModelDict(env_prefix="PARENT_")
 
         inherited: str = "parent-default"
         parent_default: str = "parent-default"
         options: dict[str, str] = Field(default={"parent": "default"})
 
     class ChildConfig(ParentConfig):
-        model_config = SettingsConfigDict(env_prefix="CHILD_")
+        model_config = ConfigModelDict(env_prefix="CHILD_")
 
         factory: list[str] = Field(default_factory=list)
 
@@ -1164,13 +1165,13 @@ def test_child_default_precedes_parent_environment(
     monkeypatch.setenv("PARENT_INHERITED", "from-parent-environment")
 
     class ParentConfig(BaseConfig):
-        model_config = SettingsConfigDict(env_prefix="PARENT_")
+        model_config = ConfigModelDict(env_prefix="PARENT_")
 
         value: str = "from-parent-default"
         inherited: str = "from-parent-default"
 
     class ChildConfig(ParentConfig):
-        model_config = SettingsConfigDict(env_prefix="CHILD_")
+        model_config = ConfigModelDict(env_prefix="CHILD_")
 
         value: str = "from-child-default"
 
@@ -1242,12 +1243,12 @@ def test_dotenv_filters_keys_by_each_mro_prefix(tmp_path: Path) -> None:
     )
 
     class ParentConfig(BaseConfig):
-        model_config = SettingsConfigDict(env_prefix="PARENT_")
+        model_config = ConfigModelDict(env_prefix="PARENT_")
 
         inherited: str
 
     class ChildConfig(ParentConfig):
-        model_config = SettingsConfigDict(env_prefix="CHILD_")
+        model_config = ConfigModelDict(env_prefix="CHILD_")
 
         value: str
 
@@ -1273,7 +1274,7 @@ def test_nested_values_merge_across_mro(
     )
 
     class ParentConfig(BaseConfig):
-        model_config = SettingsConfigDict(env_prefix="PARENT_")
+        model_config = ConfigModelDict(env_prefix="PARENT_")
 
         options: dict[str, str] = Field(
             default={
@@ -1283,7 +1284,7 @@ def test_nested_values_merge_across_mro(
         )
 
     class ChildConfig(ParentConfig):
-        model_config = SettingsConfigDict(env_prefix="CHILD_")
+        model_config = ConfigModelDict(env_prefix="CHILD_")
 
         options: dict[str, str] = Field(
             default={
@@ -1315,7 +1316,7 @@ def test_nested_model_defaults_merge_across_mro(
         options: Options = Field(default=Options(parent=1))
 
     class ChildConfig(ParentConfig):
-        model_config = SettingsConfigDict(env_prefix="CHILD_")
+        model_config = ConfigModelDict(env_prefix="CHILD_")
 
     assert ChildConfig().options == Options(child=2, parent=1)
 
@@ -1333,12 +1334,12 @@ def test_default_factory_blocks_parent_sources(
         return ["from-child-factory"]
 
     class ParentConfig(BaseConfig):
-        model_config = SettingsConfigDict(env_prefix="PARENT_")
+        model_config = ConfigModelDict(env_prefix="PARENT_")
 
         values: list[str] = Field(default=["from-parent-default"])
 
     class ChildConfig(ParentConfig):
-        model_config = SettingsConfigDict(env_prefix="CHILD_")
+        model_config = ConfigModelDict(env_prefix="CHILD_")
 
         values: list[str] = Field(default_factory=make_values)
 
@@ -1536,7 +1537,7 @@ def test_nested_model_partial_update_can_be_disabled() -> None:
         y: int = 2
 
     class Config(BaseConfig):
-        model_config = SettingsConfigDict(
+        model_config = ConfigModelDict(
             nested_model_default_partial_update=False,
         )
 

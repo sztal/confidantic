@@ -2,7 +2,6 @@
 
 __all__ = (
     "BaseConfig",
-    "BaseContext",
     "ClassDefaultsSource",
     "FactoryConfig",
     "SettingsConfigDict",
@@ -13,7 +12,6 @@ import importlib.metadata
 
 from confidantic._config import (
     BaseConfig,
-    BaseContext,
     ClassDefaultsSource,
     FactoryConfig,
     SettingsConfigDict,

@@ -16,9 +16,9 @@ The package requires Python 3.11 or later; the repository's default interpreter
 is Python 3.13.
 
 The core public APIs live in `confidantic/annotations.py`,
-`confidantic/logging.py`, `confidantic/paths.py`, and the package root. Internal
-configuration primitives live in `confidantic/_config/`, which contains base,
-context-local, and factory configuration.
+`confidantic/context.py`, `confidantic/logging.py`, `confidantic/paths.py`, and
+the package root. Internal configuration primitives live in
+`confidantic/_config/`, which contains base and factory configuration.
 
 ## Working conventions
 

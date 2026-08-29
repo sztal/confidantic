@@ -7,7 +7,8 @@ import pytest
 from pydantic import Field, ValidationError, field_validator
 from pydantic_settings import EnvSettingsSource, InitSettingsSource
 
-from confidantic import BaseContext, SettingsConfigDict
+from confidantic import SettingsConfigDict
+from confidantic.context import BaseContext
 
 
 class ExampleContext(BaseContext):

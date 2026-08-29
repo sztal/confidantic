@@ -1,6 +1,6 @@
 """Context-local configuration state."""
 
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any, ClassVar, Self
@@ -76,7 +76,7 @@ class BaseContext(BaseConfig):
 
     @classmethod
     @contextmanager
-    def temporary(cls, context: Self) -> Iterator[Self]:
+    def temporary(cls, context: Self) -> Generator[Self, None, None]:
         """Temporarily activate an instance in the current execution context.
 
         Parameters

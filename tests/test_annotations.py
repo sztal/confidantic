@@ -9,6 +9,7 @@ from pytest import MonkeyPatch, raises
 
 from confidantic.annotations import (
     AbsolutePath,
+    Call,
     Import,
     get_proper_args,
 )
@@ -69,3 +70,33 @@ def test_import_resolves_import_strings_and_serializes_objects() -> None:
     assert settings.model_dump() == {"callable": "builtins:len"}
     assert Settings(callable=len).model_dump_json() == '{"callable":"builtins:len"}'
     assert Settings.model_validate_json(settings.model_dump_json()).callable is len
+
+
+def test_call_invokes_callables_import_strings_and_call_mappings() -> None:
+    """Call annotations evaluate all supported directive forms before validation."""
+
+    class Settings(BaseModel):
+        value: Call[dict[str, int]]
+        items: Call[tuple[int, int]]
+
+    settings = Settings.model_validate(
+        {
+            "value": {"@call": "builtins:dict", "answer": 42},
+            "items": {"@call": "builtins:tuple", "@args": [[1, 2]]},
+        }
+    )
+
+    assert Settings(value=dict, items=lambda: (1, 2)).value == {}
+    assert Settings(value="builtins:dict", items=lambda: (1, 2)).value == {}
+    assert settings.value == {"answer": 42}
+    assert settings.items == (1, 2)
+
+
+def test_call_rejects_mappings_without_a_call_target() -> None:
+    """Call mappings must explicitly identify their callable target."""
+
+    class Settings(BaseModel):
+        value: Call[dict[str, int]]
+
+    with raises(ValidationError, match="Call mappings require an '@call' key"):
+        Settings.model_validate({"value": {"answer": 42}})

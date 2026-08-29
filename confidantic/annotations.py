@@ -1,4 +1,4 @@
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import (
     Annotated,
@@ -18,10 +18,11 @@ from pydantic_core import core_schema
 from pydantic_settings import NoDecode
 from typing_extensions import TypeVar as TypeVarWithDefault
 
-from confidantic.utils import get_import_string
+from confidantic.utils import get_import_string, import_from_string
 
 __all__ = (
     "AbsolutePath",
+    "Call",
     "CommaDelimited",
     "Delimited",
     "Import",
@@ -146,3 +147,49 @@ class Import(Generic[T]):
             ImportString[item_type],
             PlainSerializer(get_import_string, return_type=str),
         ]
+
+
+# -----------------------------------------------------------------------------------
+# Call directive annotation
+# -----------------------------------------------------------------------------------
+
+
+def _call(value: Any, handler: Callable) -> Any:
+    if isinstance(value, Mapping):
+        if "@call" not in value:
+            errmsg = "Call mappings require an '@call' key"
+            raise ValueError(errmsg)
+        target = value["@call"]
+        args = value.get("@args", ())
+        kwargs = {
+            key: item for key, item in value.items() if key not in {"@args", "@call"}
+        }
+        callable_value = (
+            import_from_string(target, Callable) if isinstance(target, str) else target
+        )
+        return handler(callable_value(*args, **kwargs))
+    if isinstance(value, str):
+        return handler(import_from_string(value, Callable)())
+    return handler(value())
+
+
+class Call(Generic[T]):
+    """A Pydantic annotation that evaluates a callable during validation.
+
+    The annotation accepts a callable, an import string identifying a callable, or a
+    mapping whose ``@call`` value identifies the callable. In mappings, ``@args``
+    supplies positional arguments and all remaining entries supply keyword arguments.
+    The result is then validated against the annotated type.
+    """
+
+    @classmethod
+    def __class_getitem__(cls, item_type: type[T]) -> Any:
+        """Return a call annotation whose result is validated as ``item_type``."""
+        return Annotated[item_type, WrapValidator(_call)]
+
+
+# -----------------------------------------------------------------------------------
+# Make directive annotation
+# -----------------------------------------------------------------------------------
+# TODO: the same as 'Call' but build nested objects from mappings if they contain the
+# special '@call' key

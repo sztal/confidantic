@@ -18,6 +18,16 @@ Install `confidantic` using [pip](https://pip.pypa.io/) or [uv](https://docs.ast
 pip install confidantic
 ```
 
+## Examples
+
+The [examples/](examples/) directory contains runnable, VS Code cell-delimited
+guides. Run a file as a script or open it in VS Code's Python Interactive Window.
+
+- `basic.py` and `cli.py`: settings sources, environment variables, and CLI input.
+- `directive_annotations.py` and `serialization.py`: trusted portable documents.
+- `factory.py` and `factory_gated.py`: constructor-derived configuration.
+- `logging_config.py` and `nested.py`: logging settings and nested Pydantic models.
+
 ## Development
 
 Install [uv](https://docs.astral.sh/uv/getting-started/installation/) and

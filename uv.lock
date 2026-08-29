@@ -158,6 +158,10 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+all = [
+    { name = "pyyaml" },
+    { name = "tomli-w" },
+]
 toml = [
     { name = "tomli-w" },
 ]
@@ -206,11 +210,13 @@ type = [
 requires-dist = [
     { name = "docstring-parser", specifier = ">=0.18" },
     { name = "pydantic-settings", specifier = ">=2.15" },
+    { name = "pyyaml", marker = "extra == 'all'", specifier = ">=6" },
     { name = "pyyaml", marker = "extra == 'yaml'", specifier = ">=6" },
     { name = "rich", specifier = ">=15" },
+    { name = "tomli-w", marker = "extra == 'all'", specifier = ">=1" },
     { name = "tomli-w", marker = "extra == 'toml'", specifier = ">=1" },
 ]
-provides-extras = ["toml", "yaml"]
+provides-extras = ["all", "toml", "yaml"]
 
 [package.metadata.requires-dev]
 dev = [

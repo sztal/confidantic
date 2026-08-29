@@ -41,12 +41,11 @@ dependencies = [
   "pydantic-settings>=2.15",
   "rich>=15",
 ]
-optional-dependencies.toml = [
-  "tomli-w>=1",
-]
-optional-dependencies.yaml = [
-  "pyyaml>=6",
-]
+
+optional-dependencies.all = [ "confidantic[toml,yaml]" ]
+optional-dependencies.toml = [ "tomli-w>=1" ]
+optional-dependencies.yaml = [ "pyyaml>=6" ]
+
 urls.Changelog = "https://sztal.github.io/confidantic/changelog"
 urls.Documentation = "https://sztal.github.io/confidantic/"
 urls.Homepage = "https://github.com/sztal/confidantic"

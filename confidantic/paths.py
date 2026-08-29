@@ -83,7 +83,7 @@ class BasePaths(BaseConfig):
 
     __pydantic_extra__: dict[str, ExtensiblePath] = Field(init=False)
 
-    root: ExtensiblePath
+    root: ExtensiblePath = ExtensiblePath(".")
     """Root directory used to resolve relative path definitions."""
 
     @classmethod

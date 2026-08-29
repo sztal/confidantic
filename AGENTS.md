@@ -6,15 +6,27 @@
 - Import package: `confidantic`
 - Source directory: `confidantic/`
 - Tests: `tests/`
+- Documentation: `docs/`
+- Runnable examples: `examples/`
+- Release notes: `changelog.d/` managed by Towncrier
 - Repository: https://github.com/sztal/confidantic
 
 Configuration and CLIs for Python projects based on Pydantic and Pydantic Settings.
+The package requires Python 3.11 or later; the repository's default interpreter
+is Python 3.13.
+
+The core public APIs live in `confidantic/annotations.py`,
+`confidantic/logging.py`, and `confidantic/config/`. The latter contains base
+configuration, context-local configuration, factory configuration, and paths.
 
 ## Working conventions
 
 Read and follow [STYLE.md](STYLE.md) before changing Python code or tests.
 `pyproject.toml` is the source of truth for dependency groups, Ruff, mypy,
 pytest, and coverage configuration.
+
+Set up the development environment with `uv sync --group dev`. Examples are
+executable scripts and are smoke-tested by `tests/test_examples.py`.
 
 Keep changes focused, preserve public behavior unless the task intentionally
 changes it, and add or update tests for behavior changes.
@@ -33,12 +45,13 @@ task-session notes.
 
 ## Validation
 
-Agents must use standard pytest for test validation and the Nox lint session for
-repository checks:
+Agents must run the Nox lint session before pytest. Pre-commit may apply
+formatting or lockfile updates, so linting after pytest can invalidate the test
+result:
 
 ```console
-uv run pytest
 uv run noxfile.py -s lint
+uv run pytest
 ```
 
 Use the coverage target only when coverage statistics are needed:
@@ -57,6 +70,7 @@ needed:
 ```console
 uv run noxfile.py -s lint
 uv run noxfile.py -s typecheck
+uv run noxfile.py -s docs
 ```
 
 ## Documentation

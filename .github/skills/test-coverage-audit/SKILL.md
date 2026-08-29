@@ -15,6 +15,7 @@ If the audit confirms an unresolved source bug, add a concise entry to
 behavior, and expected behavior. Do not fix it during a coverage audit and
 never track it in `wiki/`.
 
-Run `uv run pytest` after test changes and `uv run noxfile.py -s lint` before
-completion. Never run `make test`, `nox -s tests`, or
+Run `uv run noxfile.py -s lint` before `uv run pytest` after test changes;
+pre-commit can modify files. Pytest collects `confidantic/`, `tests/`, `docs/`,
+and `README.md`. Never run `make test`, `nox -s tests`, or
 `uv run noxfile.py -s tests`.

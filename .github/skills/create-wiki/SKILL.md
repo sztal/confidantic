@@ -14,6 +14,10 @@ Never create a wiki page to track a bug or task-session progress. Confirmed,
 unresolved source defects belong only in `../../../BUGS.md`; use a testing or
 bug-fixing workflow for those records.
 
+The repository's durable code references are `confidantic/` for the package,
+`tests/` for behavior, and `docs/` for published documentation. Verify claims
+against those paths and `pyproject.toml` rather than inferring them.
+
 ## Workflow
 
 1. Read the existing wiki page closest to the topic, when one exists, and the

@@ -11,6 +11,10 @@ behavior when possible, identify the controlling code path, and report facts,
 hypotheses, evidence, and a minimal fix direction. Do not modify existing
 source, tests, configuration, or documentation files during investigation.
 
+Use `uv run pytest` for a focused reproduction. The test suite also collects
+doctests from `confidantic/`, `docs/`, and `README.md`; examples are executable
+scripts under `examples/` and have smoke tests in `tests/test_examples.py`.
+
 Do not use `wiki/` as a bug tracker. Because this workflow is read-only, report
 confirmed unresolved defects for a follow-up task to record in
 `../../../BUGS.md`.

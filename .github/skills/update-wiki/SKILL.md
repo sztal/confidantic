@@ -14,6 +14,10 @@ Never add or retain bug-backlog entries in wiki pages. Confirmed, unresolved
 source defects belong only in `../../../BUGS.md`; use a testing or bug-fixing
 workflow for those records.
 
+Use `confidantic/` as the package source, `tests/` as the behavioral reference,
+and `docs/` as the published documentation surface. Check `pyproject.toml` for
+supported Python versions and tool configuration.
+
 ## Workflow
 
 1. Read the target wiki page and the project files most directly relevant to

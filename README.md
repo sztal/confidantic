@@ -27,6 +27,7 @@ guides. Run a file as a script or open it in VS Code's Python Interactive Window
 - `directive_annotations.py` and `serialization.py`: trusted portable documents.
 - `factory.py` and `factory_gated.py`: constructor-derived configuration.
 - `logging_config.py` and `nested.py`: logging settings and nested Pydantic models.
+- `multilevel_cli.py`: nested positional subcommands and command dispatch.
 
 ## Development
 

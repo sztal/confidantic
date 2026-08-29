@@ -18,6 +18,7 @@ EXAMPLES_DIRECTORY = Path(__file__).parents[1] / "examples"
         ("factory.py", []),
         ("factory_gated.py", []),
         ("logging_config.py", []),
+        ("multilevel_cli.py", ["project", "create", "demo", "--dry-run"]),
         ("nested.py", []),
         ("serialization.py", []),
     ],

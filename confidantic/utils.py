@@ -74,6 +74,8 @@ def import_from_string(import_string: str, type_hint: Any = Any) -> Any:
     ----------
     import_string
         The import string to import the object from.
+    type_hint
+        Type or type annotation the imported object must satisfy.
 
     Returns
     -------

@@ -44,7 +44,6 @@ class BaseLogging(BaseConfig):
 
     Concrete subclasses choose their settings sources, including any environment
     variable prefix, dotenv file, and CLI parsing policy.
-
     """
 
     model_config = SettingsConfigDict(dotenv_filtering="only_existing")

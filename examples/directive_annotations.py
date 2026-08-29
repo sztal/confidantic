@@ -1,10 +1,10 @@
 # %% Imports -------------------------------------------------------------------------
 
-"""Build values from importable callables and portable configuration documents.
+"""Validate ordinary values or build them from portable call directives.
 
-The `Call` and `Make` directives import and invoke callables. Only validate
-trusted configuration data, because a directive controls what Python imports
-and calls.
+`Call` and `Make` pass ordinary values to Pydantic validation. Their call
+directives import and invoke callables, so validate only trusted configuration
+data when a document can contain `@call`.
 """
 
 from collections.abc import Callable
@@ -51,6 +51,35 @@ call_config = CallConfig(
 print(call_config.greeting)
 
 assert call_config.greeting == "Hello, world!"
+
+
+# %% Validate ordinary values without a directive -----------------------------------
+
+
+# Without `@call`, `T` describes the value Pydantic validates and returns.
+class DirectValueConfig(BaseModel):
+    """Ordinary values that may also be supplied by trusted directives."""
+
+    retries: Call[int]
+    labels: Call[dict[str, str]]
+    timeout: Make[int]
+    metadata: Make[dict[str, str]]
+
+
+direct_values = DirectValueConfig(
+    retries=3,
+    labels={"environment": "development"},
+    timeout=30,
+    metadata={"owner": "platform"},
+)
+print(direct_values.model_dump())
+
+assert direct_values.model_dump() == {
+    "retries": 3,
+    "labels": {"environment": "development"},
+    "timeout": 30,
+    "metadata": {"owner": "platform"},
+}
 
 
 # %% Recursively make values inside nested mappings ---------------------------------

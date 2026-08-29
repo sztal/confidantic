@@ -1,4 +1,4 @@
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import (
     Annotated,
@@ -29,6 +29,7 @@ __all__ = (
     "Make",
     "NoDecode",
     "SemiColonDelimited",
+    "TabDelimited",
     "WhitespaceDelimited",
     "get_proper_args",
 )
@@ -126,6 +127,7 @@ def Delimited(sep: str | None = None) -> type[Sequence]:
 CommaDelimited = Delimited(",")
 SemiColonDelimited = Delimited(";")
 WhitespaceDelimited = Delimited()
+TabDelimited = Delimited("\t")
 
 
 # -----------------------------------------------------------------------------------
@@ -157,10 +159,10 @@ class Import(Generic[T]):
 
 def _call(value: Any, handler: Callable) -> Any:
     if isinstance(value, Mapping):
-        return handler(_call_mapping(value))
+        return handler(_call_mapping(value) if "@call" in value else value)
     if isinstance(value, str):
         return handler(import_from_string(value, Callable)())
-    return handler(value())
+    return handler(value() if callable(value) else value)
 
 
 def _call_mapping(value: Mapping[Any, Any]) -> Any:
@@ -169,6 +171,8 @@ def _call_mapping(value: Mapping[Any, Any]) -> Any:
         raise ValueError(errmsg)
     target = value["@call"]
     args = value.get("@args", ())
+    if not isinstance(args, Iterable):
+        raise ValueError("'@args' must be an iterable")
     kwargs = {key: item for key, item in value.items() if key not in {"@args", "@call"}}
     callable_value = (
         import_from_string(target, Callable) if isinstance(target, str) else target
@@ -179,10 +183,10 @@ def _call_mapping(value: Mapping[Any, Any]) -> Any:
 class Call(Generic[T]):
     """A Pydantic annotation that evaluates a callable during validation.
 
-    The annotation accepts a callable, an import string identifying a callable, or a
-    mapping whose ``@call`` value identifies the callable. In mappings, ``@args``
-    supplies positional arguments and all remaining entries supply keyword arguments.
-    The result is then validated against the annotated type.
+    Callables and import strings are evaluated before validation. A mapping whose
+    ``@call`` value identifies a callable is evaluated with ``@args`` as positional
+    arguments and its remaining entries as keyword arguments. Other inputs are
+    validated unchanged against the annotated type.
     """
 
     @classmethod
@@ -207,7 +211,7 @@ def _make(value: Any, handler: Callable) -> Any:
             return tuple(build(value) for value in item)
         return item
 
-    if isinstance(value, Mapping):
+    if isinstance(value, Mapping | list | tuple):
         return handler(build(value))
     if isinstance(value, str) or callable(value):
         return _call(value, handler)

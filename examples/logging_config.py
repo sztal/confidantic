@@ -16,7 +16,12 @@ from confidantic import BaseLogging
 
 # BaseLogging produces a standard logging.config.dictConfig-compatible setup.
 class AppLogging(BaseLogging, env_prefix="EXAMPLE_LOG_"):
-    """Logging settings for this application."""
+    """Logging settings for this application.
+
+    Attributes
+    ----------
+    @attrs
+    """
 
     file: Path = Path.cwd() / "application.log"
     """Rotating log file created in the current working directory."""

@@ -36,7 +36,12 @@ from confidantic.annotations import Make
 
 
 class DocumentedConfig(BaseConfig):
-    """Configuration with a source-level field description."""
+    """Configuration with a source-level field description.
+
+    Attributes
+    ----------
+    @attrs
+    """
 
     name: str
     """The name of the configuration."""
@@ -651,16 +656,15 @@ def test_model_info_uses_attribute_docstrings() -> None:
     )
 
 
-def test_model_docstring_replaces_attributes_and_preserves_other_sections() -> None:
-    """Generated attributes replace stale entries without losing other content."""
+def test_model_docstring_replaces_marker_and_preserves_other_sections() -> None:
+    """Generated attributes replace the marker without losing other content."""
 
     class Config(BaseConfig):
         """Current summary.
 
         Attributes
         ----------
-        stale
-            Remove this entry.
+        @attrs
 
         Notes
         -----
@@ -678,7 +682,7 @@ def test_model_docstring_replaces_attributes_and_preserves_other_sections() -> N
         ("primary", "Primary value."),
         ("secondary", None),
     ]
-    assert "stale" not in Config.__doc__
+    assert "@attrs" not in Config.__doc__
     assert "SECONDARY" not in Config.__doc__
     assert any(
         item.args == ["notes"] and item.description == "Keep this note."
@@ -686,16 +690,26 @@ def test_model_docstring_replaces_attributes_and_preserves_other_sections() -> N
     )
 
 
-def test_model_docstring_is_created_with_inherited_fields() -> None:
-    """Documented subclasses describe all effective model fields in order."""
+def test_model_docstring_marker_includes_inherited_fields() -> None:
+    """Marked subclasses describe all effective model fields in order."""
 
     class ParentConfig(BaseConfig):
-        """Parent configuration."""
+        """Parent configuration.
+
+        Attributes
+        ----------
+        @attrs
+        """
 
         inherited: str = Field(description="Inherited value.")
 
     class Config(ParentConfig):
-        """Child configuration."""
+        """Child configuration.
+
+        Attributes
+        ----------
+        @attrs
+        """
 
         direct: int = Field(description="Direct value.")
 
@@ -708,13 +722,7 @@ def test_model_docstring_is_created_with_inherited_fields() -> None:
 
 def test_model_docstring_generation_can_be_disabled() -> None:
     """The inherited opt-out leaves class docstrings unchanged."""
-    original_docstring = (
-        "Original documentation.\n\n"
-        "Attributes\n"
-        "----------\n"
-        "handwritten\n"
-        "    Keep this entry."
-    )
+    original_docstring = "Original documentation.\n\nAttributes\n----------\n@attrs"
 
     class DisabledConfig(BaseConfig):
         __doc__ = original_docstring
@@ -733,8 +741,8 @@ def test_model_docstring_generation_can_be_disabled() -> None:
     assert ChildConfig.__doc__ == "Child documentation."
 
 
-def test_model_docstring_generation_is_disabled_for_cli_models_by_default() -> None:
-    """CLI-enabled models preserve handwritten docstrings by default."""
+def test_model_docstring_without_marker_is_preserved_for_cli_models() -> None:
+    """CLI-enabled models preserve docstrings without an opt-in marker."""
     original_docstring = (
         "Original documentation.\n\n"
         "Attributes\n"
@@ -758,6 +766,33 @@ def test_model_docstring_generation_requires_a_docstring_by_default() -> None:
         value: str = Field(description="Generated description.")
 
     assert Config.__doc__ is None
+
+
+def test_model_docstring_without_marker_is_preserved() -> None:
+    """Documented models need a marker before an Attributes section is added."""
+
+    class Config(BaseConfig):
+        """Summary without an attributes marker."""
+
+        value: str = Field(description="Generated description.")
+
+    assert Config.__doc__ == "Summary without an attributes marker."
+
+
+def test_model_docstring_marker_is_replaced_for_cli_models() -> None:
+    """CLI-enabled models replace the marker when they explicitly opt in."""
+
+    class Config(BaseConfig, cli_parse_args=True):
+        """CLI summary.
+
+        Attributes
+        ----------
+        @attrs
+        """
+
+        value: str = Field(description="Generated description.")
+
+    assert _docstring_attributes(Config) == [("value", "Generated description.")]
 
 
 def test_fieldless_model_does_not_gain_an_attributes_section() -> None:

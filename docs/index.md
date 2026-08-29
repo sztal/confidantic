@@ -69,8 +69,8 @@ class MutableAppConfig(BaseConfig):
 
 ## Field documentation
 
-`BaseConfig` subclasses automatically replace their NumPy-style `Attributes`
-section with the effective model field names and descriptions:
+Add an `@attrs` marker to a `BaseConfig` subclass's NumPy-style `Attributes`
+section to replace it with effective model field names and descriptions:
 
 ```python
 from confidantic import BaseConfig
@@ -80,11 +80,15 @@ from pydantic import Field
 class AppConfig(BaseConfig):
 	"""Application configuration."""
 
+	Attributes
+	----------
+	@attrs
+
 	retries: int = Field(3, description="Number of retry attempts.")
 ```
 
-Set `docstring_set_attributes_section=False` to preserve a handwritten class
-docstring unchanged:
+Set `docstring_set_attributes_section=False` to retain an `@attrs` marker
+without replacing it:
 
 ```python
 from confidantic import BaseConfig, SettingsConfigDict
@@ -92,6 +96,10 @@ from confidantic import BaseConfig, SettingsConfigDict
 
 class AppConfig(BaseConfig):
 	"""Application configuration."""
+
+	Attributes
+	----------
+	@attrs
 
 	model_config = SettingsConfigDict(
 		docstring_set_attributes_section=False,

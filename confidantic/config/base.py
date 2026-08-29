@@ -106,9 +106,9 @@ class SettingsConfigDict(PydanticSettingsConfigDict, total=False):
     Attributes
     ----------
     docstring_set_attributes_section
-        Whether model fields replace the class docstring's ``Attributes``
-        section when a configuration subclass is created. ``None`` enables
-        this by default except for models with ``cli_parse_args=True``.
+        Whether model fields replace an ``@attrs`` marker in the class
+        docstring's ``Attributes`` section when a configuration subclass is
+        created. ``None`` enables marker replacement by default.
     model_import_string
         Key used for an optional model import string in serialized output.
         Set to ``None`` to disable the marker for a configuration class.
@@ -145,7 +145,6 @@ class ClassDefaultsSource(PydanticBaseSettingsSource):
     ) -> None:
         super().__init__(settings_cls, _init_state)
         self.defaults: dict[str, Any] = {}
-
         field_names = (
             get_annotations(settings_cls) if field_names is None else field_names
         )
@@ -201,10 +200,10 @@ class BaseConfig(BaseSettings):
     or :meth:`mutate` to update an instance in place. Set ``frozen=False`` in
     ``model_config`` when a subclass intentionally requires mutable fields.
 
-    Subclass docstrings receive a NumPy-style ``Attributes`` section generated
-    from the effective model field names and descriptions. Set
-    ``docstring_set_attributes_section=False`` in ``model_config`` to preserve
-    a handwritten class docstring unchanged.
+    Add an ``@attrs`` marker to a NumPy-style ``Attributes`` section to replace
+    that marker with the effective model field names and descriptions. Set
+    ``docstring_set_attributes_section=False`` in ``model_config`` to disable
+    the replacement.
     """
 
     model_config: ClassVar[SettingsConfigDict] = SettingsConfigDict(
@@ -275,15 +274,10 @@ class BaseConfig(BaseSettings):
     @classmethod
     def __pydantic_init_subclass__(cls, **kwargs: Any) -> None:
         super().__pydantic_init_subclass__(**kwargs)
-        set_attributes_section = cls.model_config.get(
-            "docstring_set_attributes_section"
-        )
-        if set_attributes_section is None:
-            set_attributes_section = (
-                cls.__doc__ is not None
-                and not cls.model_config.get("cli_parse_args", False)
-            )
-        if not set_attributes_section:
+        if (
+            cls.model_config.get("docstring_set_attributes_section") is False
+            or cls.__doc__ is None
+        ):
             return
 
         parsed = parse(cls.__doc__, style=DocstringStyle.NUMPYDOC)
@@ -292,7 +286,7 @@ class BaseConfig(BaseSettings):
             for item in parsed.meta
             if isinstance(item, DocstringParam) and item.args[0] == "attribute"
         ]
-        if not cls.model_fields and not attributes:
+        if not any(item.arg_name == "@attrs" for item in attributes):
             return
 
         parsed.meta = [item for item in parsed.meta if item not in attributes]

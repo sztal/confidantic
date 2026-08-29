@@ -3,13 +3,11 @@
 from pathlib import Path
 from typing import Annotated
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, DirectoryPath, FilePath, ValidationError
 from pytest import MonkeyPatch, raises
 
 from confidantic.annotations import (
     AbsolutePath,
-    DirectoryPath,
-    FilePath,
     get_proper_args,
 )
 

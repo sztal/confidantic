@@ -1260,6 +1260,20 @@ def test_dotenv_filters_keys_by_each_mro_prefix(tmp_path: Path) -> None:
     }
 
 
+def test_dotenv_ignores_undeclared_unprefixed_keys(tmp_path: Path) -> None:
+    """Unprefixed dotenv files provide declared fields without extra errors."""
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "VALUE=from-dotenv\nUNRELATED=ignored\n",
+        encoding="utf-8",
+    )
+
+    class Config(BaseConfig):
+        value: str
+
+    assert _build_config(Config, _env_file=env_file).value == "from-dotenv"
+
+
 def test_nested_values_merge_across_mro(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

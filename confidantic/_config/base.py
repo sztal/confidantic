@@ -222,7 +222,7 @@ class BaseConfig(BaseSettings):
         cli_use_class_docs_for_groups=True,
         use_attribute_docstrings=True,
         docstring_set_attributes_section=None,
-        dotenv_filtering="match_prefix",
+        dotenv_filtering="only_existing",
         model_import_string="__model__",
     )
 

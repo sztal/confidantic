@@ -9,6 +9,7 @@ from typing import (
     get_origin,
 )
 
+from pydantic import ImportString, PlainSerializer
 from pydantic.functional_validators import (
     AfterValidator,
     WrapValidator,
@@ -17,10 +18,13 @@ from pydantic_core import core_schema
 from pydantic_settings import NoDecode
 from typing_extensions import TypeVar as TypeVarWithDefault
 
+from confidantic.utils import get_import_string
+
 __all__ = (
     "AbsolutePath",
     "CommaDelimited",
     "Delimited",
+    "Import",
     "NoDecode",
     "SemiColonDelimited",
     "WhitespaceDelimited",
@@ -120,3 +124,25 @@ def Delimited(sep: str | None = None) -> type[Sequence]:
 CommaDelimited = Delimited(",")
 SemiColonDelimited = Delimited(";")
 WhitespaceDelimited = Delimited()
+
+
+# -----------------------------------------------------------------------------------
+# Import directive annotation
+# -----------------------------------------------------------------------------------
+
+
+class Import(Generic[T]):
+    """A Pydantic annotation for importable objects.
+
+    Values supplied as import strings are resolved using Pydantic's
+    :class:`pydantic.ImportString` validation. Serialized values are always emitted as
+    import strings, allowing models to be round-tripped through configuration files.
+    """
+
+    @classmethod
+    def __class_getitem__(cls, item_type: type[T]) -> Any:
+        """Return an import annotation constrained to ``item_type``."""
+        return Annotated[
+            ImportString[item_type],
+            PlainSerializer(get_import_string, return_type=str),
+        ]

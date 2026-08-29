@@ -1,5 +1,6 @@
 """Tests for public annotation helpers."""
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import Annotated
 
@@ -8,6 +9,7 @@ from pytest import MonkeyPatch, raises
 
 from confidantic.annotations import (
     AbsolutePath,
+    Import,
     get_proper_args,
 )
 
@@ -53,3 +55,17 @@ def test_absolute_path_retains_specialized_path_validation(tmp_path: Path) -> No
     assert settings.directory == directory_path.resolve()
     with raises(ValidationError):
         Settings.model_validate({"file": directory_path, "directory": file_path})
+
+
+def test_import_resolves_import_strings_and_serializes_objects() -> None:
+    """Import annotations resolve strings and dump stable import paths."""
+
+    class Settings(BaseModel):
+        callable: Import[Callable]
+
+    settings = Settings.model_validate({"callable": "builtins:len"})
+
+    assert settings.callable is len
+    assert settings.model_dump() == {"callable": "builtins:len"}
+    assert Settings(callable=len).model_dump_json() == '{"callable":"builtins:len"}'
+    assert Settings.model_validate_json(settings.model_dump_json()).callable is len

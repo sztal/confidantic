@@ -196,6 +196,7 @@ def test_config_model_dict_documents_all_settings_options() -> None:
     assert all(option in ConfigModelDict.__doc__ for option in documented_options)
     assert BaseConfig.__doc__ is not None
     assert "ConfigModelDict" in BaseConfig.__doc__
+    assert "BaseSettings" in BaseConfig.__doc__
 
 
 def test_make_serialization_is_opt_in_and_recursive() -> None:

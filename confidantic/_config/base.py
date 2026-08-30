@@ -268,6 +268,8 @@ class BaseConfig(BaseSettings):
     :class:`ConfigModelDict` for the complete Pydantic Settings and
     Confidantic option reference. General Pydantic model configuration options
     remain available through :class:`pydantic.ConfigDict`.
+    See :class:`pydantic_settings.BaseSettings` to determine which settings
+    options can also be configured at initialization with a leading underscore.
 
     Each class is resolved using Pydantic Settings source ordering, followed by
     defaults declared directly on that class. Remaining values continue through

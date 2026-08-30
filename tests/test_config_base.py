@@ -189,7 +189,7 @@ def test_config_model_dict_documents_all_settings_options() -> None:
         "pyproject_toml_table_header",
         "enable_decoding",
         "docstring_set_attributes_section",
-        "env_file_discover",
+        "env_file_discovery",
     }
 
     assert ConfigModelDict.__doc__ is not None
@@ -1271,7 +1271,7 @@ def test_dotenv_discovery_uses_concrete_class_once_across_mro(
 
     class ChildConfig(ParentConfig):
         model_config = ConfigModelDict(
-            env_file_discover=True,
+            env_file_discovery=True,
             env_prefix="CHILD_",
         )
 
@@ -1298,7 +1298,7 @@ def test_explicit_dotenv_file_bypasses_discovery(tmp_path: Path) -> None:
     env_file.write_text("VALUE=from-explicit\n", encoding="utf-8")
 
     class Config(BaseConfig):
-        model_config = ConfigModelDict(env_file_discover=True)
+        model_config = ConfigModelDict(env_file_discovery=True)
 
         value: str
 

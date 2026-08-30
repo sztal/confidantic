@@ -187,12 +187,12 @@ class ConfigModelDict(PydanticSettingsConfigDict, total=False):
         Whether model fields replace an ``@attrs`` marker in the class
         docstring's ``Attributes`` section when a configuration subclass is
         created. ``None`` enables marker replacement by default.
-    env_file_discover
+    env_file_discovery
         Whether to discover a dotenv file when ``env_file`` is ``None``.
     """
 
     docstring_set_attributes_section: bool | None
-    env_file_discover: bool
+    env_file_discovery: bool
 
 
 class ClassDefaultsSource(PydanticBaseSettingsSource):
@@ -305,7 +305,7 @@ class BaseConfig(BaseSettings):
         use_attribute_docstrings=True,
         docstring_set_attributes_section=None,
         dotenv_filtering="only_existing",
-        env_file_discover=False,
+        env_file_discovery=False,
     )
 
     _model_field_sources: dict[str, _FieldSource] = PrivateAttr(default_factory=dict)
@@ -1030,7 +1030,7 @@ class BaseConfig(BaseSettings):
             for name in signature(BaseSettings._settings_init_sources).parameters
             if name in local_options
         }
-        if cls.model_config.get("env_file_discover") and (
+        if cls.model_config.get("env_file_discovery") and (
             _env_file is None
             or (
                 _env_file is ENV_FILE_SENTINEL

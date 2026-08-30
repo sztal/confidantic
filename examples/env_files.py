@@ -58,7 +58,7 @@ with TemporaryDirectory() as directory:
         """Configuration using an application-specific discovery strategy."""
 
         model_config = ConfigModelDict(
-            env_file_discover=True,
+            env_file_discovery=True,
             env_prefix="DISCOVERED_",
         )
 

@@ -36,10 +36,8 @@ from pydantic import (
     ValidationInfo,
     field_validator,
     model_serializer,
-    model_validator,
 )
 from pydantic.fields import FieldInfo
-from pydantic_core import PydanticCustomError
 from pydantic_settings import (
     BaseSettings,
     CliSettingsSource,
@@ -66,7 +64,6 @@ from rich.text import Text
 
 from confidantic.utils import (
     get_import_string,
-    import_from_string,
     is_runtime_jupyterlike,
 )
 
@@ -106,19 +103,95 @@ class ConfigModelDict(PydanticSettingsConfigDict, total=False):
 
     Attributes
     ----------
+    case_sensitive
+        Whether environment-variable and command-line names are case-sensitive.
+    nested_model_default_partial_update
+        Whether source values may partially update default nested models.
+    env_prefix
+        Prefix applied to environment variable names.
+    env_prefix_target
+        Names to which ``env_prefix`` applies: ``"variable"``, ``"alias"``,
+        or ``"all"``.
+    env_file
+        Dotenv file or files to load. ``None`` disables dotenv loading.
+    env_file_encoding
+        Text encoding used to read ``env_file``.
+    dotenv_filtering
+        Policy for filtering dotenv variables before validation.
+    env_ignore_empty
+        Whether empty environment and dotenv values are ignored.
+    env_nested_delimiter
+        Delimiter used to map environment and dotenv variables to nested values.
+    env_nested_max_split
+        Maximum number of ``env_nested_delimiter`` splits for one variable.
+    env_parse_none_str
+        Environment and dotenv string value interpreted as ``None``.
+    env_parse_enums
+        Whether environment and dotenv enum member names are parsed as values.
+    cli_prog_name
+        Program name displayed in command-line help.
+    cli_parse_args
+        Whether to parse process arguments, or an explicit argument sequence.
+    cli_parse_none_str
+        Command-line string value interpreted as ``None``.
+    cli_hide_none_type
+        Whether command-line help hides ``None`` in field types.
+    cli_avoid_json
+        Whether command-line help avoids JSON syntax for complex values.
+    cli_enforce_required
+        Whether required fields are enforced by the command-line parser.
+    cli_use_class_docs_for_groups
+        Whether command-line argument groups use class docstrings.
+    cli_show_env_vars
+        Whether command-line help displays resolved environment variable names.
+    cli_exit_on_error
+        Whether command-line parsing exits when it encounters an error.
+    cli_prefix
+        Prefix for root command-line arguments.
+    cli_flag_prefix_char
+        Prefix character for command-line option flags.
+    cli_implicit_flags
+        Whether boolean fields use implicit flags, and their ``"dual"`` or
+        ``"toggle"`` mode.
+    cli_ignore_unknown_args
+        Whether command-line parsing ignores unknown arguments.
+    cli_kebab_case
+        Whether command-line option names use kebab case, including its
+        ``"all"`` and ``"no_enums"`` modes.
+    cli_shortcuts
+        Mapping from field names to command-line shortcut names.
+    secrets_dir
+        Directory, or ordered directories, containing secret files.
+    json_file, json_file_encoding
+        JSON configuration file or files and their text encoding. Add a
+        :class:`pydantic_settings.JsonConfigSettingsSource` through
+        :meth:`BaseConfig.settings_customise_sources` to use them.
+    yaml_file, yaml_file_encoding, yaml_config_section
+        YAML configuration file or files, their text encoding, and an optional
+        dotted section. Add a :class:`pydantic_settings.YamlConfigSettingsSource`
+        through :meth:`BaseConfig.settings_customise_sources` to use them.
+    toml_file, toml_table_header
+        TOML configuration file or files and an optional table header. Add a
+        :class:`pydantic_settings.TomlConfigSettingsSource` through
+        :meth:`BaseConfig.settings_customise_sources` to use them.
+    pyproject_toml_depth, pyproject_toml_table_header
+        Number of parent directories to search for ``pyproject.toml`` and the
+        table header to load. Add a
+        :class:`pydantic_settings.PyprojectTomlConfigSettingsSource` through
+        :meth:`BaseConfig.settings_customise_sources` to use them.
+    enable_decoding
+        Whether settings sources decode complex values by default. Field-level
+        ``pydantic_settings.NoDecode`` and ``pydantic_settings.ForceDecode``
+        annotations override this setting.
     docstring_set_attributes_section
         Whether model fields replace an ``@attrs`` marker in the class
         docstring's ``Attributes`` section when a configuration subclass is
         created. ``None`` enables marker replacement by default.
-    model_import_string
-        Key used for an optional model import string in serialized output.
-        Set to ``None`` to disable the marker for a configuration class.
     env_file_discover
         Whether to discover a dotenv file when ``env_file`` is ``None``.
     """
 
     docstring_set_attributes_section: bool | None
-    model_import_string: str | None
     env_file_discover: bool
 
 
@@ -190,6 +263,11 @@ class ClassDefaultsSource(PydanticBaseSettingsSource):
 class BaseConfig(BaseSettings):
     """Resolve configuration sources independently along the class MRO.
 
+    Configure settings behavior with ``model_config``; see
+    :class:`ConfigModelDict` for the complete Pydantic Settings and
+    Confidantic option reference. General Pydantic model configuration options
+    remain available through :class:`pydantic.ConfigDict`.
+
     Each class is resolved using Pydantic Settings source ordering, followed by
     defaults declared directly on that class. Remaining values continue through
     Python's C3 MRO. Nested values retain Pydantic Settings deep-merge behavior.
@@ -228,7 +306,6 @@ class BaseConfig(BaseSettings):
         docstring_set_attributes_section=None,
         dotenv_filtering="only_existing",
         env_file_discover=False,
-        model_import_string="__model__",
     )
 
     _model_field_sources: dict[str, _FieldSource] = PrivateAttr(default_factory=dict)
@@ -1128,45 +1205,6 @@ class BaseConfig(BaseSettings):
             self.model_fields_set | updated_fields,
         )
         return copied
-
-    @model_validator(mode="wrap")
-    @classmethod
-    def _validate_model_import_string(cls, value: Any, handler: Any) -> Any:
-        return cls._resolve_model_import_string(value, handler)
-
-    @classmethod
-    def _resolve_model_import_string(cls, value: Any, handler: Any) -> Any:
-        marker_key = cls.model_config.get("model_import_string")
-        if (
-            marker_key is None
-            or not isinstance(value, Mapping)
-            or marker_key not in value
-        ):
-            return handler(value)
-
-        marker = value[marker_key]
-        if not isinstance(marker, str):
-            raise PydanticCustomError(
-                "model_import_invalid",
-                "Model import string must be a string",
-            )
-        try:
-            model_type = import_from_string(marker, type_hint=type[BaseConfig])
-        except ValueError as error:
-            raise PydanticCustomError(
-                "model_import_invalid",
-                "Invalid model import string: {marker}",
-                {"marker": marker},
-            ) from error
-        if not issubclass(model_type, cls):
-            raise PydanticCustomError(
-                "model_import_type_mismatch",
-                "Model import {marker} is not a subclass of {expected}",
-                {"marker": marker, "expected": get_import_string(cls)},
-            )
-
-        data = {key: item for key, item in value.items() if key != marker_key}
-        return model_type.model_validate(data, by_alias=True, by_name=True)
 
     @model_serializer(mode="wrap")
     def _serialize_with_make(

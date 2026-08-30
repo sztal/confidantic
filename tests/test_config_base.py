@@ -5,6 +5,7 @@ import tomllib
 from copy import copy, deepcopy
 from enum import Enum
 from importlib import import_module
+from inspect import signature
 from io import StringIO
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -129,6 +130,74 @@ def test_base_config_can_be_instantiated() -> None:
     assert BaseConfig().model_dump() == {}
 
 
+def test_base_config_accepts_base_settings_sunder_arguments() -> None:
+    """BaseConfig forwards every per-instance Pydantic Settings override."""
+    base_settings_options = tuple(
+        name
+        for name in signature(BaseSettings._settings_init_sources).parameters
+        if name != "_init_kwargs"
+    )
+    config_options = tuple(
+        name
+        for name in signature(BaseConfig._settings_init_sources).parameters
+        if name != "_init_kwargs"
+    )
+
+    assert config_options == base_settings_options
+    BaseConfig(**dict.fromkeys(base_settings_options))
+
+
+def test_config_model_dict_documents_all_settings_options() -> None:
+    """The public option reference covers Pydantic Settings and extensions."""
+    documented_options = {
+        "case_sensitive",
+        "nested_model_default_partial_update",
+        "env_prefix",
+        "env_prefix_target",
+        "env_file",
+        "env_file_encoding",
+        "dotenv_filtering",
+        "env_ignore_empty",
+        "env_nested_delimiter",
+        "env_nested_max_split",
+        "env_parse_none_str",
+        "env_parse_enums",
+        "cli_prog_name",
+        "cli_parse_args",
+        "cli_parse_none_str",
+        "cli_hide_none_type",
+        "cli_avoid_json",
+        "cli_enforce_required",
+        "cli_use_class_docs_for_groups",
+        "cli_show_env_vars",
+        "cli_exit_on_error",
+        "cli_prefix",
+        "cli_flag_prefix_char",
+        "cli_implicit_flags",
+        "cli_ignore_unknown_args",
+        "cli_kebab_case",
+        "cli_shortcuts",
+        "secrets_dir",
+        "json_file",
+        "json_file_encoding",
+        "yaml_file",
+        "yaml_file_encoding",
+        "yaml_config_section",
+        "toml_file",
+        "toml_table_header",
+        "pyproject_toml_depth",
+        "pyproject_toml_table_header",
+        "enable_decoding",
+        "docstring_set_attributes_section",
+        "env_file_discover",
+    }
+
+    assert ConfigModelDict.__doc__ is not None
+    assert all(option in ConfigModelDict.__doc__ for option in documented_options)
+    assert BaseConfig.__doc__ is not None
+    assert "ConfigModelDict" in BaseConfig.__doc__
+
+
 def test_make_serialization_is_opt_in_and_recursive() -> None:
     """Dump context adds ordered Make directives to nested configurations."""
     config = SerializedParentConfig()
@@ -148,39 +217,6 @@ def test_make_serialization_is_opt_in_and_recursive() -> None:
     )
 
 
-def test_make_serialization_ignores_legacy_marker_configuration() -> None:
-    """Make directives consistently use the reserved @call key."""
-
-    class CustomConfig(BaseConfig):
-        model_config = ConfigModelDict(model_import_string="__type__")
-
-        value: int = 1
-
-    class DisabledConfig(BaseConfig):
-        model_config = ConfigModelDict(model_import_string=None)
-
-        value: int = 1
-
-    class ParentConfig(BaseConfig):
-        child: CustomConfig = CustomConfig()
-
-    assert CustomConfig().model_dump(context={"make": True}) == {
-        "@call": "tests.test_config_base:test_make_serialization_ignores_legacy_marker_configuration.<locals>.CustomConfig",
-        "value": 1,
-    }
-    assert DisabledConfig().model_dump(context={"make": True}) == {
-        "@call": "tests.test_config_base:test_make_serialization_ignores_legacy_marker_configuration.<locals>.DisabledConfig",
-        "value": 1,
-    }
-    assert ParentConfig().model_dump(context={"make": True}) == {
-        "@call": "tests.test_config_base:test_make_serialization_ignores_legacy_marker_configuration.<locals>.ParentConfig",
-        "child": {
-            "@call": "tests.test_config_base:test_make_serialization_ignores_legacy_marker_configuration.<locals>.CustomConfig",
-            "value": 1,
-        },
-    }
-
-
 def test_make_serialization_preserves_dump_options() -> None:
     """Make directives remain independent from aliases and exclusions."""
 
@@ -194,32 +230,6 @@ def test_make_serialization_preserves_dump_options() -> None:
     ) == {
         "@call": "tests.test_config_base:test_make_serialization_preserves_dump_options.<locals>.Config"
     }
-
-
-@pytest.mark.parametrize(
-    "settings_config",
-    [
-        ConfigModelDict(model_import_string="VALUE"),
-        ConfigModelDict(extra="allow"),
-    ],
-)
-def test_model_import_string_rejects_input_key_collisions(
-    settings_config: ConfigModelDict,
-) -> None:
-    """Input rejects fields or extras that use the reserved marker key."""
-
-    class Config(BaseConfig):
-        model_config = settings_config
-
-        value: int = Field(1, alias="VALUE")
-
-    values: dict[str, object] = {"VALUE": 1}
-    if settings_config.get("extra") == "allow":
-        values["__model__"] = "extra"
-    with pytest.raises(ValidationError) as error:
-        Config.model_validate(values)
-
-    assert error.value.errors()[0]["type"] == "model_import_invalid"
 
 
 def test_make_deserializes_concrete_subclasses() -> None:
@@ -256,52 +266,6 @@ def test_make_deserializes_nested_subclasses() -> None:
     assert type(resolved.item) is PolymorphicChildConfig
     assert type(resolved.items[0]) is PolymorphicChildConfig
     assert type(resolved.items[1]) is PolymorphicSiblingConfig
-
-
-def test_model_import_string_preserves_unmarked_validation() -> None:
-    """Unmarked input retains ordinary validation against the requested type."""
-    resolved = PolymorphicConfig.model_validate({"name": "base"})
-
-    assert type(resolved) is PolymorphicConfig
-    assert resolved.name == "base"
-
-
-@pytest.mark.parametrize(
-    ("marker", "error_type"),
-    [
-        (1, "model_import_invalid"),
-        ("not-an-import-string", "model_import_invalid"),
-        ("builtins:dict", "model_import_invalid"),
-    ],
-)
-def test_model_import_string_rejects_invalid_targets(
-    marker: object,
-    error_type: str,
-) -> None:
-    """Invalid import markers are reported as structured validation errors."""
-    with pytest.raises(ValidationError) as error:
-        PolymorphicConfig.model_validate({"__model__": marker, "name": "base"})
-
-    assert error.value.errors()[0]["type"] == error_type
-
-
-def test_model_import_string_rejects_unrelated_configurations() -> None:
-    """Markers cannot select configuration types outside the requested hierarchy."""
-    data = SerializedChildConfig().model_dump(context={"make": True})
-
-    with pytest.raises(ValidationError) as error:
-        PolymorphicContainer.model_validate({"item": data, "items": []})
-
-    assert error.value.errors()[0]["type"] == "model_type"
-
-
-def test_model_import_string_is_removed_before_subtype_validation() -> None:
-    """Marker metadata does not violate a concrete subtype's extra-field policy."""
-    data = StrictPolymorphicConfig(name="strict").model_dump(context={"make": True})
-
-    resolved = PolymorphicContainer.model_validate({"item": data, "items": []}).item
-
-    assert type(resolved) is StrictPolymorphicConfig
 
 
 def test_model_dump_yaml_forwards_model_dump_options() -> None:

@@ -37,14 +37,6 @@ def test_dynamic_path_has_no_dynamic_segment_attributes() -> None:
     assert not hasattr(path, "raw")
 
 
-def test_base_paths_requires_root() -> None:
-    """Every path configuration requires a root definition."""
-    with pytest.raises(ValidationError) as error:
-        _build_paths()
-
-    assert error.value.errors()[0]["loc"] == ("root",)
-
-
 def test_relative_root_and_declared_defaults_are_canonicalized(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

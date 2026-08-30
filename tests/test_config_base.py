@@ -1274,6 +1274,80 @@ def test_dotenv_ignores_undeclared_unprefixed_keys(tmp_path: Path) -> None:
     assert _build_config(Config, _env_file=env_file).value == "from-dotenv"
 
 
+def test_dotenv_discovery_is_opt_in() -> None:
+    """An absent dotenv file does not invoke discovery by default."""
+
+    class Config(BaseConfig):
+        value: str = "from-default"
+
+        @classmethod
+        def find_dotenv(cls) -> str:
+            raise AssertionError("dotenv discovery should be disabled")
+
+    assert _build_config(Config, _env_file=None).value == "from-default"
+
+
+@pytest.mark.parametrize("options", ({}, {"_env_file": None}))
+def test_dotenv_discovery_uses_concrete_class_once_across_mro(
+    tmp_path: Path,
+    options: dict[str, object],
+) -> None:
+    """A concrete config discovers one dotenv file for every MRO level."""
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "CHILD_VALUE=from-child\nPARENT_INHERITED=from-parent\n",
+        encoding="utf-8",
+    )
+    calls = 0
+
+    class ParentConfig(BaseConfig):
+        model_config = ConfigModelDict(env_prefix="PARENT_")
+
+        inherited: str
+
+    class ChildConfig(ParentConfig):
+        model_config = ConfigModelDict(
+            env_file_discover=True,
+            env_prefix="CHILD_",
+        )
+
+        value: str
+
+        @classmethod
+        def find_dotenv(cls) -> str:
+            nonlocal calls
+            calls += 1
+            return str(env_file)
+
+    config = _build_config(ChildConfig, **options)
+
+    assert config.model_dump() == {
+        "inherited": "from-parent",
+        "value": "from-child",
+    }
+    assert calls == 1
+
+
+def test_explicit_dotenv_file_bypasses_discovery(tmp_path: Path) -> None:
+    """An explicit dotenv file remains authoritative over discovery."""
+    env_file = tmp_path / ".env"
+    env_file.write_text("VALUE=from-explicit\n", encoding="utf-8")
+
+    class Config(BaseConfig):
+        model_config = ConfigModelDict(env_file_discover=True)
+
+        value: str
+
+        @classmethod
+        def find_dotenv(cls) -> str:
+            raise AssertionError("explicit dotenv files bypass discovery")
+
+    config = _build_config(Config, _env_file=env_file)
+
+    assert config.value == "from-explicit"
+    assert config.model_field_sources == {"value": (DotEnvSettingsSource, Config)}
+
+
 def test_nested_values_merge_across_mro(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

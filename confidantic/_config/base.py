@@ -24,6 +24,7 @@ from typing import (
 )
 
 from docstring_parser import DocstringParam, DocstringStyle, compose, parse
+from dotenv import find_dotenv
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -112,10 +113,13 @@ class ConfigModelDict(PydanticSettingsConfigDict, total=False):
     model_import_string
         Key used for an optional model import string in serialized output.
         Set to ``None`` to disable the marker for a configuration class.
+    env_file_discover
+        Whether to discover a dotenv file when ``env_file`` is ``None``.
     """
 
     docstring_set_attributes_section: bool | None
     model_import_string: str | None
+    env_file_discover: bool
 
 
 class ClassDefaultsSource(PydanticBaseSettingsSource):
@@ -223,6 +227,7 @@ class BaseConfig(BaseSettings):
         use_attribute_docstrings=True,
         docstring_set_attributes_section=None,
         dotenv_filtering="only_existing",
+        env_file_discover=False,
         model_import_string="__model__",
     )
 
@@ -270,6 +275,18 @@ class BaseConfig(BaseSettings):
     def __deepcopy__(self, memo: dict[int, Any] | None = None) -> Self:
         """Return a deep structural copy of this configuration."""
         return super().__deepcopy__(memo)
+
+    @classmethod
+    def find_dotenv(cls) -> str:
+        """Locate the dotenv file used when automatic discovery is enabled.
+
+        Returns
+        -------
+        str
+            Path to the discovered dotenv file, or an empty string when none
+            is found.
+        """
+        return find_dotenv()
 
     @classmethod
     def __pydantic_init_subclass__(cls, **kwargs: Any) -> None:
@@ -936,6 +953,14 @@ class BaseConfig(BaseSettings):
             for name in signature(BaseSettings._settings_init_sources).parameters
             if name in local_options
         }
+        if cls.model_config.get("env_file_discover") and (
+            _env_file is None
+            or (
+                _env_file is ENV_FILE_SENTINEL
+                and cls.model_config.get("env_file") is None
+            )
+        ):
+            source_options["_env_file"] = cls.find_dotenv()
         levels = [
             level
             for level in cls.__mro__

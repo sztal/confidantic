@@ -30,6 +30,7 @@ EXAMPLES_DIRECTORY = Path(__file__).parents[1] / "examples"
             ],
         ),
         ("directive_annotations.py", []),
+        ("env_files.py", []),
         ("factory.py", []),
         ("factory_gated.py", []),
         ("logging_config.py", []),

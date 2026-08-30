@@ -114,6 +114,9 @@ class ConfigModelDict(PydanticSettingsConfigDict, total=False):
         or ``"all"``.
     env_file
         Dotenv file or files to load. ``None`` disables dotenv loading.
+    env_file_discovery
+        Whether to call :meth:`BaseConfig.find_dotenv` when no dotenv file is
+        configured or supplied per instance.
     env_file_encoding
         Text encoding used to read ``env_file``.
     dotenv_filtering
@@ -187,8 +190,6 @@ class ConfigModelDict(PydanticSettingsConfigDict, total=False):
         Whether model fields replace an ``@attrs`` marker in the class
         docstring's ``Attributes`` section when a configuration subclass is
         created. ``None`` enables marker replacement by default.
-    env_file_discovery
-        Whether to discover a dotenv file when ``env_file`` is ``None``.
     """
 
     docstring_set_attributes_section: bool | None

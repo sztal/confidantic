@@ -2,10 +2,9 @@
 
 ## Goal
 
-Describe the intended core behavior of `BaseConfig`: extend
+Describe the core behavior of `BaseConfig`: extend
 `pydantic_settings.BaseSettings` with configuration resolution that is applied
-independently at each level of a configuration class's MRO. This is a proposed
-design; `BaseConfig` is not implemented in the current checkout.
+independently at each level of a configuration class's MRO.
 
 ## Decisions and findings
 
@@ -26,10 +25,18 @@ are non-standard sources. A `BaseConfig` subclass must add JSON, TOML, YAML, or
 source belongs in the precedence order. `BaseConfig` must not assign those
 sources an implicit position.
 
-The first value found for a field or nested key wins. Only values still absent
-after the current class's defaults advance to the next parent in the MRO. A
-default on a derived class therefore takes priority over any source that applies
-only to a parent class.
+The first value found for a field or nested key wins. Nested mappings and models
+are deep-merged, so a parent level can fill keys that remain absent without
+replacing keys resolved by a child. Only values still absent after the current
+class's defaults advance to the next parent in Python's C3 MRO. A default on a
+derived class therefore takes priority over any source that applies only to a
+parent class.
+
+Each level uses its effective inherited `model_config` and
+`settings_customise_sources`. CLI arguments are parsed once against the concrete
+class, whose field set includes inherited fields. Static defaults participate in
+nested merging. A `default_factory` remains lazy and blocks its whole field from
+parent sources before Pydantic evaluates it during validation.
 
 ```text
 Resolve concrete config class
@@ -81,9 +88,8 @@ so the subclass controls whether a structured file overrides or falls back to
 CLI, initialization, environment, dotenv, secrets, or another custom source.
 Sources can also inspect the accumulated `current_state` and
 `settings_sources_data`. Pydantic Settings merges source results deeply, which
-lets lower-priority sources supply missing nested keys. The interaction between
-that deep merge and per-MRO resolution must be specified and tested by
-`confidantic`.
+lets lower-priority sources supply missing nested keys. `BaseConfig` preserves
+that behavior across its flattened MRO source sequence.
 
 Supported file-backed sources are:
 
@@ -102,6 +108,33 @@ come from class `model_config` or from arguments passed by the subclass when it
 constructs the source. Preserving this constraint keeps source registration and
 priority explicit in the subclass.
 
+## Value provenance
+
+Every resolved `BaseConfig` instance exposes `model_field_sources`, a read-only
+mapping from canonical model field names to two-dimensional resolution
+coordinates. Each coordinate is ordered as:
+
+1. The concrete Pydantic settings source class that established the field.
+1. The actual configuration class for which that source was constructed.
+
+For example, a child-level environment value is represented by
+`(EnvSettingsSource, ChildConfig)`, while an inherited parent default is
+represented by `(ClassDefaultsSource, ParentConfig)`. Aliases are normalized to
+model field names in the mapping. Values transformed by validators retain the
+coordinate of their source input, and lazy default factories are attributed to
+`ClassDefaultsSource` for the class that declared them.
+
+Nested mappings and models can combine values from several sources. Provenance
+remains field-level: the mapping reports the highest-priority source that first
+established the top-level field, not the sources of individual nested keys.
+Computed fields and values synthesized solely during validation have no settings
+source coordinate and are omitted.
+
+Tracking requires sources derived from `PydanticBaseSettingsSource`, which
+provides both source state and the owning settings class. If a source sequence
+contains a bare callable, settings resolution still works but provenance is
+empty because the required inheritance coordinate is unavailable.
+
 ## Validation
 
 - Checked the [Pydantic Settings documentation](https://pydantic.dev/docs/validation/latest/concepts/pydantic_settings/#field-value-priority)
@@ -109,13 +142,11 @@ priority explicit in the subclass.
   [source customization](https://pydantic.dev/docs/validation/latest/concepts/pydantic_settings/#customise-settings-sources).
 - Confirmed with Pydantic Settings 2.15 that only dotenv and secret paths have
   built-in instance initializer overrides; structured file sources do not.
-- Confirmed this checkout has no `BaseConfig` implementation, so this page
-  records intended behavior rather than current behavior.
+- Added focused tests for built-in source priority, child defaults versus parent
+  sources, nested merging, lazy factories, aliases, validators, custom source
+  placement, required fields, and C3 multiple inheritance.
 
 ## Follow-up
 
-- Define how Pydantic Settings deep merging composes with MRO-level resolution.
-- Define the public configuration for enabling and customizing CLI parsing.
-- Implement focused tests for derived defaults overriding parent-only sources.
-- Implement examples showing subclasses that place structured file sources at
-  different priorities.
+- Add user-facing examples showing subclasses that place structured file
+  sources at different priorities.

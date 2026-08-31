@@ -1,6 +1,8 @@
-______________________________________________________________________
-
-## name: update-wiki description: "Update existing repository wiki pages from user-supplied changes. Use when asked to revise, correct, refresh, expand, clarify, or maintain a Markdown page under wiki/ while keeping it accurate in the context of the project codebase." argument-hint: "Wiki page, requested update, and any relevant source files or decisions"
+---
+name: update-wiki
+description: Update durable architecture, design, investigation, or technical reference pages under wiki/.
+argument-hint: Wiki page, requested update, and relevant source files or decisions
+---
 
 # Update Wiki Pages
 
@@ -8,10 +10,18 @@ Update existing Markdown pages under `wiki/` from the user's input. Preserve
 the page's useful structure and concise style while making the requested
 information accurate, coherent, and actionable for future contributors.
 
+Never add or retain bug-backlog entries in wiki pages. Confirmed, unresolved
+source defects belong only in `../../../BUGS.md`; use a testing or bug-fixing
+workflow for those records.
+
+Use `confidantic/` as the package source, `tests/` as the behavioral reference,
+and `docs/` as the published documentation surface. Check `pyproject.toml` for
+supported Python versions and tool configuration.
+
 ## Workflow
 
-1. Read the target wiki page, [wiki/example.md](../../../wiki/example.md), and
-   the project files most directly relevant to the requested update.
+1. Read the target wiki page and the project files most directly relevant to
+   the requested update.
 1. Determine whether the user request adds new facts, corrects stale facts,
    clarifies intent, or changes a decision or follow-up item.
 1. Apply the smallest edit that fully reflects the request. Keep content brief,
@@ -32,6 +42,7 @@ information accurate, coherent, and actionable for future contributors.
 
 - Honor the requested update without rewriting unrelated content.
 - Do not leave obsolete paths, commands, APIs, or project claims in the page.
+- Remove bug-backlog content after ensuring it is recorded in `BUGS.md`.
 - Distinguish verified facts from assumptions, questions, and pending work.
 - Do not add decorative advanced Markdown features or copy large source
   excerpts.

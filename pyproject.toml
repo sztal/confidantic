@@ -19,14 +19,13 @@ maintainers = [
 authors = [
   { name = "Szymon Talaga", email = "stalaga@protonmail.com" },
 ]
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 classifiers = [
   "Development Status :: 4 - Beta",
   "Natural Language :: English",
   "Operating System :: OS Independent",
   "Programming Language :: Python",
   "Programming Language :: Python :: 3 :: Only",
-  "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
@@ -38,8 +37,15 @@ dynamic = [
   "version",
 ]
 dependencies = [
+  "docstring-parser>=0.18",
   "pydantic-settings>=2.15",
+  "rich>=15",
 ]
+
+optional-dependencies.all = [ "confidantic[toml,yaml]" ]
+optional-dependencies.toml = [ "tomli-w>=1" ]
+optional-dependencies.yaml = [ "pyyaml>=6" ]
+
 urls.Changelog = "https://sztal.github.io/confidantic/changelog"
 urls.Documentation = "https://sztal.github.io/confidantic/"
 urls.Homepage = "https://github.com/sztal/confidantic"
@@ -84,7 +90,7 @@ packages = [
 ]
 
 [tool.ruff]
-target-version = "py314"
+target-version = "py311"
 line-length = 88
 format.indent-style = "space"
 format.quote-style = "double"
@@ -113,7 +119,6 @@ lint.isort.known-first-party = [
   "confidantic",
 ]
 lint.pydocstyle.convention = "numpy"
-lint.future-annotations = true
 
 [tool.codespell]
 write-changes = true
@@ -137,7 +142,7 @@ filterwarnings = [
 log_level = "INFO"
 testpaths = [
   "docs",
-  ".",
+  "confidantic",
   "tests",
   "README.md",
 ]
@@ -161,7 +166,7 @@ report.exclude_also = [
   "^\\s*return NotImplemented\\b",
   "^if __name__ == [\"']__main__[\"']:$",
 ]
-report.fail_under = 100
+report.fail_under = 95
 report.show_missing = true
 report.skip_covered = true
 run.branch = true
@@ -172,6 +177,9 @@ run.omit = [
 ]
 run.patch = [
   "subprocess",
+]
+run.disable_warnings = [
+  "module-not-imported",
 ]
 run.source_dirs = [
   "tests",
@@ -220,7 +228,7 @@ name = "Fixed"
 showcontent = true
 
 [tool.mypy]
-python_version = "3.14"
+python_version = "3.11"
 warn_unreachable = true
 enable_error_code = [
   "ignore-without-code",

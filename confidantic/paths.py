@@ -62,11 +62,11 @@ class ExtensiblePath(_ExtensiblePathBase):
 class BasePaths(BaseConfig):
     """Base configuration containing canonical filesystem paths.
 
-    ``root`` is required. It is expanded and canonicalized first. Every other
-    relative path is joined to that root before being canonicalized. A path
-    beginning with ``@field/`` resolves relative to a previously defined path
-    field or extra. Absolute paths bypass joining but are still canonicalized.
-    Paths need not exist.
+    ``root`` defaults to the current directory. It is expanded and canonicalized
+    first. Every other relative path is joined to that root before being
+    canonicalized. A path beginning with ``@field/`` resolves relative to a
+    previously defined path field or extra. Absolute paths bypass joining but
+    are still canonicalized. Paths need not exist.
 
     Subclasses may declare additional :class:`pathlib.Path`-compatible fields.
     Their validated values are canonicalized to ``ExtensiblePath``. Undeclared

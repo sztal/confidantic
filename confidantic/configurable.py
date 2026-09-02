@@ -13,13 +13,11 @@ objects themselves.
 """
 
 from collections.abc import Mapping
-from typing import Any, ClassVar, Self, TypeVar
+from typing import Any, ClassVar, Self
 
 from pydantic import BaseModel
 
 from confidantic import BaseConfig
-
-C = TypeVar("C", bound="Configurable")
 
 __all__ = ("Configurable", "InstanceConfig")
 
@@ -37,10 +35,25 @@ class InstanceConfig(BaseConfig):
     inherited configuration with an unrelated subclass.
     """
 
-    Parent: ClassVar[type[C]]
+    Parent: ClassVar[type["Configurable"]]
 
-    def to_parent(self, *args: Any, **kwargs: Any) -> C:
-        """Construct this configuration's directly associated parent class."""
+    def to_parent(self, *args: Any, **kwargs: Any) -> "Configurable":
+        """Construct this configuration's directly associated parent class.
+
+        Parameters
+        ----------
+        *args
+            Positional arguments forwarded to the parent constructor after this
+            configuration.
+        **kwargs
+            Keyword arguments forwarded to the parent constructor after this
+            configuration.
+
+        Returns
+        -------
+        Configurable
+            New instance of the directly associated parent class.
+        """
         parent_cls = type(self).__dict__.get("Parent")
         if not isinstance(parent_cls, type) or not issubclass(parent_cls, Configurable):
             errmsg = (
@@ -69,8 +82,7 @@ class Configurable:
 
     def __init__(
         self,
-        config: InstanceConfig | BaseModel | Mapping | None = None,
-        *args: Any,
+        config: InstanceConfig | BaseModel | Mapping[Any, Any] | None = None,
         **kwargs: Any,
     ) -> None:
         """Initialize the object with the given configuration.
@@ -81,7 +93,7 @@ class Configurable:
             The configuration for this object. If not provided, a default
             configuration will be created.
         **kwargs
-            Additional keyword arguments forwarded to ``config.copy(**kwargs)``.
+            Configuration values used to create or update ``config``.
         """
         if not isinstance(getattr(self, "Config", None), type) or not issubclass(
             self.Config, InstanceConfig
@@ -104,7 +116,7 @@ class Configurable:
                 if isinstance(config, Mapping):
                     config = self.Config(**{**config, **kwargs})
                 else:
-                    errmsg = (
+                    errmsg = (  # type: ignore[unreachable]
                         f"Expected config of type {self.Config.__name__}, "
                         f"got {type(config).__name__}"
                     )

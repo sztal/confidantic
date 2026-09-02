@@ -1,6 +1,6 @@
 import json
 import re
-from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
 from typing import (
     Annotated,
@@ -20,7 +20,7 @@ from pydantic.functional_validators import (
 from pydantic_settings import NoDecode
 from typing_extensions import TypeVar as TypeVarWithDefault
 
-from confidantic.utils import get_import_string, import_from_string
+from confidantic.utils import _call_mapping, get_import_string, import_from_string, make
 
 __all__ = (
     "AbsolutePath",
@@ -88,14 +88,14 @@ AbsolutePath: TypeAlias = Annotated[P, AfterValidator(_resolve_absolute_path)]
 # -----------------------------------------------------------------------------------
 
 
-def Delimited(sep: str | None = None) -> type[Sequence]:
+def Delimited(sep: str | None = None) -> Any:
     """Return an annotation for delimiter-separated sequence inputs.
 
     The returned annotation accepts an existing sequence unchanged, while
     splitting string inputs on ``sep`` before normal validation.
     """
 
-    def _validate_delimited(value: Any, handler: Callable) -> Any:
+    def _validate_delimited(value: Any, handler: Callable[[Any], Any]) -> Any:
         try:
             return handler(value)
         except Exception as e1:
@@ -125,7 +125,7 @@ TabDelimited = Delimited("\t")
 # -----------------------------------------------------------------------------------
 
 
-def _dict_like(value: Any, handler: Callable) -> Any:
+def _dict_like(value: Any, handler: Callable[[Any], Any]) -> Any:
     try:
         return handler(value)
     except Exception as e1:
@@ -160,21 +160,12 @@ Map: TypeAlias = Annotated[T, NoDecode, WrapValidator(_dict_like)]
 # -----------------------------------------------------------------------------------
 
 
-class Import(Generic[T]):
-    """A Pydantic annotation for importable objects.
-
-    Values supplied as import strings are resolved using Pydantic's
-    :class:`pydantic.ImportString` validation. Serialized values are always emitted as
-    import strings, allowing models to be round-tripped through configuration files.
-    """
-
-    @classmethod
-    def __class_getitem__(cls, item_type: type[T]) -> Any:
-        """Return an import annotation constrained to ``item_type``."""
-        return Annotated[
-            ImportString[item_type],
-            PlainSerializer(get_import_string, return_type=str),
-        ]
+#: A Pydantic annotation for importable objects. Import strings are resolved using
+#: :class:`pydantic.ImportString` and objects serialize as stable import strings.
+Import: TypeAlias = Annotated[
+    ImportString[T],
+    PlainSerializer(get_import_string, return_type=str),
+]
 
 
 # -----------------------------------------------------------------------------------
@@ -182,27 +173,12 @@ class Import(Generic[T]):
 # -----------------------------------------------------------------------------------
 
 
-def _call(value: Any, handler: Callable) -> Any:
+def _call(value: Any, handler: Callable[[Any], Any]) -> Any:
     if isinstance(value, Mapping):
         return handler(_call_mapping(value) if "@call" in value else value)
     if isinstance(value, str):
         return handler(import_from_string(value, Callable)())
     return handler(value() if callable(value) else value)
-
-
-def _call_mapping(value: Mapping[Any, Any]) -> Any:
-    if "@call" not in value:
-        errmsg = "Call mappings require an '@call' key"
-        raise ValueError(errmsg)
-    target = value["@call"]
-    args = value.get("@args", ())
-    if not isinstance(args, Iterable):
-        raise ValueError("'@args' must be an iterable")
-    kwargs = {key: item for key, item in value.items() if key not in {"@args", "@call"}}
-    callable_value = (
-        import_from_string(target, Callable) if isinstance(target, str) else target
-    )
-    return callable_value(*args, **kwargs)
 
 
 class Call(Generic[T]):
@@ -225,24 +201,6 @@ class Call(Generic[T]):
 # -----------------------------------------------------------------------------------
 
 
-def _make(value: Any, handler: Callable) -> Any:
-    def build(item: Any) -> Any:
-        if isinstance(item, Mapping):
-            built = {key: build(value) for key, value in item.items()}
-            return _call_mapping(built) if "@call" in built else built
-        if isinstance(item, list):
-            return [build(value) for value in item]
-        if isinstance(item, tuple):
-            return tuple(build(value) for value in item)
-        return item
-
-    if isinstance(value, Mapping | list | tuple):
-        return handler(build(value))
-    if isinstance(value, str) or callable(value):
-        return _call(value, handler)
-    return handler(value)
-
-
 class Make(Generic[T]):
     """A Pydantic annotation that evaluates nested call mappings.
 
@@ -255,3 +213,7 @@ class Make(Generic[T]):
     def __class_getitem__(cls, item_type: type[T]) -> Any:
         """Return a make annotation whose result is validated as ``item_type``."""
         return Annotated[item_type, WrapValidator(_make)]
+
+
+def _make(value: Any, handler: Callable[[Any], Any]) -> Any:
+    return make(value, handler)

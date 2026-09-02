@@ -6,9 +6,7 @@ Run cells individually to inspect the generated model, then materialize the
 target object from validated configuration values.
 """
 
-from pydantic import Field
-
-from confidantic import BaseConfig, FactoryConfig
+from confidantic import BaseConfig, Factory
 
 
 class Service:
@@ -22,28 +20,24 @@ class Service:
         return f"{self.__class__.__name__}(host={self.host!r}, port={self.port})"
 
 
-# `model_from()` reads the annotated constructor to create `ServiceConfig`.
-ServiceConfig = FactoryConfig.model_from(Service)
-
-
 class Config(BaseConfig, cli_parse_args=True):
     """Application settings containing a configurable service."""
 
-    service: ServiceConfig = Field(default_factory=ServiceConfig)
-    """Values passed to `Service` when configuration is resolved."""
+    service: Factory[Service] = Factory.instance_from(Service, port=9999)
+    """Values passed to `Service` when it is materialized."""
 
 
 # %% Inspect config fields, then materialize the target -----------------------------
 
-# `model_resolve()` walks factory fields and replaces them with target objects.
-config = Config(service={"host": "127.0.0.1", "port": 8080})
+config = Config(service={"host": "127.0.0.1"})
 config.info()
 
-resolved = config.model_resolve()
-print(resolved.service)
+service = config.service.materialize()
+# OR just `service = config.service()` because `Factory` is callable.
+print(service)
 
-assert isinstance(resolved.service, Service)
-assert resolved.service.host == "127.0.0.1"
-assert resolved.service.port == 8080
+assert isinstance(service, Service)
+assert service.host == "127.0.0.1"
+assert service.port == 9999
 
 # %% ---------------------------------------------------------------------------------

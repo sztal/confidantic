@@ -4,7 +4,7 @@ __all__ = (
     "BaseConfig",
     "ClassDefaultsSource",
     "ConfigModelDict",
-    "FactoryConfig",
+    "Factory",
     "__version__",
 )
 
@@ -14,7 +14,7 @@ from confidantic._config import (
     BaseConfig,
     ClassDefaultsSource,
     ConfigModelDict,
-    FactoryConfig,
+    Factory,
 )
 
 __version__ = importlib.metadata.version("confidantic")

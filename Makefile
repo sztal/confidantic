@@ -36,7 +36,7 @@ install:
 	uv sync --group dev
 
 nox:
-	nox -s tests
+	uv run nox -s tests
 
 test:
 	uv run pytest
@@ -50,7 +50,7 @@ coverage-html:
 	uv run coverage html
 
 lint:
-	nox -s lint
+	uv run nox -s lint
 
 format:
 	uv run ruff format .

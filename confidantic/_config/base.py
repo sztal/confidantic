@@ -37,10 +37,12 @@ from pydantic import (
     field_validator,
     model_serializer,
 )
+from pydantic._internal._config import config_keys
 from pydantic.fields import FieldInfo
 from pydantic_settings import (
     BaseSettings,
     CliSettingsSource,
+    EnvSettingsSource,
     InitSettingsSource,
     PydanticBaseSettingsSource,
 )
@@ -96,6 +98,21 @@ _DISABLE_CLI_PARSE_ARGS: ContextVar[bool] = ContextVar(
     "_DISABLE_CLI_PARSE_ARGS",
     default=False,
 )
+
+
+class _CliHelpDisabledSettingsSource(CliSettingsSource[Any]):
+    def _add_default_help(self) -> None:
+        pass
+
+
+class _InitSettingsSource(InitSettingsSource):
+    def __call__(self) -> dict[str, Any]:
+        try:
+            return super().__call__()
+        except TypeError as error:
+            if "unhashable type: 'dict'" not in str(error):
+                raise
+            return self.init_kwargs
 
 
 class ConfigModelDict(PydanticSettingsConfigDict, total=False):
@@ -186,6 +203,10 @@ class ConfigModelDict(PydanticSettingsConfigDict, total=False):
         Whether settings sources decode complex values by default. Field-level
         ``pydantic_settings.NoDecode`` and ``pydantic_settings.ForceDecode``
         annotations override this setting.
+    use_attribute_docstrings
+        Whether field descriptions are read from attribute docstrings. This is
+        disabled by default in Jupyter-like runtimes because their source
+        mapping may not be available for Pydantic's inspection.
     docstring_set_attributes_section
         Whether model fields replace an ``@attrs`` marker in the class
         docstring's ``Attributes`` section when a configuration subclass is
@@ -194,6 +215,13 @@ class ConfigModelDict(PydanticSettingsConfigDict, total=False):
 
     docstring_set_attributes_section: bool | None
     env_file_discovery: bool
+    cli_help: bool
+
+
+_CUSTOM_CONFIG_KEYS = set(ConfigModelDict.__annotations__) - set(
+    PydanticSettingsConfigDict.__annotations__
+)
+config_keys.update(_CUSTOM_CONFIG_KEYS)
 
 
 class ClassDefaultsSource(PydanticBaseSettingsSource):
@@ -245,7 +273,9 @@ class ClassDefaultsSource(PydanticBaseSettingsSource):
                     else None
                 )
                 try:
-                    adapter = TypeAdapter(field.annotation, config=adapter_config)
+                    adapter: TypeAdapter[Any] = TypeAdapter(
+                        field.annotation, config=adapter_config
+                    )
                 except PydanticUserError as error:
                     if error.code != "type-adapter-config-unused":
                         raise
@@ -305,7 +335,9 @@ class BaseConfig(BaseSettings):
         cli_hide_none_type=True,
         cli_show_env_vars=True,
         cli_use_class_docs_for_groups=True,
-        use_attribute_docstrings=True,
+        cli_ignore_unknown_args=True,
+        cli_help=True,
+        use_attribute_docstrings=not is_runtime_jupyterlike(),
         docstring_set_attributes_section=None,
         dotenv_filtering="only_existing",
         env_file_discovery=False,
@@ -317,6 +349,12 @@ class BaseConfig(BaseSettings):
         if _DISABLE_CLI_PARSE_ARGS.get() or is_runtime_jupyterlike():
             kwargs["_cli_parse_args"] = False
 
+        config_options = {
+            name: kwargs.pop(f"_{name}")
+            for name in _CUSTOM_CONFIG_KEYS
+            if f"_{name}" in kwargs
+        }
+
         build_sources = kwargs.pop("_build_sources", None)
         if build_sources is None:
             option_names = signature(self._settings_init_sources).parameters.keys()
@@ -327,7 +365,10 @@ class BaseConfig(BaseSettings):
             }
             build_sources = self._settings_init_sources(
                 **source_options,
-                _init_kwargs=kwargs,
+                _init_kwargs={
+                    **kwargs,
+                    "__confidantic_config_options": config_options,
+                },
             )
 
         token = _NESTED_MODEL_BASELINES.set({})
@@ -428,8 +469,14 @@ class BaseConfig(BaseSettings):
         ----------
         indent
             Number of spaces used to indent nested YAML collections.
-        include, exclude, context, by_alias, exclude_unset, exclude_defaults
+        include, exclude, by_alias, exclude_unset, exclude_defaults
             Options forwarded to :meth:`model_dump`.
+        context
+            Serialization context forwarded to :meth:`model_dump`. Pass
+            ``{"make": True}`` to add an ``@call`` directive containing the
+            configuration's import string, producing Make-compatible output
+            that preserves concrete configuration types when it is loaded
+            through a Make annotation.
         exclude_none, exclude_computed_fields, round_trip, warnings, fallback
             Options forwarded to :meth:`model_dump`.
         serialize_as_any, polymorphic_serialization
@@ -500,8 +547,14 @@ class BaseConfig(BaseSettings):
 
         Parameters
         ----------
-        include, exclude, context, by_alias, exclude_unset, exclude_defaults
+        include, exclude, by_alias, exclude_unset, exclude_defaults
             Options forwarded to :meth:`model_dump`.
+        context
+            Serialization context forwarded to :meth:`model_dump`. Pass
+            ``{"make": True}`` to add an ``@call`` directive containing the
+            configuration's import string, producing Make-compatible output
+            that preserves concrete configuration types when it is loaded
+            through a Make annotation.
         exclude_none, exclude_computed_fields, round_trip, warnings, fallback
             Options forwarded to :meth:`model_dump`.
         serialize_as_any, polymorphic_serialization
@@ -698,23 +751,6 @@ class BaseConfig(BaseSettings):
         self._model_field_sources.clear()
         self._model_field_sources.update(updated._model_field_sources)
         return self
-
-    def model_resolve(self) -> Self:
-        """Materialize factory fields in a generated resolved model.
-
-        Resolution uses this instance's current validated values and recursively
-        materializes factory configs in nested Pydantic models and standard
-        containers without mutating the source.
-
-        Returns
-        -------
-        Self
-            Instance of a cached ``<Source>Resolved`` subclass whose declared
-            concrete factory config annotations are replaced by target types.
-        """
-        from confidantic._config.factory import _model_resolve
-
-        return cast(Self, _model_resolve(self))
 
     @property
     def model_field_sources(self) -> Mapping[str, _FieldSource]:
@@ -1033,12 +1069,12 @@ class BaseConfig(BaseSettings):
             for name in signature(BaseSettings._settings_init_sources).parameters
             if name in local_options
         }
-        if cls.model_config.get("env_file_discovery") and (
+        init_kwargs = _init_kwargs if _init_kwargs is not None else {}
+        config_options = init_kwargs.pop("__confidantic_config_options", {})
+        model_config: dict[str, Any] = {**cls.model_config, **config_options}
+        if model_config.get("env_file_discovery") and (
             _env_file is None
-            or (
-                _env_file is ENV_FILE_SENTINEL
-                and cls.model_config.get("env_file") is None
-            )
+            or (_env_file is ENV_FILE_SENTINEL and model_config.get("env_file") is None)
         ):
             source_options["_env_file"] = cls.find_dotenv()
         levels = [
@@ -1050,7 +1086,6 @@ class BaseConfig(BaseSettings):
             return super()._settings_init_sources(**source_options)
 
         resolved_sources: list[PydanticBaseSettingsSource] = []
-        init_kwargs = _init_kwargs if _init_kwargs is not None else {}
         init_state = InitState()
         partial_update = False
 
@@ -1058,12 +1093,65 @@ class BaseConfig(BaseSettings):
             source_builder = BaseSettings.__dict__["_settings_init_sources"].__get__(
                 None, level
             )
+            level_config: dict[str, Any] = {
+                **level.model_config,
+                **config_options,
+            }
+            cli_source_options = {
+                name: local_options[f"_{name}"]
+                for name in signature(CliSettingsSource).parameters
+                if f"_{name}" in local_options
+            }
+            env_source_options = {
+                name: local_options[f"_{name}"]
+                for name in signature(EnvSettingsSource).parameters
+                if f"_{name}" in local_options
+            }
+            cli_source_options = {
+                name: value if value is not None else level_config.get(name)
+                for name, value in cli_source_options.items()
+            }
+            env_source_options = {
+                name: value if value is not None else level_config.get(name)
+                for name, value in env_source_options.items()
+            }
+            if env_source_options["env_parse_none_str"] is not None:
+                cli_source_options["cli_parse_none_str"] = env_source_options[
+                    "env_parse_none_str"
+                ]
+            cli_settings_source = _cli_settings_source if index == 0 else None
+            if (
+                index == 0
+                and not level_config.get("cli_help", True)
+                and cli_source_options["cli_parse_args"] is not None
+                and cli_source_options["cli_parse_args"] is not False
+                and cli_settings_source is None
+            ):
+                cli_settings_source = _CliHelpDisabledSettingsSource(
+                    level,
+                    **cli_source_options,
+                    _env_settings_source=EnvSettingsSource(
+                        level,
+                        **env_source_options,
+                    ),
+                )
             level_options = source_options | {
                 "_cli_parse_args": _cli_parse_args if index == 0 else False,
-                "_cli_settings_source": (_cli_settings_source if index == 0 else None),
+                "_cli_settings_source": cli_settings_source,
                 "_init_kwargs": init_kwargs,
             }
             level_sources, _ = source_builder(**level_options)
+            level_sources = tuple(
+                _InitSettingsSource(
+                    source.settings_cls,
+                    source.init_kwargs,
+                    source.nested_model_default_partial_update,
+                    source._init_state,
+                )
+                if type(source) is InitSettingsSource
+                else source
+                for source in level_sources
+            )
             default_source = next(
                 source
                 for source in reversed(level_sources)
@@ -1225,7 +1313,13 @@ class BaseConfig(BaseSettings):
             raise ValueError(
                 "Make directive key '@call' conflicts with serialized data"
             )
-        return {"@call": get_import_string(self), **data}
+        from confidantic._config.factory import Factory
+
+        target = self.factory_target if isinstance(self, Factory) else self
+        return {
+            "@call": get_import_string(target),
+            **data,
+        }
 
     @field_validator("*", mode="before", check_fields=False)
     @classmethod
@@ -1284,7 +1378,9 @@ class _ResolvedSettingsSource(PydanticBaseSettingsSource):
                     for key in keys
                 ):
                     self.field_sources[field_name] = (
-                        type(source),
+                        InitSettingsSource
+                        if isinstance(source, _InitSettingsSource)
+                        else type(source),
                         source.settings_cls,
                     )
                     break

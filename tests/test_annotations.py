@@ -1,5 +1,6 @@
 """Tests for public annotation helpers."""
 
+from collections import Counter
 from collections.abc import Callable
 from pathlib import Path
 from typing import Annotated
@@ -21,6 +22,7 @@ from confidantic.annotations import (
     WhitespaceDelimited,
     get_proper_args,
 )
+from confidantic.utils import make
 
 
 def test_absolute_path_annotation_accepts_path_values() -> None:
@@ -221,6 +223,18 @@ def test_import_resolves_import_strings_and_serializes_objects() -> None:
     assert Settings.model_validate_json(settings.model_dump_json()).callable is len
 
 
+def test_import_accepts_class_defaults() -> None:
+    """Import annotations retain class objects as typed configuration defaults."""
+
+    class Settings(BaseConfig):
+        collection: Import[type[Counter]] = Counter
+
+    settings = Settings()
+
+    assert settings.collection is Counter
+    assert settings.model_dump(mode="json") == {"collection": "collections:Counter"}
+
+
 def test_call_invokes_callables_import_strings_and_call_mappings() -> None:
     """Call annotations evaluate all supported directive forms before validation."""
 
@@ -321,6 +335,19 @@ def test_make_recursively_evaluates_nested_call_mappings() -> None:
     )
 
     assert settings.value == {"items": [{"answer": 42}]}
+
+
+def test_make_can_evaluate_values_without_a_pydantic_handler() -> None:
+    """The standalone helper returns the value a Make field would receive."""
+    value = make(
+        {
+            "items": [
+                {"@call": "builtins:dict", "answer": 42},
+            ]
+        }
+    )
+
+    assert value == {"items": [{"answer": 42}]}
 
 
 def test_make_preserves_nested_constructed_values() -> None:

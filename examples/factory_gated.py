@@ -5,11 +5,31 @@
 This mirrors applications that use a small routing CLI before parsing the
 selected implementation's options. The example is self-contained and needs
 only Confidantic.
+
+Run the example with the default moving average and set its generated options::
+
+    python examples/factory_gated.py \
+        --types.estimator __main__:MovingAverage \
+        --estimator.window 10 --estimator.center
+
+Select a different implementation; its constructor adds the ``decay`` option::
+
+    python examples/factory_gated.py \
+        --types.estimator __main__:ExponentialMovingAverage \
+        --estimator.window 12 --estimator.decay 0.85
+
+The final configuration help shows the selected type's generated options::
+
+    python examples/factory_gated.py --help
+
+The routing stage can show help for choosing a type instead. It exits before
+the final configuration is parsed::
+
+    python examples/factory_gated.py --help.types
 """
 
-from pydantic import Field, ImportString
-
-from confidantic import BaseConfig, FactoryConfig
+from confidantic import BaseConfig, Factory
+from confidantic.annotations import Import
 
 
 class MovingAverage:
@@ -23,15 +43,35 @@ class MovingAverage:
         return f"{self.__class__.__name__}(window={self.window}, center={self.center})"
 
 
+class ExponentialMovingAverage(MovingAverage):
+    """A moving average with an additional smoothing factor."""
+
+    def __init__(
+        self,
+        window: int = 20,
+        center: bool = False,
+        decay: float = 0.9,
+    ) -> None:
+        super().__init__(window=window, center=center)
+        self.decay = decay
+
+    def __repr__(self) -> str:
+        return (
+            f"{self.__class__.__name__}(window={self.window}, "
+            f"center={self.center}, decay={self.decay})"
+        )
+
+
 # %% Parse routing options without consuming implementation options -----------------
 
 
-# A routing program could use `--help-types` before it knows the selected type.
+# A routing program could use `--help.types` before it knows the selected type.
 class HelpRouter(
     BaseConfig,
-    cli_parse_args=True,
     cli_prefix="help",
     cli_ignore_unknown_args=True,
+    cli_help=False,
+    cli_parse_args=True,
 ):
     """Early CLI options that do not reject later configuration arguments."""
 
@@ -40,33 +80,34 @@ class HelpRouter(
 
 
 help_router = HelpRouter()
-print(help_router)
+help_router.info()
 
 
 # %% Select an importable target type ------------------------------------------------
 
 
-# In a real program, accept `--types-estimator package.module:Type` from the CLI.
+# In a real program, accept `--types.estimator package.module:Type` from the CLI.
 class Types(
     BaseConfig,
     cli_parse_args=True,
     cli_prefix="types",
     cli_ignore_unknown_args=True,
+    cli_help=help_router.types,
 ):
     """Options used to choose which implementation will be configured."""
 
-    estimator: ImportString[type[MovingAverage]]
-    """Import path of the selected implementation class."""
+    estimator: Import[type[MovingAverage]] = MovingAverage
+    """Estimator to use."""
 
 
-types = Types(estimator="__main__:MovingAverage")
+types = Types()
 types.info()
 
 
-# %% Generate and resolve settings for the selected type -----------------------------
+# %% Convert the selected type to a factory ------------------------------------------
 
-# The selected constructor becomes a Pydantic model, including `window` and `center`.
-EstimatorConfig = FactoryConfig.model_from(types.estimator)
+# Convert the selected constructor as soon as its import string has been resolved.
+EstimatorConfig = Factory.model_from(types.estimator)
 
 
 class Config(
@@ -77,17 +118,15 @@ class Config(
 ):
     """Final application settings, including the selected implementation."""
 
-    estimator: EstimatorConfig = Field(default_factory=types.estimator)
+    estimator: EstimatorConfig = EstimatorConfig()
     """Configuration values for the selected implementation."""
     parameter: float = 0.5
     """An ordinary application setting parsed after routing."""
 
 
-config = Config(estimator={"window": 10, "center": True}).model_resolve()
+config = Config(estimator={"window": 10, "center": True})
 config.info()
-
-assert isinstance(config.estimator, MovingAverage)
-assert config.estimator.window == 10
-assert config.estimator.center is True
+estimator = config.estimator.materialize()
+print(estimator)
 
 # %% ---------------------------------------------------------------------------------

@@ -6,7 +6,11 @@ argument-hint: Optional module or coverage concern
 
 # Test Coverage Audit
 
-Start with `make coverage`, then inspect uncovered behavior alongside its tests.
+Start with `uv run coverage erase && make coverage`, then inspect uncovered
+behavior alongside its tests. The explicit erase is needed because the Make
+target uses the persistent repository `.coverage` file; after package files
+are moved or deleted, stale paths can make `coverage report` fail with
+`No source for code`.
 Prioritize branches, validation, error paths, and public behavior. Avoid adding
 tests only to execute trivial lines.
 

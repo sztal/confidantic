@@ -91,6 +91,14 @@ Sources can also inspect the accumulated `current_state` and
 lets lower-priority sources supply missing nested keys. `BaseConfig` preserves
 that behavior across its flattened MRO source sequence.
 
+The implementation is split between [`BaseConfig`][baseconfig] and
+[`ClassDefaultsSource`][defaults-source] in `confidantic/_config/base.py`.
+Factory configuration is implemented by [`Factory`][factory] in
+`confidantic/_config/factory.py`; it builds on the same `BaseConfig` source
+resolution rather than defining a separate precedence system. The published
+[API reference][api-reference] now also includes the public annotation,
+configurable, type, and utility modules.
+
 Supported file-backed sources are:
 
 - Dotenv files, configured on the class with `env_file` or per instance with
@@ -150,3 +158,8 @@ empty because the required inheritance coordinate is unavailable.
 
 - Add user-facing examples showing subclasses that place structured file
   sources at different priorities.
+
+[api-reference]: ../docs/reference/api.md
+[baseconfig]: ../confidantic/_config/base.py
+[defaults-source]: ../confidantic/_config/base.py
+[factory]: ../confidantic/_config/factory.py

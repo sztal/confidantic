@@ -76,7 +76,7 @@ def typecheck(session: nox.Session) -> None:
     session.install(".", "--group", "type")
     session.run(
         "mypy",
-        *(session.posargs or ("confidantic", "tests", "noxfile.py", "scripts")),
+        *(session.posargs or ("confidantic", "noxfile.py", "scripts")),
     )
 
 

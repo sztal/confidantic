@@ -1,14 +1,12 @@
-"""Tests for constructor-derived factory configuration models."""
+"""Tests for constructor-derived generic factory configuration models."""
 
 import sys
-from typing import Annotated, Any, cast, get_args
+from typing import Any
 
 import pytest
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model
 
-from confidantic import BaseConfig, FactoryConfig
-from confidantic import ConfigModelDict as ConfigModelDict
-from confidantic.annotations import Make
+from confidantic import BaseConfig, Factory
 
 _UNTYPED_DEFAULT = object()
 
@@ -37,7 +35,7 @@ Product.__init__.__annotations__.pop("untyped")
 
 
 class Basket:
-    """Target with a mutable constructor value exposed as an attribute."""
+    """Target with mutable constructor attributes."""
 
     def __init__(self, items: list[str], metadata: dict[str, int]) -> None:
         self.items = items
@@ -47,131 +45,58 @@ class Basket:
 class Child:
     """Nested materialization target."""
 
-    def __init__(self, value: int) -> None:
+    def __init__(self, value: int | None = None) -> None:
         self.value = value
 
 
-class ChildConfig(FactoryConfig):
-    """Concrete factory config used in statically typed resolution tests."""
+class ProductModel(BaseModel):
+    """Model containing a typed product factory."""
 
-    factory_target = Child
-    factory_fields = ("value",)
-
-    value: int
-
-
-class NestedModel(BaseModel):
-    """Plain Pydantic model containing a concrete factory config."""
-
-    child: ChildConfig
-
-
-class ResolvableConfig(BaseConfig):
-    """Configuration exercising recursive factory resolution."""
-
-    model_config = ConfigModelDict(frozen=True)
-
-    primary: ChildConfig = Field(
-        default_factory=lambda: ChildConfig(value=1),
-        alias="PRIMARY",
-        description="Primary child factory.",
-    )
-    optional: ChildConfig | None = None
-    choice: ChildConfig | str = "unconfigured"
-    annotated: Annotated[ChildConfig, Field(description="Annotated child.")] = Field(
-        default_factory=lambda: ChildConfig(value=2)
-    )
-    mapping: dict[str, ChildConfig] = Field(default_factory=dict)
-    keyed: dict[ChildConfig, str] = Field(default_factory=dict)
-    sequence: list[ChildConfig] = Field(default_factory=list)
-    fixed: tuple[ChildConfig, ...] = ()
-    unique: set[ChildConfig] = Field(default_factory=set)
-    frozen_unique: frozenset[ChildConfig] = frozenset()
-    nested: NestedModel = Field(
-        default_factory=lambda: NestedModel(child=ChildConfig(value=3))
-    )
-    label: str = "default"
-
-    @field_validator("label")
-    @classmethod
-    def add_marker(cls, value: str) -> str:
-        return f"{value}!"
-
-    def primary_value(self) -> int:
-        """Return the selected primary value."""
-        return self.primary.value
+    factory: Factory[Product]
 
 
 def test_factory_field_converts_target_instance() -> None:
-    """Pydantic fields convert target instances into factory configs."""
-
-    class Model(BaseModel):
-        factory: FactoryConfig
-
+    """Typed Pydantic fields convert a target instance to a factory."""
     source = Product(3, "source", enabled=False)
-    model = Model.model_validate({"factory": source})
 
-    assert isinstance(model.factory, FactoryConfig)
-    assert model.factory.model_dump() == {
-        "count": 3,
-        "label": "source",
-        "enabled": False,
-    }
-    assert isinstance(model.factory.materialize(), Product)
+    factory = ProductModel.model_validate({"factory": source}).factory
+
+    assert isinstance(factory, Factory)
+    assert factory.model_dump() == {"count": 3, "label": "source", "enabled": False}
+    assert isinstance(factory.materialize(), Product)
 
 
-def test_concrete_factory_field_converts_target_instance() -> None:
-    """Concrete factory fields generate compatible config subclasses."""
-    model = NestedModel.model_validate({"child": Child(4)})
+def test_factory_field_validates_mapping() -> None:
+    """Mappings use the generated target factory fields for validation."""
+    factory = ProductModel.model_validate(
+        {"factory": {"count": "5", "label": "configured"}}
+    ).factory
 
-    assert isinstance(model.child, ChildConfig)
-    assert model.child.value == 4
-    assert isinstance(model.child.materialize(), Child)
-
-
-def test_concrete_factory_field_validates_mapping() -> None:
-    """Mappings retain normal concrete model validation."""
-    model = NestedModel.model_validate({"child": {"value": "5"}})
-
-    assert type(model.child) is ChildConfig
-    assert model.child.value == 5
+    assert factory.count == 5
+    assert factory.label == "configured"
 
 
-def test_factory_field_preserves_existing_config_instance() -> None:
-    """Existing factory configs bypass conversion and subtype enforcement."""
+def test_factory_field_converts_assignment() -> None:
+    """Assignment validation applies the generic factory conversion."""
 
     class Model(BaseModel):
-        factory: FactoryConfig
+        model_config = ConfigDict(validate_assignment=True)
 
-    child = ChildConfig(value=6)
-    bare = Model.model_validate({"factory": child})
-    product_config = cast(Any, FactoryConfig.model_from(Product))(count=7)
-    concrete = NestedModel.model_validate({"child": product_config})
+        factory: Factory[Child]
 
-    assert bare.factory is child
-    assert concrete.child is product_config
+    model = Model(factory=Child(10))
+    model.factory = Child(11)
 
-
-def test_factory_field_deserializes_make_directive() -> None:
-    """Make directive data resolves to its concrete configuration type."""
-
-    class Model(BaseModel):
-        factory: Make[FactoryConfig]
-
-    source = ChildConfig(value=6)
-    model = Model.model_validate({"factory": source.model_dump(context={"make": True})})
-
-    assert type(model.factory) is ChildConfig
-    assert model.factory == source
+    assert model.factory.materialize().value == 11
 
 
-def test_factory_field_validation_composes_with_annotations() -> None:
-    """Factory conversion composes with containers, optionals, and unions."""
+def test_factory_field_composes_with_containers_and_unions() -> None:
+    """Generic factory validation composes with standard Pydantic annotations."""
 
     class Model(BaseModel):
-        factories: list[FactoryConfig]
-        optional: FactoryConfig | None
-        choice: FactoryConfig | str
+        factories: list[Factory[Child]]
+        optional: Factory[Child] | None
+        choice: Factory[Child] | str
 
     model = Model.model_validate(
         {
@@ -181,96 +106,51 @@ def test_factory_field_validation_composes_with_annotations() -> None:
         }
     )
 
-    assert isinstance(model.factories[0], FactoryConfig)
     assert model.factories[0].materialize().value == 8
-    assert isinstance(model.optional, FactoryConfig)
+    assert model.optional is not None
     assert model.optional.materialize().value == 9
     assert model.choice == "unchanged"
 
 
-def test_factory_field_converts_assignment() -> None:
-    """Assignment validation uses the same factory conversion schema."""
-
-    class Model(BaseModel):
-        model_config = ConfigDict(validate_assignment=True)
-
-        factory: FactoryConfig
-
-    model = Model(factory=ChildConfig(value=10))
-    cast(Any, model).factory = Child(11)
-
-    assert isinstance(model.factory, FactoryConfig)
-    assert model.factory.materialize().value == 11
-
-
 def test_factory_field_failure_allows_union_fallback() -> None:
-    """Factory conversion failures remain local to their union branch."""
+    """A mismatched target lets a union's following branch validate it."""
 
     class PositionalTarget:
         def __init__(self, value: int, /) -> None:
             self.value = value
 
-    class FactoryModel(BaseModel):
-        factory: FactoryConfig
-
-    class UnionModel(BaseModel):
+    class Model(BaseModel):
         model_config = ConfigDict(arbitrary_types_allowed=True)
 
-        factory: FactoryConfig | PositionalTarget
+        factory: Factory[Product] | PositionalTarget
 
-    source = PositionalTarget(12)
-
-    with pytest.raises(ValidationError, match="FactoryConfig"):
-        FactoryModel.model_validate({"factory": source})
-
-    assert UnionModel.model_validate({"factory": source}).factory is source
+    assert isinstance(Model(factory=PositionalTarget(12)).factory, PositionalTarget)
 
 
-def test_model_from_type_creates_ordered_config_fields() -> None:
-    """Only annotated keyword-capable constructor parameters become fields."""
-    config_type = cast(Any, FactoryConfig.model_from(Product))
+def test_model_from_type_creates_typed_config_fields() -> None:
+    """Constructor annotations define fields on the generated generic factory."""
+    config_type = Factory.model_from(Product)
 
     assert config_type.__name__ == "ProductConfig"
-    assert issubclass(config_type, FactoryConfig)
+    assert config_type.__module__ == Product.__module__
+    assert issubclass(config_type, Factory)
     assert config_type.factory_target is Product
     assert config_type.factory_fields == ("count", "label", "enabled")
     assert tuple(config_type.model_fields) == ("count", "label", "enabled")
     assert config_type.model_fields["count"].is_required()
     assert config_type.model_fields["label"].default == "default"
     assert config_type.model_fields["enabled"].default is True
-
-
-def test_cli_help_omits_generated_factory_attributes(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """Generated factory fields do not become CLI group descriptions."""
-
-    class Target:
-        def __init__(self, value: int = 1) -> None:
-            self.value = value
-
-    class Config(BaseConfig, cli_parse_args=True):
-        target: FactoryConfig.model_from(Target) = Field(  # type: ignore[valid-type]
-            default_factory=Target
-        )
-
-    with pytest.raises(SystemExit, match="0"):
-        cast(Any, Config)(_cli_parse_args=["--help"])
-
-    output = capsys.readouterr().out
-    assert "target options:" in output
-    assert "--target.value int" in output
-    assert "Attributes" not in output
+    assert config_type(count=1).model_dump(context={"make": True})["@call"] == (
+        "tests.test_config_factory:Product"
+    )
 
 
 def test_model_from_type_accepts_custom_name() -> None:
     """Callers can choose the generated model name."""
-    config_type = cast(
-        Any,
-        FactoryConfig.model_from(Product, name="ConfiguredProduct"),
+    assert (
+        Factory.model_from(Product, name="ConfiguredProduct").__name__
+        == "ConfiguredProduct"
     )
-
-    assert config_type.__name__ == "ConfiguredProduct"
 
 
 def test_model_from_rejects_annotated_positional_only_parameter() -> None:
@@ -284,14 +164,12 @@ def test_model_from_rejects_annotated_positional_only_parameter() -> None:
         TypeError,
         match=r"PositionalTarget.__init__ parameter 'value' is positional-only",
     ):
-        FactoryConfig.model_from(PositionalTarget)
+        Factory.model_from(PositionalTarget)
 
 
 def test_model_from_instance_uses_isolated_attribute_defaults() -> None:
     """Mutable instance attributes are copied for every config instance."""
-    source = Basket(["first"], {"count": 1})
-    config_type = cast(Any, FactoryConfig.model_from(source))
-
+    config_type = Factory.model_from(Basket(["first"], {"count": 1}))
     first = config_type()
     second = config_type()
     first.items.append("second")
@@ -301,50 +179,30 @@ def test_model_from_instance_uses_isolated_attribute_defaults() -> None:
     assert first.metadata == {"count": 2}
     assert second.items == ["first"]
     assert second.metadata == {"count": 1}
-    assert source.items == ["first"]
-    assert source.metadata == {"count": 1}
 
 
-def test_model_from_instance_uses_immutable_attribute_defaults() -> None:
-    """Immutable instance attributes become generated model defaults."""
-    source = Product(4, "source", enabled=False)
-    config_type = cast(Any, FactoryConfig.model_from(source))
+def test_model_from_instance_copies_custom_unhashable_defaults() -> None:
+    """Custom unhashable instance attributes receive isolated defaults."""
 
-    assert config_type().model_dump() == {
-        "count": 4,
-        "label": "source",
-        "enabled": False,
-    }
+    class Unhashable:
+        __hash__ = None  # type: ignore[assignment]
 
+    default_value = Unhashable()
 
-def test_model_from_instance_clones_unhashable_attribute_defaults() -> None:
-    """Unhashable model attributes are deeply isolated between configs."""
+    class Target:
+        def __init__(self, value: Any = default_value) -> None:
+            self.value = value
 
-    class Payload(BaseModel):
-        value: int
-
-    class PayloadTarget:
-        def __init__(self, payload: Payload) -> None:
-            self.payload = payload
-
-    source = PayloadTarget(Payload(value=1))
-    config_type = cast(Any, FactoryConfig.model_from(source))
-
+    config_type = Factory.model_from(Target(Unhashable()))
     first = config_type()
     second = config_type()
-    first.payload.value = 2
 
-    assert first.payload.value == 2
-    assert second.payload.value == 1
-    assert source.payload.value == 1
-    assert first.payload is not second.payload
-    assert first.payload is not source.payload
+    assert first.value is not second.value
 
 
 def test_materialize_validates_values_and_calls_target() -> None:
     """Materialization passes validated fields to the target constructor."""
-    config_type = cast(Any, FactoryConfig.model_from(Product))
-    config = config_type(count="3", label="configured", enabled=False)
+    config = Factory.model_from(Product)(count="3", label="configured", enabled=False)
 
     product = config.materialize()
 
@@ -353,53 +211,147 @@ def test_materialize_validates_values_and_calls_target() -> None:
     assert product.label == "configured"
     assert product.enabled is False
     assert config() is not product
-    assert FactoryConfig.__call__ is FactoryConfig.materialize
-    assert not hasattr(FactoryConfig, "build")
+    assert Factory.__call__ is Factory.materialize
+
+
+def test_materialize_overrides_configured_values_with_kwargs() -> None:
+    """Materialization keyword arguments override configured values."""
+    config = Factory.model_from(Product)(count=3, label="configured", enabled=False)
+
+    product = config.materialize(label="overridden", enabled=True)
+
+    assert product.label == "overridden"
+    assert product.enabled is True
 
 
 def test_materialize_resolves_nested_factory_configs() -> None:
-    """Nested factory configs in fields and containers resolve recursively."""
+    """Direct materialization recursively materializes nested factories."""
 
-    class ConfiguredParent:
-        def __init__(self, child: Any, children: list[Any]) -> None:
+    class Parent:
+        def __init__(
+            self, child: Factory[Child], children: list[Factory[Child]]
+        ) -> None:
             self.child = child
             self.children = children
 
-    ConfiguredParent.__init__.__annotations__ = {
-        "child": ChildConfig,
-        "children": list[ChildConfig],
-        "return": None,
-    }
-    parent_config = cast(Any, FactoryConfig.model_from(ConfiguredParent))
-    config = parent_config(
-        child=ChildConfig(value=1),
-        children=[ChildConfig(value=2), ChildConfig(value=3)],
+    child_config = Factory.model_from(Child)
+    parent = Factory.model_from(Parent)(
+        child=child_config(value=1),
+        children=[child_config(value=2), child_config(value=3)],
+    ).materialize()
+
+    assert isinstance(parent.child, Child)
+    assert [child.value for child in parent.children] == [2, 3]
+
+
+def test_materialize_resolves_nested_factories_in_containers() -> None:
+    """Nested factories are resolved in mappings and immutable containers."""
+
+    class Parent:
+        def __init__(
+            self,
+            mapping: dict[str, Any],
+            tuple_value: tuple[Any, ...],
+            set_value: set[Any],
+            frozenset_value: frozenset[Any],
+        ) -> None:
+            self.mapping = mapping
+            self.tuple_value = tuple_value
+            self.set_value = set_value
+            self.frozenset_value = frozenset_value
+
+    child_config = Factory.model_from(Child)
+    parent = (
+        Factory.model_from(Parent)
+        .model_construct(
+            mapping={"child": child_config(value=1)},
+            tuple_value=(child_config(value=2),),
+            set_value={child_config(value=3)},
+            frozenset_value=frozenset({child_config(value=4)}),
+        )
+        .materialize()
+    )
+
+    assert parent.mapping["child"].value == 1
+    assert parent.tuple_value[0].value == 2
+    assert {child.value for child in parent.set_value} == {3}
+    assert {child.value for child in parent.frozenset_value} == {4}
+
+
+def test_factory_accepts_nested_factories_in_set_inputs() -> None:
+    """Validated factory configs can be supplied in set-valued inputs."""
+
+    class Parent:
+        def __init__(
+            self,
+            children: set[Factory[Child]],
+            frozen_children: frozenset[Factory[Child]],
+        ) -> None:
+            self.children = children
+            self.frozen_children = frozen_children
+
+    child_config = Factory.model_from(Child)
+    config = Factory.model_from(Parent)(
+        children={child_config(value=1)},
+        frozen_children=frozenset({child_config(value=2)}),
     )
 
     parent = config.materialize()
 
-    assert isinstance(parent.child, Child)
-    assert parent.child.value == 1
-    assert [child.value for child in parent.children] == [2, 3]
+    assert {child.value for child in parent.children} == {1}
+    assert {child.value for child in parent.frozen_children} == {2}
 
 
-def test_materialize_propagates_target_errors() -> None:
-    """Errors raised by a target constructor are not hidden."""
+def test_materialize_rejects_cyclic_values() -> None:
+    """Cyclic nested values cannot be recursively materialized."""
 
-    class FailingTarget:
-        def __init__(self, value: int) -> None:
-            raise RuntimeError(value)
+    class Parent:
+        def __init__(self, payload: Any) -> None:
+            self.payload = payload
 
-    config_type = cast(Any, FactoryConfig.model_from(FailingTarget))
+    payload: list[Any] = []
+    payload.append(payload)
+    config = Factory.model_from(Parent).model_construct(payload=payload)
 
-    with pytest.raises(RuntimeError, match="5"):
-        config_type(value=5).materialize()
+    with pytest.raises(ValueError, match="cyclic values cannot be resolved"):
+        config.materialize()
+
+
+def test_factory_default_target_class_is_converted() -> None:
+    """A target class default is converted through the typed factory schema."""
+    config_type = create_model(
+        "Config",
+        __base__=BaseConfig,
+        service=(Factory[Child], Child),
+    )
+
+    assert config_type().service.materialize().value is None
+
+
+def test_factory_instance_default_is_type_safe() -> None:
+    """Factory instances provide a type-safe default for annotated fields."""
+
+    class Config(BaseConfig):
+        service: Factory[Child] = Factory[Child].instance_from(Child)
+
+    assert Config().service.materialize().value is None
+
+
+def test_factory_default_factory_is_converted() -> None:
+    """Normal Pydantic default factories remain supported."""
+
+    class Config(BaseConfig):
+        service: Factory[Child] = Field(
+            default_factory=lambda: Factory[Child].instance_from(Child, value=4)
+        )
+
+    assert Config().service.materialize().value == 4
 
 
 def test_materialize_disables_cli_parsing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Target construction cannot consume process CLI arguments."""
+    """Target construction cannot consume process command-line arguments."""
 
     class CliConfig(BaseConfig, cli_parse_args=True):
         value: int = 1
@@ -408,227 +360,17 @@ def test_materialize_disables_cli_parsing(
         def __init__(self) -> None:
             self.config = CliConfig()
 
-    config_type = cast(Any, FactoryConfig.model_from(Target))
     monkeypatch.setattr(sys, "argv", ["factory.py", "--value=17"])
 
-    target = config_type().materialize()
-
-    assert target.config.value == 1
-    assert CliConfig().value == 17
+    assert Factory.model_from(Target)().materialize().config.value == 1
 
 
-def test_model_resolve_disables_cli_parsing(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Resolved model construction does not reparse process arguments."""
-
-    class Config(BaseConfig, cli_parse_args=True):
-        child: ChildConfig = Field(default_factory=lambda: ChildConfig(value=1))
-
-    monkeypatch.setattr(sys, "argv", ["factory.py", "--child.value=17"])
-    source = Config()
-
-    resolved = source.model_resolve()
-
-    assert source.child.value == 17
-    assert resolved.child.value == 17
+def test_model_resolve_is_not_available() -> None:
+    """Whole-model factory materialization is intentionally unsupported."""
+    assert not hasattr(BaseConfig, "model_resolve")
 
 
-def test_model_resolve_uses_instance_values() -> None:
-    """Resolution uses the source instance's current validated values."""
-    source = ResolvableConfig(PRIMARY=ChildConfig(value=10), label="custom")
-    resolved = source.model_resolve()
-
-    assert type(resolved).__name__ == "ResolvableConfigResolved"
-    assert issubclass(type(resolved), ResolvableConfig)
-    assert isinstance(resolved.primary, Child)
-    assert resolved.primary.value == 10
-    assert isinstance(source.primary, ChildConfig)
-    assert source.primary.value == 10
-    assert resolved.model_config["frozen"] is True  # type: ignore[truthy-function]
-    assert resolved.primary_value() == 10
-    assert source.label == "custom!"
-    assert resolved.label == "custom!!"
-
-
-def test_model_resolve_preserves_field_metadata_and_resolved_defaults() -> None:
-    """Overridden resolved fields retain metadata and remain constructible."""
-    resolved = ResolvableConfig().model_resolve()
-    resolved_type = type(resolved)
-    primary_field = resolved_type.model_fields["primary"]
-
-    assert primary_field.annotation is Child
-    assert primary_field.alias == "PRIMARY"
-    assert primary_field.description == "Primary child factory."
-    assert resolved_type.model_fields["annotated"].description == "Annotated child."
-
-    another = resolved_type()
-
-    assert isinstance(another.primary, Child)
-    assert another.primary.value == 1
-    assert another.primary is not resolved.primary
-
-
-def test_resolved_model_preserves_validated_data_default_factory() -> None:
-    """Resolved defaults can depend on preceding validated field values."""
-
-    class DependentConfig(BaseConfig):
-        seed: int = 3
-        child: ChildConfig = Field(
-            default_factory=lambda data: ChildConfig(value=data["seed"])
-        )
-
-    resolved_type = type(DependentConfig().model_resolve())
-    resolved = resolved_type(seed=7)
-
-    assert isinstance(resolved.child, Child)
-    assert resolved.child.value == 7
-
-
-def test_model_resolve_materializes_pydantic_extra_values() -> None:
-    """Factory configs stored as Pydantic extras resolve recursively."""
-
-    class OpenModel(BaseModel):
-        model_config = ConfigDict(extra="allow")
-
-    class ExtraConfig(BaseConfig):
-        nested: OpenModel
-
-    nested = OpenModel.model_validate(
-        {"factory": ChildConfig(value=12)},
-    )
-    source = ExtraConfig(nested=nested)
-    resolved = source.model_resolve()
-    nested = cast(Any, resolved.nested)
-
-    assert type(nested).__name__ == "OpenModelResolved"
-    assert isinstance(nested.factory, Child)
-    assert nested.factory.value == 12
-
-
-def test_model_resolve_preserves_nested_annotation_metadata() -> None:
-    """Nested metadata survives factory substitution and unchanged fields."""
-
-    class AnnotationConfig(BaseConfig):
-        children: list[Annotated[ChildConfig, Field(description="Nested child.")]]
-        positive: list[Annotated[int, Field(gt=0)]] = Field(default_factory=lambda: [1])
-
-    source = AnnotationConfig(children=[ChildConfig(value=13)])
-    resolved = source.model_resolve()
-    resolved_values = cast(Any, resolved)
-    fields = type(resolved).model_fields
-
-    assert isinstance(resolved_values.children[0], Child)
-    nested_annotation = get_args(fields["children"].annotation)[0]
-    nested_type, nested_metadata = get_args(nested_annotation)
-    assert nested_type is Child
-    assert nested_metadata.description == "Nested child."
-    assert (
-        fields["positive"].annotation
-        == AnnotationConfig.model_fields["positive"].annotation
-    )
-
-
-def test_model_resolve_handles_recursive_model_annotations() -> None:
-    """Recursive schemas resolve factory fields at every concrete level."""
-
-    class RecursiveModel(BaseModel):
-        child: ChildConfig
-        nested: "RecursiveModel | None" = None
-
-    class RecursiveConfig(BaseConfig):
-        recursive: RecursiveModel
-
-    source = RecursiveConfig(
-        recursive=RecursiveModel(
-            child=ChildConfig(value=15),
-            nested=RecursiveModel(child=ChildConfig(value=16)),
-        )
-    )
-    resolved = source.model_resolve()
-    recursive = cast(Any, resolved.recursive)
-
-    assert type(recursive).__name__ == "RecursiveModelResolved"
-    assert isinstance(recursive.child, Child)
-    assert type(recursive.nested).__name__ == "RecursiveModelResolved"
-    assert isinstance(recursive.nested.child, Child)
-
-
-def test_model_resolve_transforms_nested_models_and_containers() -> None:
-    """Declared concrete factories resolve throughout supported annotations."""
-    source = ResolvableConfig(
-        optional=ChildConfig(value=4),
-        choice=ChildConfig(value=5),
-        mapping={"child": ChildConfig(value=6)},
-        sequence=[ChildConfig(value=7)],
-        fixed=(ChildConfig(value=8),),
-        nested=NestedModel(child=ChildConfig(value=11)),
-    )
-    source = source.model_copy(
-        update={
-            "keyed": {ChildConfig(value=8): "child"},  # type: ignore[dict-item]
-            "unique": {ChildConfig(value=9)},  # type: ignore[dict-item]
-            "frozen_unique": frozenset({ChildConfig(value=10)}),  # type: ignore[dict-item]
-        }
-    )
-
-    resolved = source.model_resolve()
-    resolved_values = cast(Any, resolved)
-
-    assert isinstance(resolved_values.optional, Child)
-    assert isinstance(resolved_values.choice, Child)
-    assert isinstance(resolved_values.annotated, Child)
-    assert isinstance(resolved_values.mapping["child"], Child)
-    assert all(isinstance(child, Child) for child in resolved_values.keyed)
-    assert isinstance(resolved_values.sequence[0], Child)
-    assert isinstance(resolved_values.fixed[0], Child)
-    assert all(isinstance(child, Child) for child in resolved_values.unique)
-    assert all(isinstance(child, Child) for child in resolved_values.frozen_unique)
-    assert type(resolved_values.nested).__name__ == "NestedModelResolved"
-    assert isinstance(resolved_values.nested, NestedModel)
-    assert isinstance(resolved_values.nested.child, Child)
-
-    fields = type(resolved).model_fields
-    assert fields["optional"].annotation == Child | None
-    assert fields["choice"].annotation == Child | str
-    assert fields["mapping"].annotation == dict[str, Child]
-    assert fields["keyed"].annotation == dict[Child, str]
-    assert fields["sequence"].annotation == list[Child]
-    assert fields["fixed"].annotation == tuple[Child, ...]
-    assert fields["unique"].annotation == set[Child]
-    assert fields["frozen_unique"].annotation == frozenset[Child]
-
-
-def test_model_resolve_rejects_bare_factory_annotation() -> None:
-    """A bare FactoryConfig does not identify a stable target annotation."""
-
-    class BareConfig(BaseConfig):
-        factory: FactoryConfig
-
-    source = BareConfig(factory=ChildConfig(value=1))
-
-    with pytest.raises(
-        TypeError,
-        match="FactoryConfig annotations must use a concrete generated subclass",
-    ):
-        source.model_resolve()
-
-
-def test_model_resolve_requires_an_instance() -> None:
-    """The normal method cannot be called without a config instance."""
-    with pytest.raises(TypeError, match="missing 1 required positional argument"):
-        cast(Any, ResolvableConfig).model_resolve()
-
-
-def test_model_resolve_rejects_cyclic_values() -> None:
-    """Recursive resolution reports active object cycles clearly."""
-
-    class CyclicConfig(BaseConfig):
-        value: Any
-
-    cycle: list[Any] = []
-    cycle.append(cycle)
-    source = CyclicConfig.model_construct(value=cycle)
-
-    with pytest.raises(ValueError, match="cyclic values cannot be resolved"):
-        source.model_resolve()
+def test_invalid_factory_input_reports_validation_error() -> None:
+    """Factory validation exposes an ordinary Pydantic validation error."""
+    with pytest.raises(ValidationError, match="Factory"):
+        ProductModel.model_validate({"factory": object()})

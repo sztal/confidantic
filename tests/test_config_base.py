@@ -8,7 +8,7 @@ from importlib import import_module
 from inspect import signature
 from io import StringIO
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, ClassVar, Literal, cast
 
 import pytest
 from docstring_parser import DocstringStyle, parse
@@ -147,6 +147,45 @@ def test_base_config_accepts_base_settings_sunder_arguments() -> None:
     BaseConfig(**dict.fromkeys(base_settings_options))
 
 
+def test_base_config_accepts_custom_class_and_instance_options(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Custom model options support class and leading-underscore forms."""
+    env_file = tmp_path / ".env"
+    env_file.write_text("VALUE=from-discovery\n", encoding="utf-8")
+
+    class Config(
+        BaseConfig,
+        env_file_discovery=True,
+        cli_help=False,
+    ):
+        value: str = "default"
+
+        @classmethod
+        def find_dotenv(cls) -> str:
+            return str(env_file)
+
+    assert Config.model_config.get("env_file_discovery") is True
+    assert Config.model_config.get("cli_help") is False
+    assert Config(_env_file_discovery=False).value == "default"
+    assert Config(_env_file_discovery=True, _cli_help=False).value == ("from-discovery")
+
+
+def test_base_config_instance_cli_help_override_does_not_mutate_model_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A per-instance CLI override is isolated from the model configuration."""
+
+    class Config(BaseConfig, cli_parse_args=True):
+        value: int = 1
+
+    monkeypatch.setattr(sys, "argv", ["config.py", "--help"])
+
+    assert Config(_cli_help=False).value == 1
+    assert Config.model_config.get("cli_help") is True
+
+
 def test_config_model_dict_documents_all_settings_options() -> None:
     """The public option reference covers Pydantic Settings and extensions."""
     documented_options = {
@@ -215,6 +254,17 @@ def test_make_serialization_is_opt_in_and_recursive() -> None:
         '{"@call":"tests.test_config_base:SerializedParentConfig",'
         '"child":{"@call":"tests.test_config_base:SerializedChildConfig",'
         '"value":1}}'
+    )
+
+
+def test_make_serialization_does_not_use_factory_target_attribute() -> None:
+    """Only Factory instances use their target for Make directives."""
+
+    class MisleadingConfig(BaseConfig):
+        factory_target: ClassVar[type] = str
+
+    assert MisleadingConfig().model_dump(context={"make": True})["@call"] == (
+        "tests.test_config_base:test_make_serialization_does_not_use_factory_target_attribute.<locals>.MisleadingConfig"
     )
 
 

@@ -4,8 +4,8 @@ __all__ = (
     "BaseConfig",
     "ClassDefaultsSource",
     "ConfigModelDict",
-    "FactoryConfig",
+    "Factory",
 )
 
 from confidantic._config.base import BaseConfig, ClassDefaultsSource, ConfigModelDict
-from confidantic._config.factory import FactoryConfig
+from confidantic._config.factory import Factory

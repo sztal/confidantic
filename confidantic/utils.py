@@ -1,4 +1,5 @@
 import sys
+from collections.abc import Callable, Iterable, Mapping
 from functools import singledispatch
 from types import ModuleType
 from typing import Any, cast
@@ -9,6 +10,7 @@ __all__ = (
     "get_import_string",
     "import_from_string",
     "is_runtime_jupyterlike",
+    "make",
 )
 
 
@@ -84,3 +86,57 @@ def import_from_string(import_string: str, type_hint: Any = Any) -> Any:
     """
     import_type = cast(Any, ImportString)[type_hint]
     return TypeAdapter(import_type).validate_python(import_string)
+
+
+def _call_mapping(value: Mapping[Any, Any]) -> Any:
+    if "@call" not in value:
+        errmsg = "Call mappings require an '@call' key"
+        raise ValueError(errmsg)
+    target = value["@call"]
+    args = value.get("@args", ())
+    if not isinstance(args, Iterable):
+        raise ValueError("'@args' must be an iterable")
+    kwargs = {key: item for key, item in value.items() if key not in {"@args", "@call"}}
+    callable_value = (
+        import_from_string(target, Callable) if isinstance(target, str) else target
+    )
+    return callable_value(*args, **kwargs)
+
+
+def make(value: Any, handler: Callable[[Any], Any] | None = None) -> Any:
+    """Evaluate nested Make directives in a value.
+
+    Parameters
+    ----------
+    value
+        Value containing call mappings, import strings, or callable values.
+    handler
+        Optional final validator used by :class:`confidantic.annotations.Make`.
+        Direct callers can omit it to receive the evaluated value directly.
+
+    Returns
+    -------
+    Any
+        The value after recursively evaluating call mappings and applying the
+        optional handler.
+    """
+
+    def build(item: Any) -> Any:
+        if isinstance(item, Mapping):
+            built = {key: build(nested_value) for key, nested_value in item.items()}
+            return _call_mapping(built) if "@call" in built else built
+        if isinstance(item, list):
+            return [build(nested_value) for nested_value in item]
+        if isinstance(item, tuple):
+            return tuple(build(nested_value) for nested_value in item)
+        return item
+
+    if isinstance(value, Mapping | list | tuple):
+        result = build(value)
+    elif isinstance(value, str):
+        result = import_from_string(value, Callable)()
+    elif callable(value):
+        result = value()
+    else:
+        result = value
+    return handler(result) if handler is not None else result

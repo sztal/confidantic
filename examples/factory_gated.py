@@ -29,7 +29,6 @@ the final configuration is parsed::
 """
 
 from confidantic import BaseConfig, Factory
-from confidantic.annotations import Import
 
 
 class MovingAverage:
@@ -96,7 +95,8 @@ class Types(
 ):
     """Options used to choose which implementation will be configured."""
 
-    estimator: Import[type[MovingAverage]] = MovingAverage
+    estimator: Factory.Field[MovingAverage] = MovingAverage(window=20)
+    # estimator: Import[type[MovingAverage]] = MovingAverage
     """Estimator to use."""
 
 
@@ -105,9 +105,6 @@ types.info()
 
 
 # %% Convert the selected type to a factory ------------------------------------------
-
-# Convert the selected constructor as soon as its import string has been resolved.
-EstimatorConfig = Factory.model_from(types.estimator)
 
 
 class Config(
@@ -118,15 +115,16 @@ class Config(
 ):
     """Final application settings, including the selected implementation."""
 
-    estimator: EstimatorConfig = EstimatorConfig()
+    estimator: types.estimator = types.estimator()
     """Configuration values for the selected implementation."""
     parameter: float = 0.5
     """An ordinary application setting parsed after routing."""
 
 
-config = Config(estimator={"window": 10, "center": True})
+config = Config(estimator={"center": True})
 config.info()
 estimator = config.estimator.materialize()
+
 print(estimator)
 
 # %% ---------------------------------------------------------------------------------

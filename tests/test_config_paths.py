@@ -30,6 +30,19 @@ def test_dynamic_path_call_joins_path_segments() -> None:
     assert joined("archive") == path.joinpath("raw", "items.json", "archive")
 
 
+def test_base_paths_call_joins_segments_to_root(tmp_path: Path) -> None:
+    """Calling a paths model delegates to its root path."""
+    paths = _build_paths(root=tmp_path)
+
+    joined = paths("data", Path("items.json"))
+
+    assert type(joined) is ExtensiblePath
+    assert joined == paths.root.joinpath("data", "items.json")
+
+    with pytest.raises(TypeError):
+        paths(segment="data")
+
+
 def test_dynamic_path_has_no_dynamic_segment_attributes() -> None:
     """Unknown attributes do not append path segments."""
     path = ExtensiblePath("data")

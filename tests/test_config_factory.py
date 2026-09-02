@@ -1,7 +1,8 @@
 """Tests for constructor-derived generic factory configuration models."""
 
 import sys
-from typing import Any
+from types import ModuleType
+from typing import Any, ForwardRef
 
 import pytest
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model
@@ -151,6 +152,32 @@ def test_model_from_type_accepts_custom_name() -> None:
         Factory.model_from(Product, name="ConfiguredProduct").__name__
         == "ConfiguredProduct"
     )
+
+
+def test_model_from_resolves_annotations_from_base_class_modules() -> None:
+    """Inherited runtime types are available to nested forward references."""
+    base_module = ModuleType("factory_base_module")
+    exec(
+        "class BaseOptimization(int):\n    pass\n",
+        vars(base_module),
+    )
+    target_namespace = {"__name__": __name__}
+    target_namespace["Fallback"] = ForwardRef("BaseOptimization") | None
+    exec(
+        "def target_init(self, fallback: 'Fallback' = None):\n"
+        "    self.fallback = fallback\n",
+        target_namespace,
+    )
+    target = type(
+        "Target",
+        (base_module.BaseOptimization,),
+        {"__module__": __name__, "__init__": target_namespace["target_init"]},
+    )
+    sys.modules[base_module.__name__] = base_module
+
+    config_type = Factory.model_from(target)
+
+    assert config_type().fallback is None
 
 
 def test_model_from_rejects_annotated_positional_only_parameter() -> None:

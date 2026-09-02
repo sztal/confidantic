@@ -1,5 +1,6 @@
 """Configuration models generated from object constructors."""
 
+import sys
 from collections.abc import (
     Callable,
     Mapping,
@@ -204,7 +205,18 @@ class Factory(BaseConfig, Generic[T]):
         name: str | None,
     ) -> type[Self]:
         init = target.__init__
-        annotations = get_type_hints(init, include_extras=True)
+        namespace: dict[str, Any] = {}
+        for base in reversed(target.__mro__):
+            module = sys.modules.get(base.__module__)
+            if module is not None:
+                namespace.update(vars(module))
+        namespace.update(getattr(init, "__globals__", {}))
+        annotations = get_type_hints(
+            init,
+            globalns=namespace,
+            localns=namespace,
+            include_extras=True,
+        )
         fields: dict[str, tuple[Any, Any]] = {}
 
         for index, (field_name, parameter) in enumerate(

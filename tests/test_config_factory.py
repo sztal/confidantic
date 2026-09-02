@@ -53,63 +53,67 @@ class Child:
 class ProductModel(BaseModel):
     """Model containing a typed product factory."""
 
-    factory: Factory[Product]
+    factory: Factory.Field[Product]
+
+
+def test_factory_field_converts_target_type() -> None:
+    """Typed Pydantic fields convert a target type to a factory type."""
+
+    factory = ProductModel.model_validate({"factory": Product}).factory
+
+    assert factory.factory_target is Product
 
 
 def test_factory_field_converts_target_instance() -> None:
-    """Typed Pydantic fields convert a target instance to a factory."""
+    """Typed Pydantic fields derive factory defaults from target instances."""
     source = Product(3, "source", enabled=False)
 
     factory = ProductModel.model_validate({"factory": source}).factory
 
-    assert isinstance(factory, Factory)
-    assert factory.model_dump() == {"count": 3, "label": "source", "enabled": False}
-    assert isinstance(factory.materialize(), Product)
+    assert factory.factory_target is Product
+    assert factory().model_dump() == {
+        "count": 3,
+        "label": "source",
+        "enabled": False,
+    }
 
 
-def test_factory_field_validates_mapping() -> None:
-    """Mappings use the generated target factory fields for validation."""
-    factory = ProductModel.model_validate(
-        {"factory": {"count": "5", "label": "configured"}}
-    ).factory
+def test_factory_field_preserves_factory_type() -> None:
+    """Factory fields preserve an already-generated matching factory type."""
+    factory_type = Factory.model_from(Product)
 
-    assert factory.count == 5
-    assert factory.label == "configured"
+    assert (
+        ProductModel.model_validate({"factory": factory_type}).factory is factory_type
+    )
 
 
-def test_factory_field_converts_assignment() -> None:
-    """Assignment validation applies the generic factory conversion."""
+def test_factory_field_rejects_factory_instances() -> None:
+    """Factory fields reject factory instances because they store types."""
+    factory_type = Factory.model_from(Child)
 
-    class Model(BaseModel):
-        model_config = ConfigDict(validate_assignment=True)
-
-        factory: Factory[Child]
-
-    model = Model(factory=Child(10))
-    model.factory = Child(11)
-
-    assert model.factory.materialize().value == 11
+    with pytest.raises(ValidationError, match="target type or Factory type"):
+        ProductModel.model_validate({"factory": factory_type()})
 
 
 def test_factory_field_composes_with_containers_and_unions() -> None:
     """Generic factory validation composes with standard Pydantic annotations."""
 
     class Model(BaseModel):
-        factories: list[Factory[Child]]
-        optional: Factory[Child] | None
-        choice: Factory[Child] | str
+        factories: list[Factory.Field[Child]]
+        optional: Factory.Field[Child] | None
+        choice: Factory.Field[Child] | str
 
     model = Model.model_validate(
         {
-            "factories": [Child(8)],
-            "optional": Child(9),
+            "factories": [Child],
+            "optional": Child,
             "choice": "unchanged",
         }
     )
 
-    assert model.factories[0].materialize().value == 8
+    assert model.factories[0].factory_target is Child
     assert model.optional is not None
-    assert model.optional.materialize().value == 9
+    assert model.optional.factory_target is Child
     assert model.choice == "unchanged"
 
 
@@ -123,7 +127,7 @@ def test_factory_field_failure_allows_union_fallback() -> None:
     class Model(BaseModel):
         model_config = ConfigDict(arbitrary_types_allowed=True)
 
-        factory: Factory[Product] | PositionalTarget
+        factory: Factory.Field[Product] | PositionalTarget
 
     assert isinstance(Model(factory=PositionalTarget(12)).factory, PositionalTarget)
 
@@ -349,30 +353,60 @@ def test_factory_default_target_class_is_converted() -> None:
     config_type = create_model(
         "Config",
         __base__=BaseConfig,
-        service=(Factory[Child], Child),
+        service=(Factory.Field[Child], Child),
     )
 
-    assert config_type().service.materialize().value is None
+    assert config_type().service.factory_target is Child
 
 
-def test_factory_instance_default_is_type_safe() -> None:
-    """Factory instances provide a type-safe default for annotated fields."""
+def test_factory_default_factory_class_is_preserved() -> None:
+    """A concrete factory class default is preserved without regeneration."""
+
+    factory_type = Factory.model_from(Child)
 
     class Config(BaseConfig):
-        service: Factory[Child] = Factory[Child].instance_from(Child)
+        service: Factory.Field[Child] = factory_type
 
-    assert Config().service.materialize().value is None
+    service = Config().service
+
+    assert service is factory_type
+
+
+def test_factory_instance_default_is_rejected() -> None:
+    """Factory instances are rejected because fields store factory types."""
+
+    class Config(BaseConfig):
+        service: Factory.Field[Child] = Factory.instance_from(Child)
+
+    with pytest.raises(ValidationError, match="target type or Factory type"):
+        Config()
+
+
+def test_factory_field_rejects_a_factory_for_another_target() -> None:
+    """Typed factory fields reject concrete factories for another target."""
+
+    class Other:
+        def __init__(self, name: str = "other") -> None:
+            self.name = name
+
+    class Config(BaseModel):
+        service: Factory.Field[Child]
+
+    other = Factory.model_from(Other)
+
+    with pytest.raises(ValidationError, match="expected target type"):
+        Config(service=other)
 
 
 def test_factory_default_factory_is_converted() -> None:
     """Normal Pydantic default factories remain supported."""
 
     class Config(BaseConfig):
-        service: Factory[Child] = Field(
-            default_factory=lambda: Factory[Child].instance_from(Child, value=4)
+        service: Factory.Field[Child] = Field(
+            default_factory=lambda: Factory.model_from(Child)
         )
 
-    assert Config().service.materialize().value == 4
+    assert Config().service.factory_target is Child
 
 
 def test_materialize_disables_cli_parsing(

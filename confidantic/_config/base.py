@@ -323,6 +323,7 @@ class BaseConfig(BaseSettings):
 
     model_config: ClassVar[ConfigModelDict] = ConfigModelDict(
         frozen=True,
+        validate_default=True,
         env_nested_delimiter="__",
         env_ignore_empty=True,
         env_parse_enums=True,

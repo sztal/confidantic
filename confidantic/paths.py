@@ -86,6 +86,23 @@ class BasePaths(BaseConfig):
     root: ExtensiblePath = ExtensiblePath(".")
     """Root directory used to resolve relative path definitions."""
 
+    def __call__(self, *args: Any, **kwargs: Any) -> ExtensiblePath:
+        """Join path segments to the configured root directory.
+
+        Parameters
+        ----------
+        *args
+            Path segments to append to the root directory.
+        **kwargs
+            Keyword arguments forwarded to :meth:`pathlib.Path.joinpath`.
+
+        Returns
+        -------
+        ExtensiblePath
+            Joined path.
+        """
+        return self.root.joinpath(*args, **kwargs)
+
     @classmethod
     def __pydantic_init_subclass__(cls, **kwargs: Any) -> None:
         super().__pydantic_init_subclass__(**kwargs)

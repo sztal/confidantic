@@ -1,5 +1,7 @@
 """Configuration models generated from object constructors."""
 
+from __future__ import annotations
+
 import sys
 from collections.abc import (
     Callable,
@@ -11,7 +13,6 @@ from collections.abc import (
 from copy import deepcopy
 from inspect import Parameter, signature
 from typing import (
-    TYPE_CHECKING,
     Annotated,
     Any,
     ClassVar,
@@ -19,25 +20,28 @@ from typing import (
     Self,
     TypeVar,
     cast,
+    get_args,
     get_type_hints,
+    overload,
 )
 
 from pydantic import Field as PydanticField
 from pydantic import GetCoreSchemaHandler, create_model
-from pydantic.functional_validators import WrapValidator
 from pydantic_core import (
     CoreSchema,
     PydanticCustomError,
     PydanticUndefined,
     core_schema,
 )
+from typing_extensions import TypeAliasType
 
 from confidantic._config.base import (
     _DISABLE_CLI_PARSE_ARGS,
     BaseConfig,
 )
+from confidantic.utils import import_from_string, make
 
-__all__ = ("Factory",)
+__all__ = ("Factory", "FactoryField")
 
 T = TypeVar("T")
 U = TypeVar("U")
@@ -70,38 +74,6 @@ class Factory(BaseConfig, Generic[T]):
     factory_target: ClassVar[type[T]]
     factory_fields: ClassVar[tuple[str, ...]] = ()
 
-    if TYPE_CHECKING:
-        Field: ClassVar[Any]
-    else:
-
-        class Field(Generic[U]):
-            """A typed field that stores a factory configuration class."""
-
-            @classmethod
-            def __class_getitem__(cls, item_type: type[U]) -> Any:
-                """Return a factory-class annotation for ``item_type``."""
-                if not isinstance(item_type, type):
-                    raise TypeError("Factory.Field requires a target type")
-
-                def validate(value: Any, handler: Callable[[Any], Any]) -> Any:
-                    if isinstance(value, type) and issubclass(value, Factory):
-                        if value.factory_target is not item_type:
-                            raise PydanticCustomError(
-                                "factory",
-                                "Input should be a Factory for the expected target type",
-                            )
-                        return value
-                    if isinstance(value, type) and value is item_type:
-                        return Factory.model_from(value)
-                    if isinstance(value, item_type):
-                        return Factory.model_from(value)
-                    raise PydanticCustomError(
-                        "factory",
-                        "Input should be a target type or Factory type",
-                    )
-
-                return Annotated[type[Factory[U]], WrapValidator(validate)]
-
     @classmethod
     def __get_pydantic_core_schema__(
         cls,
@@ -120,7 +92,7 @@ class Factory(BaseConfig, Generic[T]):
 
         def validate(value: Any, next_validator: Callable[[Any], Any]) -> Any:
             if isinstance(value, Factory):
-                if target is not None and value.factory_target is not target:
+                if target is not None and not issubclass(value.factory_target, target):
                     raise PydanticCustomError(
                         "factory",
                         "Input should be a Factory for the expected target type",
@@ -151,12 +123,30 @@ class Factory(BaseConfig, Generic[T]):
         return core_schema.lax_or_strict_schema(lax_schema, strict_schema)
 
     @classmethod
+    @overload
+    def model_from(
+        cls,
+        source: type[U],
+        *,
+        name: str | None = None,
+    ) -> type[Factory[U]]: ...
+
+    @classmethod
+    @overload
+    def model_from(
+        cls,
+        source: U,
+        *,
+        name: str | None = None,
+    ) -> type[Factory[U]]: ...
+
+    @classmethod
     def model_from(
         cls,
         source: type[Any] | Any,
         *,
         name: str | None = None,
-    ) -> type[Self]:
+    ) -> Any:
         """Create a concrete factory config from a target type or instance.
 
         Constructor annotations define the generated fields. When ``source``
@@ -170,30 +160,37 @@ class Factory(BaseConfig, Generic[T]):
             Target type, or an instance whose type and current attribute values
             define the generated configuration model.
         name
-                Optional generated model name. By default, append ``Config`` to
-                the target type name.
+            Optional generated model name. By default, append ``Config`` to the
+            target type name.
 
         Returns
         -------
-        type[Factory]
+        type[Factory[T]]
             Generated concrete configuration class.
         """
         target = source if isinstance(source, type) else type(source)
         expected_target = _factory_target(cls)
-        if expected_target is not None and target is not expected_target:
+        if expected_target is not None and not issubclass(target, expected_target):
             msg = f"{cls.__name__} expects {expected_target.__name__}"
             raise TypeError(msg)
         instance = None if isinstance(source, type) else source
-        return cls._model_from(instance, target, name=name)
+        factory_base = (
+            cast(type[Factory[Any]], Factory.__class_getitem__(target))
+            if cls is Factory
+            else cls
+        )
+        return factory_base._model_from(instance, target, name=name)
 
     @classmethod
     def instance_from(
-        cls, source: type[Any] | Any, *, name: str | None = None, **kwargs: Any
-    ) -> Self:
+        cls, source: type[U] | U, *, name: str | None = None, **kwargs: Any
+    ) -> Factory[U]:
         """Create a new factory config instance from a source.
 
         Parameters
         ----------
+        source
+            Target type or instance used to generate the configuration model.
         name
             Optional generated model name.
         **kwargs
@@ -202,12 +199,12 @@ class Factory(BaseConfig, Generic[T]):
 
         Returns
         -------
-        Self
+        Factory[T]
             New factory config instance.
         """
-        return cls.model_from(source, name=name)(**kwargs)
+        return cast(Factory[U], cls.model_from(source, name=name)(**kwargs))
 
-    def materialize(self, **kwargs: Any) -> Any:
+    def materialize(self, **kwargs: Any) -> T:
         """Create the target object from the validated configuration values.
 
         CLI parsing is disabled throughout materialization, including any
@@ -220,7 +217,7 @@ class Factory(BaseConfig, Generic[T]):
         """
         token = _DISABLE_CLI_PARSE_ARGS.set(True)
         try:
-            return _materialize_factory(self, set(), **kwargs)
+            return cast(T, _materialize_factory(self, set(), **kwargs))
         finally:
             _DISABLE_CLI_PARSE_ARGS.reset(token)
 
@@ -286,6 +283,58 @@ class Factory(BaseConfig, Generic[T]):
         model.factory_target = target
         model.factory_fields = tuple(fields)
         return model
+
+
+class _FactoryFieldMetadata:
+    def __get_pydantic_core_schema__(
+        self,
+        source_type: Any,
+        handler: GetCoreSchemaHandler,
+    ) -> CoreSchema:
+        factory_type = get_args(source_type)[0]
+        target = factory_type.__pydantic_generic_metadata__["args"][0]
+        schema = handler(source_type)
+
+        def validate(value: Any, next_validator: Callable[[Any], Any]) -> Any:
+            try:
+                if isinstance(value, Factory):
+                    raise TypeError
+                if isinstance(value, str):
+                    value = import_from_string(value)
+                    if callable(value) and not isinstance(value, type):
+                        value = value()
+                elif isinstance(value, Mapping) and "@call" in value:
+                    value = make(value)
+                elif callable(value) and not isinstance(value, type):
+                    value = value()
+                if isinstance(value, type) and issubclass(value, Factory):
+                    if not issubclass(value.factory_target, target):
+                        raise TypeError
+                    return next_validator(value)
+                value_target = value if isinstance(value, type) else type(value)
+                if not issubclass(value_target, target):
+                    raise TypeError
+                factory_base = cast(
+                    type[Factory[Any]], Factory.__class_getitem__(target)
+                )
+                return next_validator(factory_base.model_from(value))
+            except (TypeError, ValueError) as error:
+                raise PydanticCustomError(
+                    "factory_field",
+                    "Input should be a compatible target or Factory type",
+                ) from error
+
+        return core_schema.no_info_wrap_validator_function(validate, schema)
+
+
+#: A Pydantic annotation for fields storing generated factory classes. Values may
+#: be compatible factory classes, target classes or instances, import strings,
+#: callables, or call/make mappings. Validation produces ``type[Factory[T]]``.
+FactoryField = TypeAliasType(
+    "FactoryField",
+    Annotated[type[Factory[T]], _FactoryFieldMetadata()],
+    type_params=(T,),
+)
 
 
 def _cloned_default(value: Any) -> Callable[[], Any]:

@@ -6,7 +6,7 @@ Run cells individually to inspect the generated model, then materialize the
 target object from validated configuration values.
 """
 
-from confidantic import BaseConfig, Factory
+from confidantic import BaseConfig, Factory, FactoryField
 
 
 class Service:
@@ -23,13 +23,13 @@ class Service:
 class Config(BaseConfig, cli_parse_args=True):
     """Application settings containing a configurable service."""
 
-    service: Factory.Field[Service] = Service
+    service: FactoryField[Service] = Factory.model_from(Service)
     """Values passed to `Service` when it is materialized."""
 
 
 # %% Inspect config fields, then materialize the target -----------------------------
 
-config = Config(service=Service("127.0.0.1", 9999))
+config = Config(service=Factory.model_from(Service("127.0.0.1", 9999)))
 config.info()
 
 service = config.service().materialize()

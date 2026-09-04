@@ -15,6 +15,10 @@ If the audit confirms an unresolved source bug, add a concise entry to
 behavior, and expected behavior. Do not fix source bugs during a test audit and
 never track them in `wiki/`.
 
+Package behavior is implemented under `confidantic/`, with tests under
+`tests/`; runnable examples are under `examples/` and only a selected subset
+is smoke-tested by `tests/test_examples.py`.
+
 Run `uv run noxfile.py -s lint` before `uv run pytest` after test changes;
 pre-commit can modify files. Use `make coverage` only when coverage statistics
 are relevant. Pytest collects `confidantic/`, `tests/`, `docs/`, and `README.md`.

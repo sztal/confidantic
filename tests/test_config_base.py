@@ -130,6 +130,18 @@ def test_base_config_can_be_instantiated() -> None:
     assert BaseConfig().model_dump() == {}
 
 
+def test_base_config_find_dotenv_delegates_to_dotenv_discovery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """BaseConfig exposes the discovered dotenv path unchanged."""
+    monkeypatch.setattr(
+        "confidantic._config.base.find_dotenv",
+        lambda: "/tmp/project/.env",
+    )
+
+    assert BaseConfig.find_dotenv() == "/tmp/project/.env"
+
+
 def test_base_config_accepts_base_settings_sunder_arguments() -> None:
     """BaseConfig forwards every per-instance Pydantic Settings override."""
     base_settings_options = tuple(

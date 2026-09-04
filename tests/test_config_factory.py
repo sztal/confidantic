@@ -130,6 +130,22 @@ def test_model_from_instance_returns_typed_factory() -> None:
     }
 
 
+def test_instance_from_uses_source_defaults_and_keyword_overrides() -> None:
+    """Factory instances combine source-derived defaults with overrides."""
+    source = Product(3, "source", enabled=False)
+
+    factory = Factory.instance_from(source, count=4)
+
+    assert factory.factory_target is Product
+    assert factory.model_dump() == {
+        "count": 4,
+        "label": "source",
+        "enabled": False,
+    }
+    product = factory()
+    assert (product.count, product.label, product.enabled) == (4, "source", False)
+
+
 def test_typed_factory_field_preserves_factory_type() -> None:
     """Typed factory fields preserve an already-generated factory type."""
     factory_type = Factory.model_from(Product)
@@ -448,6 +464,20 @@ def test_factory_field_rejects_a_factory_for_another_target() -> None:
 
     with pytest.raises(ValidationError):
         Config(service=other)
+
+
+def test_factory_field_rejects_a_target_class_for_another_target() -> None:
+    """Typed factory fields reject target classes of another type."""
+
+    class Other:
+        def __init__(self, name: str = "other") -> None:
+            self.name = name
+
+    class Config(BaseModel):
+        service: FactoryField[Child]
+
+    with pytest.raises(ValidationError):
+        Config(service=Other)
 
 
 def test_factory_default_factory_is_converted() -> None:

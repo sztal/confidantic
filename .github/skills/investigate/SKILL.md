@@ -13,7 +13,8 @@ source, tests, configuration, or documentation files during investigation.
 
 Use `uv run pytest` for a focused reproduction. The test suite also collects
 doctests from `confidantic/`, `docs/`, and `README.md`; examples are executable
-scripts under `examples/` and have smoke tests in `tests/test_examples.py`.
+scripts under `examples/`, while `tests/test_examples.py` smoke-tests a
+selected subset of them.
 
 Do not use `wiki/` as a bug tracker. Because this workflow is read-only, report
 confirmed unresolved defects for a follow-up task to record in

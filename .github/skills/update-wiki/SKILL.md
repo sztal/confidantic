@@ -15,7 +15,8 @@ source defects belong only in `../../../BUGS.md`; use a testing or bug-fixing
 workflow for those records.
 
 Use `confidantic/` as the package source, `tests/` as the behavioral reference,
-and `docs/` as the published documentation surface. Check `pyproject.toml` for
+`docs/` as the published documentation surface, and `examples/` for runnable
+guides. Check `pyproject.toml`, `.python-version`, and `zensical.toml` for
 supported Python versions and tool configuration.
 
 ## Workflow

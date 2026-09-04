@@ -8,7 +8,7 @@ from copy import deepcopy as deep_copy
 from importlib import import_module
 from inspect import get_annotations, signature
 from io import StringIO
-from types import MappingProxyType, UnionType
+from types import GenericAlias, MappingProxyType, UnionType
 from typing import (
     Annotated,
     Any,
@@ -98,6 +98,71 @@ _DISABLE_CLI_PARSE_ARGS: ContextVar[bool] = ContextVar(
     "_DISABLE_CLI_PARSE_ARGS",
     default=False,
 )
+
+
+class _FactoryCliSettingsSource(CliSettingsSource[Any]):
+    @staticmethod
+    def supports(model: type[BaseModel]) -> bool:
+        from confidantic._config.factory import Factory, FactoryField
+
+        return any(
+            get_origin(field.annotation) is FactoryField
+            or (
+                isinstance(field.annotation, type)
+                and issubclass(field.annotation, Factory)
+                and isinstance(field.default, Factory)
+            )
+            for field in model.model_fields.values()
+        )
+
+    @staticmethod
+    def _import_annotation(target: type[Any]) -> Any:
+        from confidantic.annotations import Import
+
+        return Import[GenericAlias(type, target)]  # type: ignore[misc]
+
+    @staticmethod
+    def _factory_field_type(field_info: FieldInfo) -> type[Any] | None:
+        from confidantic._config.factory import Factory, FactoryField
+
+        if get_origin(field_info.annotation) is not FactoryField:
+            return None
+        arguments = get_args(field_info.annotation)
+        if len(arguments) != 1 or not isinstance(arguments[0], type):
+            return None
+        return cast(type[Any], Factory.__class_getitem__(arguments[0]))
+
+    def _factory_field_target(self, field_info: FieldInfo) -> type[Any] | None:
+        from confidantic._config.factory import _factory_target
+
+        factory_type = self._factory_field_type(field_info)
+        return _factory_target(factory_type) if factory_type is not None else None
+
+    def _sort_arg_fields(self, model: type[BaseModel]) -> list[tuple[str, FieldInfo]]:
+        from confidantic._config.factory import Factory
+
+        fields = super()._sort_arg_fields(model)
+        normalized: list[tuple[str, FieldInfo]] = []
+        for field_name, field_info in fields:
+            target = self._factory_field_target(field_info)
+            if target is not None:
+                field_info = shallow_copy(field_info)
+                field_info.annotation = self._import_annotation(target)
+                field_info.default = target
+            elif (
+                isinstance(field_info.annotation, type)
+                and issubclass(field_info.annotation, Factory)
+                and isinstance(field_info.default, Factory)
+            ):
+                field_info = shallow_copy(field_info)
+                field_info.annotation = type(field_info.default)
+            normalized.append((field_name, field_info))
+        return normalized
+
+
+class _FactoryCliHelpDisabledSettingsSource(_FactoryCliSettingsSource):
+    def _add_default_help(self) -> None:
+        pass
 
 
 class _CliHelpDisabledSettingsSource(CliSettingsSource[Any]):
@@ -1123,19 +1188,29 @@ class BaseConfig(BaseSettings):
             cli_settings_source = _cli_settings_source if index == 0 else None
             if (
                 index == 0
-                and not level_config.get("cli_help", True)
                 and cli_source_options["cli_parse_args"] is not None
                 and cli_source_options["cli_parse_args"] is not False
                 and cli_settings_source is None
             ):
-                cli_settings_source = _CliHelpDisabledSettingsSource(
-                    level,
-                    **cli_source_options,
-                    _env_settings_source=EnvSettingsSource(
+                has_factory_fields = _FactoryCliSettingsSource.supports(level)
+                if has_factory_fields or not level_config.get("cli_help", True):
+                    source_type = (
+                        _FactoryCliSettingsSource
+                        if level_config.get("cli_help", True)
+                        else (
+                            _FactoryCliHelpDisabledSettingsSource
+                            if has_factory_fields
+                            else _CliHelpDisabledSettingsSource
+                        )
+                    )
+                    cli_settings_source = source_type(
                         level,
-                        **env_source_options,
-                    ),
-                )
+                        **cli_source_options,
+                        _env_settings_source=EnvSettingsSource(
+                            level,
+                            **env_source_options,
+                        ),
+                    )
             level_options = source_options | {
                 "_cli_parse_args": _cli_parse_args if index == 0 else False,
                 "_cli_settings_source": cli_settings_source,

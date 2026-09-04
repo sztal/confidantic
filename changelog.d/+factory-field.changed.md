@@ -1,1 +1,3 @@
-`Factory` is now nongeneric; annotate typed factory fields with `Factory.Field[T]`. `BaseConfig` validates field defaults by default, and typed factory fields reject factories for another target.
+Added `FactoryField[T]` for factory-class fields with import-string, call/make,
+target-class, target-instance, and generated-factory validation. `BaseConfig` now
+validates field defaults by default.

@@ -1,34 +1,51 @@
 # %% Define a selectable implementation ---------------------------------------------
 
-"""Select a target type first, then generate its configuration model.
+"""Route help, select an implementation, then configure its constructor.
 
-This mirrors applications that use a small routing CLI before parsing the
-selected implementation's options. The example is self-contained and needs
-only Confidantic.
+The script demonstrates a staged CLI for applications whose final options depend
+on a runtime-selected type:
 
-Run the example with the default moving average and set its generated options::
+1. ``HelpRouter`` decides whether ``--help`` describes type selection or the
+   final generated configuration.
+2. ``Types`` accepts an estimator import string through ``FactoryField`` and
+   retains the selected value as a generated ``Factory`` class. Its default is
+   generated from a template object, so it can provide nonstandard constructor
+   defaults.
+3. ``Config`` uses that generated class for a nested factory instance. The
+   selected constructor parameters become ordinary CLI options, and the validated
+   factory can materialize the final estimator object.
+
+Run the default implementation with its template defaults::
+
+    python examples/factory_gated.py
+
+Override options generated from the default ``MovingAverage`` constructor::
 
     python examples/factory_gated.py \
-        --types.estimator __main__:MovingAverage \
         --estimator.window 10 --estimator.center
 
-Select a different implementation; its constructor adds the ``decay`` option::
+Select an implementation by import string and configure options unique to it::
 
     python examples/factory_gated.py \
         --types.estimator __main__:ExponentialMovingAverage \
         --estimator.window 12 --estimator.decay 0.85
 
-The final configuration help shows the selected type's generated options::
+Show final configuration help. Its estimator options reflect the type selected
+by ``--types.estimator``::
 
     python examples/factory_gated.py --help
 
-The routing stage can show help for choosing a type instead. It exits before
-the final configuration is parsed::
+    python examples/factory_gated.py \
+        --types.estimator __main__:ExponentialMovingAverage --help
 
-    python examples/factory_gated.py --help.types
+Route ``--help`` to the type-selection gate instead. ``--help.types`` is consumed
+by ``HelpRouter`` and causes ``Types`` to display ``--types.estimator`` before the
+final configuration is parsed::
+
+    python examples/factory_gated.py --help --help.types
 """
 
-from confidantic import BaseConfig, Factory
+from confidantic import BaseConfig, Factory, FactoryField
 
 
 class MovingAverage:
@@ -95,8 +112,9 @@ class Types(
 ):
     """Options used to choose which implementation will be configured."""
 
-    estimator: Factory.Field[MovingAverage] = MovingAverage(window=20)
-    # estimator: Import[type[MovingAverage]] = MovingAverage
+    estimator: FactoryField[MovingAverage] = Factory.model_from(
+        MovingAverage(window=20)
+    )
     """Estimator to use."""
 
 
@@ -121,7 +139,7 @@ class Config(
     """An ordinary application setting parsed after routing."""
 
 
-config = Config(estimator={"center": True})
+config = Config.model_validate({"estimator": {"center": True}})
 config.info()
 estimator = config.estimator.materialize()
 

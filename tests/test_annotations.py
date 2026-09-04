@@ -3,7 +3,7 @@
 from collections import Counter
 from collections.abc import Callable
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import pytest
 from pydantic import BaseModel, DirectoryPath, FilePath, TypeAdapter, ValidationError
@@ -348,6 +348,18 @@ def test_make_can_evaluate_values_without_a_pydantic_handler() -> None:
     )
 
     assert value == {"items": [{"answer": 42}]}
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [("builtins:list", []), (lambda: 42, 42)],
+)
+def test_make_evaluates_direct_import_strings_and_callables(
+    value: Any,
+    expected: Any,
+) -> None:
+    """The standalone Make helper evaluates direct executable values."""
+    assert make(value) == expected
 
 
 def test_make_preserves_nested_constructed_values() -> None:

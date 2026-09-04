@@ -165,7 +165,7 @@ class Factory(BaseConfig, Generic[T]):
 
         Returns
         -------
-        type[Factory[T]]
+        type[Factory[U]]
             Generated concrete configuration class.
         """
         target = source if isinstance(source, type) else type(source)
@@ -199,7 +199,7 @@ class Factory(BaseConfig, Generic[T]):
 
         Returns
         -------
-        Factory[T]
+        Factory[U]
             New factory config instance.
         """
         return cast(Factory[U], cls.model_from(source, name=name)(**kwargs))

@@ -9,13 +9,16 @@
 - Documentation: `docs/`
 - Runnable examples: `examples/`
 - Release notes: `changelog.d/` managed by Towncrier
+- Agent workflows: `.github/skills/`
 - Repository: https://github.com/sztal/confidantic
 
 Configuration and CLIs for Python projects based on Pydantic and Pydantic Settings.
 The package requires Python 3.11 or later; the repository's default interpreter
 is Python 3.13.
 
-The core public APIs live in the package root and in
+The package root re-exports `BaseConfig`, `ClassDefaultsSource`,
+`ConfigModelDict`, `Factory`, `FactoryField`, and `__version__`. Other core
+public APIs live in
 `confidantic/annotations.py`, `confidantic/configurable.py`,
 `confidantic/context.py`, `confidantic/logging.py`, `confidantic/paths.py`,
 `confidantic/types.py`, and `confidantic/utils.py`. Internal configuration
@@ -28,8 +31,11 @@ Read and follow [STYLE.md](STYLE.md) before changing Python code or tests.
 `pyproject.toml` is the source of truth for dependency groups, Ruff, mypy,
 pytest, and coverage configuration.
 
-Set up the development environment with `uv sync --group dev`. Examples are
-executable scripts and are smoke-tested by `tests/test_examples.py`.
+Set up the development environment with `uv sync --group dev`; add the `docs`
+group when building documentation. The repository default interpreter is read
+from `.python-version` (currently 3.13). Examples are executable scripts;
+`tests/test_examples.py` smoke-tests the listed example subset, so check that
+test before assuming every script is covered.
 
 Keep changes focused, preserve public behavior unless the task intentionally
 changes it, and add or update tests for behavior changes.
@@ -87,6 +93,10 @@ uv run noxfile.py -s lint
 uv run noxfile.py -s typecheck
 uv run noxfile.py -s docs
 ```
+
+Pytest is configured to collect tests and doctests from `docs/`,
+`confidantic/`, `tests/`, and `README.md`. Documentation builds use
+`zensical.toml` and require the `docs` dependency group.
 
 ## Documentation
 

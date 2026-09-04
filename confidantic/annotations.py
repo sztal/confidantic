@@ -93,6 +93,11 @@ def Delimited(sep: str | None = None) -> Any:
 
     The returned annotation accepts an existing sequence unchanged, while
     splitting string inputs on ``sep`` before normal validation.
+
+    Returns
+    -------
+    Any
+        An annotated type that validates delimiter-separated sequence inputs.
     """
 
     def _validate_delimited(value: Any, handler: Callable[[Any], Any]) -> Any:

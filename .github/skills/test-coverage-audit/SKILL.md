@@ -14,6 +14,10 @@ are moved or deleted, stale paths can make `coverage report` fail with
 Prioritize branches, validation, error paths, and public behavior. Avoid adding
 tests only to execute trivial lines.
 
+Use `confidantic/` as the source package and `tests/` as the behavioral test
+surface. Example scripts are under `examples/`; check `tests/test_examples.py`
+to see which are covered by smoke tests.
+
 If the audit confirms an unresolved source bug, add a concise entry to
 `../../../BUGS.md` with its symptom, reproduction or evidence, affected
 behavior, and expected behavior. Do not fix it during a coverage audit and

@@ -15,8 +15,9 @@ unresolved source defects belong only in `../../../BUGS.md`; use a testing or
 bug-fixing workflow for those records.
 
 The repository's durable code references are `confidantic/` for the package,
-`tests/` for behavior, and `docs/` for published documentation. Verify claims
-against those paths and `pyproject.toml` rather than inferring them.
+`tests/` for behavior, `docs/` for published documentation, and `examples/`
+for runnable guides. Verify claims against those paths and `pyproject.toml`
+rather than inferring them.
 
 ## Workflow
 

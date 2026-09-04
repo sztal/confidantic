@@ -1,165 +1,75 @@
-# BaseConfig resolution order
+# Confidantic package design and usage
 
-## Goal
+Confidantic builds configuration and CLI workflows on top of Pydantic and
+Pydantic Settings. Its central abstraction is `BaseConfig`: a validated,
+frozen settings model that combines constructor arguments, CLI arguments,
+environment variables, dotenv files, secret files, and class defaults.
 
-Describe the core behavior of `BaseConfig`: extend
-`pydantic_settings.BaseSettings` with configuration resolution that is applied
-independently at each level of a configuration class's MRO.
+## Package map
 
-## Decisions and findings
+The implementation is layered around `BaseConfig`; the specialized APIs reuse
+its validation and source-resolution behavior:
 
-`BaseConfig` resolves a class completely before consulting its parent. At each
-MRO level, sources are considered in this descending order:
+- [`BaseConfig`][baseconfig] and `ClassDefaultsSource` provide settings
+  resolution, inherited defaults, frozen models, copying, mutation, field
+  provenance, and serialization helpers.
+- [`Factory`][factory] creates configuration models from class constructors.
+- [`confidantic.annotations`][annotations] provides reusable annotations for
+  paths, delimited values, mappings, imports, calls, and trusted make
+  directives.
+- [`BaseContext`][context] provides context-local configuration and scoped
+  overrides.
+- [`Configurable`][configurable], [`paths`][paths], [`logging`][logging], and
+  [`types`][types] provide integrations for configurable objects, path-aware
+  fields, logging settings, and shared model types.
 
-1. Command-line arguments, when enabled.
-1. Explicit initialization arguments.
-1. Process environment variables.
-1. Dotenv values.
-1. Secret files.
-1. Defaults declared by the current class.
+Read the focused pages for details:
 
-This fixed chain includes only the file-backed sources that Pydantic Settings
-provides by default: dotenv and secret files. Structured configuration files
-are non-standard sources. A `BaseConfig` subclass must add JSON, TOML, YAML, or
-`pyproject.toml` through `settings_customise_sources` and choose where each
-source belongs in the precedence order. `BaseConfig` must not assign those
-sources an implicit position.
+- [Configuration resolution](configuration-resolution.md)
+- [Factories and annotations](factories-and-annotations.md)
+- [Contexts and serialization](contexts-and-serialization.md)
 
-The first value found for a field or nested key wins. Nested mappings and models
-are deep-merged, so a parent level can fill keys that remain absent without
-replacing keys resolved by a child. Only values still absent after the current
-class's defaults advance to the next parent in Python's C3 MRO. A default on a
-derived class therefore takes priority over any source that applies only to a
-parent class.
+## Quick start
 
-Each level uses its effective inherited `model_config` and
-`settings_customise_sources`. CLI arguments are parsed once against the concrete
-class, whose field set includes inherited fields. Static defaults participate in
-nested merging. A `default_factory` remains lazy and blocks its whole field from
-parent sources before Pydantic evaluates it during validation.
+Define fields as you would with a Pydantic model. Configure the input namespace
+and optional CLI parsing with `ConfigModelDict`:
 
-```text
-Resolve concrete config class
-            |
-            v
-    CLI arguments
-            |
-            v
- Initialization arguments
-            |
-            v
- Environment variables
-            |
-            v
-      Dotenv values
-            |
-            v
-       Secret files
-            |
-            v
-Current-class defaults
-            |
-            v
-   All values resolved? ---- yes ---> Validated configuration
-            |
-            no
-            |
-            v
-    Parent MRO class? ------- no ----> Missing required values
-            |
-            yes
-            |
-            +------------------------> Repeat from CLI arguments
+```python
+from confidantic import BaseConfig, ConfigModelDict
 
-Subclass extension rule:
-JSON, TOML, YAML, and pyproject.toml sources may be inserted at any chosen
-position in this chain through settings_customise_sources.
+
+class AppConfig(BaseConfig):
+    model_config = ConfigModelDict(
+        env_prefix="APP_",
+        env_file=".env",
+        cli_parse_args=True,
+    )
+
+    name: str = "demo"
+    retries: int = 3
+
+
+config = AppConfig()
+updated = config.copy(retries=5)
 ```
 
-Pydantic Settings provides the machinery for an individual level, but not this
-MRO-level traversal. Its documented default priority is CLI, when
-`cli_parse_args` is enabled, then initialization arguments, environment,
-dotenv, secrets, and defaults. A CLI source is topmost by default. JSON, TOML,
-YAML, and `pyproject.toml` source classes are available but opt-in; a subclass
-must add them through `settings_customise_sources`.
+For a runnable walkthrough of source precedence, see
+[`examples/basic.py`](../examples/basic.py). The complete runnable guide set is
+in [`examples/`](../examples/), including CLI, dotenv, nested, factory,
+context, logging, and serialization examples. They are smoke-tested by
+[`tests/test_examples.py`](../tests/test_examples.py).
 
-`settings_customise_sources` returns source callables in descending priority,
-so the subclass controls whether a structured file overrides or falls back to
-CLI, initialization, environment, dotenv, secrets, or another custom source.
-Sources can also inspect the accumulated `current_state` and
-`settings_sources_data`. Pydantic Settings merges source results deeply, which
-lets lower-priority sources supply missing nested keys. `BaseConfig` preserves
-that behavior across its flattened MRO source sequence.
+## Public references
 
-The implementation is split between [`BaseConfig`][baseconfig] and
-[`ClassDefaultsSource`][defaults-source] in `confidantic/_config/base.py`.
-Factory configuration is implemented by [`Factory`][factory] in
-`confidantic/_config/factory.py`; it builds on the same `BaseConfig` source
-resolution rather than defining a separate precedence system. The published
-[API reference][api-reference] now also includes the public annotation,
-configurable, type, and utility modules.
+The generated [API reference](../docs/reference/api.md) is the public symbol
+index. Source-level implementation details live in [`confidantic/`](../confidantic/),
+and behavioral details belong in the focused tests under [`tests/`](../tests/).
 
-Supported file-backed sources are:
-
-- Dotenv files, configured on the class with `env_file` or per instance with
-  `_env_file`.
-- Secret-file directories, configured with `secrets_dir` or per instance with
-  `_secrets_dir`.
-- JSON via `JsonConfigSettingsSource`.
-- TOML via `TomlConfigSettingsSource`.
-- YAML via `YamlConfigSettingsSource`.
-- `pyproject.toml` via `PyprojectTomlConfigSettingsSource`.
-
-Pydantic Settings has no `_json_file`, `_toml_file`, `_yaml_file`, or
-`_pyproject_toml_file` initializer override. Structured file paths therefore
-come from class `model_config` or from arguments passed by the subclass when it
-constructs the source. Preserving this constraint keeps source registration and
-priority explicit in the subclass.
-
-## Value provenance
-
-Every resolved `BaseConfig` instance exposes `model_field_sources`, a read-only
-mapping from canonical model field names to two-dimensional resolution
-coordinates. Each coordinate is ordered as:
-
-1. The concrete Pydantic settings source class that established the field.
-1. The actual configuration class for which that source was constructed.
-
-For example, a child-level environment value is represented by
-`(EnvSettingsSource, ChildConfig)`, while an inherited parent default is
-represented by `(ClassDefaultsSource, ParentConfig)`. Aliases are normalized to
-model field names in the mapping. Values transformed by validators retain the
-coordinate of their source input, and lazy default factories are attributed to
-`ClassDefaultsSource` for the class that declared them.
-
-Nested mappings and models can combine values from several sources. Provenance
-remains field-level: the mapping reports the highest-priority source that first
-established the top-level field, not the sources of individual nested keys.
-Computed fields and values synthesized solely during validation have no settings
-source coordinate and are omitted.
-
-Tracking requires sources derived from `PydanticBaseSettingsSource`, which
-provides both source state and the owning settings class. If a source sequence
-contains a bare callable, settings resolution still works but provenance is
-empty because the required inheritance coordinate is unavailable.
-
-## Validation
-
-- Checked the [Pydantic Settings documentation](https://pydantic.dev/docs/validation/latest/concepts/pydantic_settings/#field-value-priority)
-  for standard source priority and
-  [source customization](https://pydantic.dev/docs/validation/latest/concepts/pydantic_settings/#customise-settings-sources).
-- Confirmed with Pydantic Settings 2.15 that only dotenv and secret paths have
-  built-in instance initializer overrides; structured file sources do not.
-- Added focused tests for built-in source priority, child defaults versus parent
-  sources, nested merging, lazy factories, aliases, validators, custom source
-  placement, required fields, and C3 multiple inheritance.
-
-## Follow-up
-
-- Add user-facing examples showing subclasses that place structured file
-  sources at different priorities.
-
-[api-reference]: ../docs/reference/api.md
+[annotations]: ../confidantic/annotations.py
 [baseconfig]: ../confidantic/_config/base.py
-[defaults-source]: ../confidantic/_config/base.py
+[configurable]: ../confidantic/configurable.py
+[context]: ../confidantic/context.py
 [factory]: ../confidantic/_config/factory.py
+[logging]: ../confidantic/logging.py
+[paths]: ../confidantic/paths.py
+[types]: ../confidantic/types.py

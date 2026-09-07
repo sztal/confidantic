@@ -295,9 +295,28 @@ def test_model_from_type_creates_typed_config_fields() -> None:
     )
 
 
-def test_model_from_as_factory_wraps_matching_defaults() -> None:
+def test_model_from_type_uses_constructor_arguments_as_defaults() -> None:
+    """Type sources can provide positional and keyword constructor defaults."""
+    config_type = Factory.model_from(Product, 3, "configured", enabled=False)
+
+    assert config_type().model_dump() == {
+        "count": 3,
+        "label": "configured",
+        "enabled": False,
+    }
+
+
+def test_model_from_rejects_constructor_arguments_for_instance_sources() -> None:
+    """Constructor arguments are accepted only when the source is a type."""
+    with pytest.raises(
+        TypeError, match="constructor arguments require a target type as source"
+    ):
+        Factory.model_from(Product(3), label="configured")
+
+
+def test_model_from_recursive_wraps_matching_defaults() -> None:
     """Matching defaults become recursively resolvable factory fields."""
-    config_type = Factory.model_from(ServiceHolder, as_factory=ServiceBase)
+    config_type = Factory.model_from(ServiceHolder, __recursive__=ServiceBase)
 
     service = config_type().service
 
@@ -307,9 +326,11 @@ def test_model_from_as_factory_wraps_matching_defaults() -> None:
 
 def test_model_from_as_factory_accepts_type_hints_and_predicates() -> None:
     """Type hints and callable selectors use the concrete default value."""
-    type_hint_config = Factory.model_from(ServiceHolder, as_factory=ServiceBase | None)
+    type_hint_config = Factory.model_from(
+        ServiceHolder, __recursive__=ServiceBase | None
+    )
     predicate_config = Factory.model_from(
-        ServiceHolder, as_factory=lambda value: isinstance(value, Service)
+        ServiceHolder, __recursive__=lambda value: isinstance(value, Service)
     )
 
     assert type_hint_config().service.factory_target is Service
@@ -320,7 +341,7 @@ def test_model_from_as_factory_accepts_type_hints_and_predicates() -> None:
 def test_model_from_as_factory_predicate_leaves_nonmatching_defaults() -> None:
     """A predicate selector leaves nonmatching concrete defaults unchanged."""
     config_type = Factory.model_from(
-        ServiceHolder, as_factory=lambda value: isinstance(value, str)
+        ServiceHolder, __recursive__=lambda value: isinstance(value, str)
     )
 
     assert config_type().service is _DEFAULT_SERVICE
@@ -329,7 +350,7 @@ def test_model_from_as_factory_predicate_leaves_nonmatching_defaults() -> None:
 def test_model_from_as_factory_handles_none_union_defaults() -> None:
     """Type-hint selectors support optional defaults that do not match."""
     config_type = Factory.model_from(
-        OptionalServiceHolder, as_factory=ServiceBase | None
+        OptionalServiceHolder, __recursive__=ServiceBase | None
     )
 
     assert config_type().service is None
@@ -339,7 +360,7 @@ def test_model_from_as_factory_uses_instance_values() -> None:
     """Instance sources provide the nested factory's concrete defaults."""
     source = ServiceHolder(Service(7), "configured")
 
-    config_type = Factory.model_from(source, as_factory=ServiceBase)
+    config_type = Factory.model_from(source, __recursive__=ServiceBase)
 
     assert config_type().model_resolve().service.value == 7
     assert config_type().model_resolve().label == "configured"
@@ -348,7 +369,7 @@ def test_model_from_as_factory_uses_instance_values() -> None:
 def test_model_from_as_factory_wraps_required_instance_values() -> None:
     """Instance values can provide defaults for required constructor fields."""
     config_type = Factory.model_from(
-        RequiredServiceHolder(Service(7)), as_factory=ServiceBase
+        RequiredServiceHolder(Service(7)), __recursive__=ServiceBase
     )
 
     assert config_type().model_resolve().service.value == 7
@@ -356,7 +377,7 @@ def test_model_from_as_factory_wraps_required_instance_values() -> None:
 
 def test_model_from_as_factory_leaves_required_fields_unchanged() -> None:
     """Required fields without source values are not auto-generated."""
-    config_type = Factory.model_from(RequiredServiceHolder, as_factory=ServiceBase)
+    config_type = Factory.model_from(RequiredServiceHolder, __recursive__=ServiceBase)
 
     assert config_type.model_fields["service"].is_required()
 
@@ -369,7 +390,7 @@ def test_model_from_as_factory_preserves_existing_factory_defaults() -> None:
         def __init__(self, service: Factory[ServiceBase] = factory_type) -> None:
             self.service = service
 
-    config_type = Factory.model_from(Target, as_factory=ServiceBase)
+    config_type = Factory.model_from(Target, __recursive__=ServiceBase)
 
     assert config_type.model_fields["service"].default is factory_type
 
@@ -389,7 +410,7 @@ def test_model_from_as_factory_isolates_nested_mutable_defaults() -> None:
         def __init__(self, service: MutableService = default_service) -> None:
             self.service = service
 
-    config_type = Factory.model_from(MutableServiceHolder, as_factory=MutableService)
+    config_type = Factory.model_from(MutableServiceHolder, __recursive__=MutableService)
     first = config_type()
     second = config_type()
 
@@ -504,9 +525,16 @@ def test_contains_factory_handles_cycles_and_mapping_keys() -> None:
 def test_model_from_type_accepts_custom_name() -> None:
     """Callers can choose the generated model name."""
     assert (
-        Factory.model_from(Product, name="ConfiguredProduct").__name__
+        Factory.model_from(Product, __name__="ConfiguredProduct").__name__
         == "ConfiguredProduct"
     )
+
+
+def test_instance_from_accepts_custom_name() -> None:
+    """Instance factories use the double-underscore model name keyword."""
+    factory = Factory.instance_from(Product, __name__="ConfiguredProduct", count=1)
+
+    assert type(factory).__name__ == "ConfiguredProduct"
 
 
 def test_model_from_resolves_annotations_from_base_class_modules() -> None:
@@ -582,6 +610,18 @@ def test_model_from_instance_copies_custom_unhashable_defaults() -> None:
     assert first.value is not second.value
 
 
+def test_model_from_instance_preserves_defaults_for_missing_attributes() -> None:
+    """Missing instance attributes do not replace declared constructor defaults."""
+
+    class Target:
+        def __init__(self, value: int = 3) -> None:
+            pass
+
+    config_type = Factory.model_from(Target())
+
+    assert config_type().value == 3
+
+
 def test_model_resolve_validates_values_and_calls_target() -> None:
     """Resolution passes validated fields to the target constructor."""
     config = Factory.model_from(Product)(count="3", label="configured", enabled=False)
@@ -597,21 +637,29 @@ def test_model_resolve_validates_values_and_calls_target() -> None:
     assert not callable(config)
 
 
-def test_model_resolve_overrides_configured_values_with_kwargs() -> None:
-    """Resolution keyword arguments override configured values."""
+def test_model_resolve_uses_values_copied_before_resolution() -> None:
+    """Updated values are copied before recursive resolution."""
     config = Factory.model_from(Product)(count=3, label="configured", enabled=False)
 
-    product = config.model_resolve(label="overridden", enabled=True)
+    product = config.copy(label="overridden", enabled=True).model_resolve()
 
     assert product.label == "overridden"
     assert product.enabled is True
 
 
-def test_factory_model_resolve_applies_mapping_before_nested_resolution() -> None:
-    """Factory updates are validated before nested factories are resolved."""
+def test_factory_model_resolve_does_not_accept_updates() -> None:
+    """Factory resolution operates only on its validated configuration."""
     config = Factory.model_from(Product)(count=1)
 
-    product = config.model_resolve({"count": "2"})
+    with pytest.raises(TypeError):
+        config.model_resolve({"count": "2"})
+
+
+def test_factory_model_resolve_accepts_values_copied_before_resolution() -> None:
+    """Copied values are validated before recursive resolution."""
+    config = Factory.model_from(Product)(count=1)
+
+    product = config.copy(count="2").model_resolve()
 
     assert product.count == 2
 
@@ -668,10 +716,8 @@ def test_model_resolve_preserves_nested_model_extra_values() -> None:
     assert resolved.payload.model_extra == {"label": "extra"}
 
 
-def test_base_config_model_resolve_preserves_nested_factory_when_not_recursive() -> (
-    None
-):
-    """Factory resolution can leave nested factories in the target intact."""
+def test_base_config_model_resolve_is_always_recursive() -> None:
+    """BaseConfig resolution always materializes nested factories."""
 
     class Parent:
         def __init__(self, child: Factory[Child]) -> None:
@@ -683,10 +729,11 @@ def test_base_config_model_resolve_preserves_nested_factory_when_not_recursive()
     child_config = Factory.model_from(Child)(value=4)
     config = Config(parent=Factory.model_from(Parent)(child=child_config))
 
-    resolved = config.model_resolve(recursive=False)
+    resolved = config.model_resolve()
 
     assert isinstance(resolved.parent, Parent)
-    assert resolved.parent.child is child_config
+    assert isinstance(resolved.parent.child, Child)
+    assert resolved.parent.child.value == 4
 
 
 def test_base_config_model_resolve_without_factories_returns_shallow_copy() -> None:

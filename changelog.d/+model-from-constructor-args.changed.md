@@ -1,0 +1,1 @@
+`Factory.model_from()` now accepts constructor arguments when given a target type, using the constructed instance values as defaults. Its control keywords are now `__name__` and `__recursive__`; `Factory.instance_from()` also uses `__name__`.

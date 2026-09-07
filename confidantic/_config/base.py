@@ -823,15 +823,12 @@ class BaseConfig(BaseSettings):
     def model_resolve(
         self,
         *,
-        recursive: bool = True,
         name: str | None = None,
     ) -> Self:
-        """Resolve nested Factory values in a generated model copy.
+        """Recursively resolve nested Factory values in a generated model copy.
 
         Parameters
         ----------
-        recursive
-            Whether nested factories and factories in containers are resolved.
         name
             Optional name for the generated resolved model class. The default
             appends ``Resolved`` to this model's class name.
@@ -856,7 +853,6 @@ class BaseConfig(BaseSettings):
                 _resolve_model_instance(
                     self,
                     set(),
-                    recursive=recursive,
                     name=name,
                 ),
             )

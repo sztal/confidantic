@@ -1,0 +1,1 @@
+`model_resolve()` now always resolves nested factories recursively. Resolution-time field updates and the `recursive` option were removed; apply updates before calling it. `BaseConfig.model_resolve()` retains only its optional derived-model `name`.

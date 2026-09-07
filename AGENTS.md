@@ -8,10 +8,10 @@
 - Tests: `tests/`
 - Documentation: `docs/`
 - Runnable examples: `examples/` (including `factory_as_factory.py` for
-  recursive `as_factory` generation)
+  recursive `__recursive__` generation)
 - Release notes: `changelog.d/` managed by Towncrier
 - Agent workflows: `.github/skills/`
-- `Factory.model_from(..., as_factory=...)` can turn matching concrete defaults
+- `Factory.model_from(..., __recursive__=...)` can turn matching concrete defaults
   into nested generated `Factory` fields; the generated factory annotation also
   enables nested CLI options such as `--database.host`.
 - Repository: https://github.com/sztal/confidantic

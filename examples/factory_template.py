@@ -34,7 +34,7 @@ class Application:
 
 
 template = Application("orders", Database("db.example.com", 6432))
-ApplicationConfig = Factory.model_from(template, as_factory=Database)
+ApplicationConfig = Factory.model_from(template, __recursive__=Database)
 
 # %% ---------------------------------------------------------------------------------
 

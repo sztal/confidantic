@@ -31,7 +31,7 @@ template = Application("orders", Database("db.example.com", 6432))
 
 
 class ApplicationConfig(
-    Factory.model_from(template, as_factory=Database),
+    Factory.model_from(template, __recursive__=Database),
     cli_parse_args=True,
 ):
     """A configuration model for an application with a nested database."""

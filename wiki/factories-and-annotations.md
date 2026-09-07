@@ -25,6 +25,21 @@ ClientConfig = Factory.model_from(Client)
 client = ClientConfig(host="localhost").model_resolve()
 ```
 
+Resolution is always recursive. Apply any configuration updates before calling
+`model_resolve()`, for example with `copy()` or validation; the resolution call
+does not accept update values. For `BaseConfig` models, `name=` is the only
+option and controls the generated resolved model class name.
+
+Pass constructor arguments when defaults should come from a constructed target
+instance. Use `__recursive__` to turn matching concrete defaults into nested
+factory fields and `__name__` to choose the generated model name:
+
+```python
+ClientConfig = Factory.model_from(
+    Client, "localhost", timeout=10.0, __name__="LocalClientConfig"
+)
+```
+
 Use `Factory[T]` or `FactoryField[T]` when a factory is nested in another
 configuration model. Factory configuration uses the same `BaseConfig` source
 resolution as ordinary settings models. See

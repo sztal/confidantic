@@ -142,9 +142,10 @@ class Factory(BaseConfig, Generic[T]):
     def model_from(
         cls,
         source: type[U],
-        *,
-        name: str | None = None,
-        as_factory: type[Any] | Callable[[Any], bool] | None = None,
+        *args: Any,
+        __name__: str | None = None,
+        __recursive__: type[Any] | Callable[[Any], bool] | None = None,
+        **kwargs: Any,
     ) -> type[Factory[U]]: ...
 
     @classmethod
@@ -153,17 +154,18 @@ class Factory(BaseConfig, Generic[T]):
         cls,
         source: U,
         *,
-        name: str | None = None,
-        as_factory: type[Any] | Callable[[Any], bool] | None = None,
+        __name__: str | None = None,
+        __recursive__: type[Any] | Callable[[Any], bool] | None = None,
     ) -> type[Factory[U]]: ...
 
     @classmethod
     def model_from(
         cls,
         source: type[Any] | Any,
-        *,
-        name: str | None = None,
-        as_factory: type[Any] | Callable[[Any], bool] | None = None,
+        *args: Any,
+        __name__: str | None = None,
+        __recursive__: type[Any] | Callable[[Any], bool] | None = None,
+        **kwargs: Any,
     ) -> Any:
         """Create a concrete factory config from a target type or instance.
 
@@ -177,36 +179,46 @@ class Factory(BaseConfig, Generic[T]):
         source
             Target type, or an instance whose type and current attribute values
             define the generated configuration model.
-        name
+        __name__
             Optional generated model name. By default, append ``Config`` to the
             target type name.
-        as_factory
+        __recursive__
             Optional type, type hint, or predicate used to convert matching
             default values into nested factory fields.
+        *args, **kwargs
+            Arguments used to construct ``source`` when it is a type. The
+            resulting instance values become generated defaults.
 
         Returns
         -------
         type[Factory[U]]
             Generated concrete configuration class.
         """
-        target = source if isinstance(source, type) else type(source)
+        if isinstance(source, type):
+            target = source
+            instance = source(*args, **kwargs) if args or kwargs else None
+        else:
+            if args or kwargs:
+                msg = "constructor arguments require a target type as source"
+                raise TypeError(msg)
+            target = type(source)
+            instance = source
         expected_target = _factory_target(cls)
         if expected_target is not None and not issubclass(target, expected_target):
             msg = f"{cls.__name__} expects {expected_target.__name__}"
             raise TypeError(msg)
-        instance = None if isinstance(source, type) else source
         factory_base = (
             cast(type[Factory[Any]], Factory.__class_getitem__(target))
             if cls is Factory
             else cls
         )
         return factory_base._model_from(
-            instance, target, name=name, as_factory=as_factory
+            instance, target, __name__=__name__, __recursive__=__recursive__
         )
 
     @classmethod
     def instance_from(
-        cls, source: type[U] | U, *, name: str | None = None, **kwargs: Any
+        cls, source: type[U] | U, *, __name__: str | None = None, **kwargs: Any
     ) -> Factory[U]:
         """Create a new factory config instance from a source.
 
@@ -214,7 +226,7 @@ class Factory(BaseConfig, Generic[T]):
         ----------
         source
             Target type or instance used to generate the configuration model.
-        name
+        __name__
             Optional generated model name.
         **kwargs
             Values for the generated fields. Unspecified fields use their
@@ -225,42 +237,24 @@ class Factory(BaseConfig, Generic[T]):
         Factory[U]
             New factory config instance.
         """
-        return cast(Factory[U], cls.model_from(source, name=name)(**kwargs))
+        return cast(Factory[U], cls.model_from(source, __name__=__name__)(**kwargs))
 
     def model_resolve(  # type: ignore[override]
         self,
-        updates: Mapping[str, Any] | None = None,
-        *,
-        recursive: bool = True,
-        **kwargs: Any,
     ) -> T:
         """Create the target object from the validated configuration values.
 
         CLI parsing is disabled throughout resolution, including any
         configuration models constructed by the target.
 
-        Parameters
-        ----------
-        updates
-            Optional field values to validate before resolving the target.
-            Keyword updates override entries with the same field name.
-        recursive
-            Whether nested factories and factories in containers are resolved
-            after the updates have been applied.
-        **kwargs
-            Additional field values to validate before resolving the target.
-
         Returns
         -------
         T
             Instance of the target type recorded by :meth:`model_from`.
         """
-        values = dict(updates or {})
-        values.update(kwargs)
-        config = self if not values else self.copy(**values)
         token = _DISABLE_CLI_PARSE_ARGS.set(True)
         try:
-            return cast(T, _resolve_factory(config, set(), recursive=recursive))
+            return cast(T, _resolve_factory(self, set()))
         finally:
             _DISABLE_CLI_PARSE_ARGS.reset(token)
 
@@ -270,8 +264,8 @@ class Factory(BaseConfig, Generic[T]):
         instance: object | None,
         target: type[T],
         *,
-        name: str | None,
-        as_factory: type[Any] | Callable[[Any], bool] | None,
+        __name__: str | None,
+        __recursive__: type[Any] | Callable[[Any], bool] | None,
     ) -> type[Self]:
         init = target.__init__
         namespace: dict[str, Any] = {}
@@ -312,11 +306,13 @@ class Factory(BaseConfig, Generic[T]):
                 default = getattr(instance, field_name)
             source_default = default
             if (
-                as_factory is not None
+                __recursive__ is not None
                 and source_default is not Parameter.empty
-                and _matches_factory_selector(source_default, as_factory)
+                and _matches_factory_selector(source_default, __recursive__)
             ):
-                factory_type = Factory.model_from(source_default, as_factory=as_factory)
+                factory_type = Factory.model_from(
+                    source_default, __recursive__=__recursive__
+                )
                 fields[field_name] = (factory_type, factory_type())
                 continue
             if default is Parameter.empty:
@@ -324,7 +320,7 @@ class Factory(BaseConfig, Generic[T]):
             fields[field_name] = (annotations[field_name], default)
 
         model = create_model(
-            name or f"{target.__name__}Config",
+            __name__ or f"{target.__name__}Config",
             __base__=cls,
             **cast(dict[str, Any], fields),
         )

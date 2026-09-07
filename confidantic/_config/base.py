@@ -190,7 +190,8 @@ class ConfigModelDict(PydanticSettingsConfigDict, total=False):
     nested_model_default_partial_update
         Whether source values may partially update default nested models.
     env_prefix
-        Prefix applied to environment variable names.
+        Prefix applied to environment variable names. ``None`` disables process
+        environment parsing, while an empty string enables it without a prefix.
     env_prefix_target
         Names to which ``env_prefix`` applies: ``"variable"``, ``"alias"``,
         or ``"all"``.
@@ -389,6 +390,7 @@ class BaseConfig(BaseSettings):
     model_config: ClassVar[ConfigModelDict] = ConfigModelDict(
         frozen=True,
         validate_default=True,
+        env_prefix=cast(Any, None),
         env_nested_delimiter="__",
         env_ignore_empty=True,
         env_parse_enums=True,
@@ -1192,6 +1194,8 @@ class BaseConfig(BaseSettings):
             if issubclass(level, BaseConfig) and level is not BaseConfig
         ]
         if not levels:
+            if source_options.get("_env_prefix") is None:
+                source_options["_env_prefix"] = ""
             return super()._settings_init_sources(**source_options)
 
         resolved_sources: list[PydanticBaseSettingsSource] = []
@@ -1224,6 +1228,8 @@ class BaseConfig(BaseSettings):
                 name: value if value is not None else level_config.get(name)
                 for name, value in env_source_options.items()
             }
+            env_prefix = env_source_options["env_prefix"]
+            env_source_options["env_prefix"] = env_prefix or ""
             if env_source_options["env_parse_none_str"] is not None:
                 cli_source_options["cli_parse_none_str"] = env_source_options[
                     "env_parse_none_str"
@@ -1255,6 +1261,7 @@ class BaseConfig(BaseSettings):
                         ),
                     )
             level_options = source_options | {
+                "_env_prefix": env_prefix or "",
                 "_cli_parse_args": _cli_parse_args if index == 0 else False,
                 "_cli_settings_source": cli_settings_source,
                 "_init_kwargs": init_kwargs,
@@ -1270,6 +1277,7 @@ class BaseConfig(BaseSettings):
                 if type(source) is InitSettingsSource
                 else source
                 for source in level_sources
+                if env_prefix is not None or type(source) is not EnvSettingsSource
             )
             default_source = next(
                 source

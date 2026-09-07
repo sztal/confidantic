@@ -1037,12 +1037,14 @@ def test_model_field_sources_track_standard_sources(
 ) -> None:
     """Built-in sources expose their exact source and configuration classes."""
     env_file = tmp_path / ".env"
-    env_file.write_text("VALUE=from-dotenv\n", encoding="utf-8")
+    env_file.write_text("APP_VALUE=from-dotenv\n", encoding="utf-8")
     secrets_dir = tmp_path / "secrets"
     secrets_dir.mkdir()
-    (secrets_dir / "value").write_text("from-secret", encoding="utf-8")
+    (secrets_dir / "APP_value").write_text("from-secret", encoding="utf-8")
 
     class Config(BaseConfig):
+        model_config = ConfigModelDict(env_prefix="APP_")
+
         value: str = "from-default"
 
     cli = _build_config(
@@ -1053,7 +1055,7 @@ def test_model_field_sources_track_standard_sources(
     )
     assert cli.model_field_sources["value"] == (CliSettingsSource, Config)
 
-    monkeypatch.setenv("VALUE", "from-environment")
+    monkeypatch.setenv("APP_VALUE", "from-environment")
     environment = _build_config(
         Config,
         _env_file=env_file,
@@ -1064,7 +1066,7 @@ def test_model_field_sources_track_standard_sources(
         Config,
     )
 
-    monkeypatch.delenv("VALUE")
+    monkeypatch.delenv("APP_VALUE")
     dotenv = _build_config(Config, _env_file=env_file, _secrets_dir=secrets_dir)
     assert dotenv.model_field_sources["value"] == (DotEnvSettingsSource, Config)
 
@@ -1214,13 +1216,15 @@ def test_standard_source_order(
 ) -> None:
     """Built-in sources retain Pydantic Settings priority."""
     env_file = tmp_path / ".env"
-    env_file.write_text("VALUE=from-dotenv\n", encoding="utf-8")
+    env_file.write_text("APP_VALUE=from-dotenv\n", encoding="utf-8")
     secrets_dir = tmp_path / "secrets"
     secrets_dir.mkdir()
-    (secrets_dir / "value").write_text("from-secret", encoding="utf-8")
-    monkeypatch.setenv("VALUE", "from-environment")
+    (secrets_dir / "APP_value").write_text("from-secret", encoding="utf-8")
+    monkeypatch.setenv("APP_VALUE", "from-environment")
 
     class Config(BaseConfig):
+        model_config = ConfigModelDict(env_prefix="APP_")
+
         value: str = "from-default"
 
     assert (
@@ -1247,7 +1251,7 @@ def test_standard_source_order(
         == "from-environment"
     )
 
-    monkeypatch.delenv("VALUE")
+    monkeypatch.delenv("APP_VALUE")
     assert (
         _build_config(Config, _env_file=env_file, _secrets_dir=secrets_dir).value
         == "from-dotenv"
@@ -1259,6 +1263,41 @@ def test_standard_source_order(
     assert (
         _build_config(Config, _env_file=None, _secrets_dir=None).value == "from-default"
     )
+
+
+def test_default_env_prefix_ignores_process_environment(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A None prefix ignores process variables but still loads dotenv values."""
+    env_file = tmp_path / ".env"
+    env_file.write_text("VALUE=from-dotenv\n", encoding="utf-8")
+    monkeypatch.setenv("VALUE", "from-environment")
+
+    class Config(BaseConfig):
+        value: str = "from-default"
+
+    config = _build_config(Config, _env_file=env_file)
+
+    assert config.value == "from-dotenv"
+    assert config.model_field_sources["value"] == (DotEnvSettingsSource, Config)
+
+
+def test_empty_env_prefix_enables_process_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An explicitly empty prefix enables unprefixed process variables."""
+    monkeypatch.setenv("VALUE", "from-environment")
+
+    class Config(BaseConfig):
+        model_config = ConfigModelDict(env_prefix="")
+
+        value: str = "from-default"
+
+    config = Config()
+
+    assert config.value == "from-environment"
+    assert config.model_field_sources["value"] == (EnvSettingsSource, Config)
 
 
 def test_dotenv_filters_keys_by_each_mro_prefix(tmp_path: Path) -> None:
@@ -1510,11 +1549,13 @@ def test_nested_factory_model_is_partially_updated_from_env_and_init(
         y: int = 2
 
     class Config(BaseConfig):
+        model_config = ConfigModelDict(env_prefix="APP_")
+
         nested: Nested = Field(default_factory=NestedChild)
 
-    monkeypatch.setenv("NESTED__X", "11")
+    monkeypatch.setenv("APP_NESTED__X", "11")
     environment = Config()
-    monkeypatch.delenv("NESTED__X")
+    monkeypatch.delenv("APP_NESTED__X")
     explicit_mapping = _build_config(Config, nested={"x": "12"})
 
     assert type(environment.nested) is NestedChild
@@ -1723,11 +1764,13 @@ def test_values_equal_to_defaults_are_in_fields_set(
     """Explicit sources retain provenance when their values equal defaults."""
 
     class Config(BaseConfig):
+        model_config = ConfigModelDict(env_prefix="APP_")
+
         value: str = "same"
 
     default = Config()
     explicit = Config(value="same")
-    monkeypatch.setenv("VALUE", "same")
+    monkeypatch.setenv("APP_VALUE", "same")
     environment = Config()
 
     assert default.model_fields_set == set()

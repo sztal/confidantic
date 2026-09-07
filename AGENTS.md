@@ -7,8 +7,8 @@
 - Source directory: `confidantic/`
 - Tests: `tests/`
 - Documentation: `docs/`
-- Runnable examples: `examples/` (including `factory_as_factory.py` for
-  recursive `__recursive__` generation)
+- Runnable examples: `examples/` (including `factory_dynamic_template.py` and
+  `factory_template.py` for recursive `__recursive__` generation)
 - Release notes: `changelog.d/` managed by Towncrier
 - Agent workflows: `.github/skills/`
 - `Factory.model_from(..., __recursive__=...)` can turn matching concrete defaults

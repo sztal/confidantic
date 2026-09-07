@@ -94,6 +94,13 @@ class OptionalServiceHolder:
         self.service = service
 
 
+class AlternativeServiceHolder:
+    """Target with nested factory and unrelated union alternatives."""
+
+    def __init__(self, service: ServiceBase | str | None = None) -> None:
+        self.service = service
+
+
 class RequiredServiceHolder:
     """Target with a required service field."""
 
@@ -337,6 +344,27 @@ def test_model_from_as_factory_uses_instance_values() -> None:
 
     assert config_type().model_resolve().service.value == 7
     assert config_type().model_resolve().label == "configured"
+
+
+def test_model_from_as_factory_preserves_optional_union_alternatives() -> None:
+    """Recursive factories retain explicit None as a valid alternative."""
+    config_type = Factory.model_from(
+        OptionalServiceHolder(Service(7)), __recursive__=ServiceBase
+    )
+
+    assert config_type().service.factory_target is Service
+    assert config_type(service=None).service is None
+    assert config_type(service=None).model_resolve().service is None
+
+
+def test_model_from_as_factory_preserves_union_alternatives() -> None:
+    """Recursive factories retain unrelated union alternatives."""
+    config_type = Factory.model_from(
+        AlternativeServiceHolder(Service(7)), __recursive__=ServiceBase
+    )
+
+    assert config_type(service=None).service is None
+    assert config_type(service="fallback").model_resolve().service == "fallback"
 
 
 def test_model_from_as_factory_wraps_required_instance_values() -> None:

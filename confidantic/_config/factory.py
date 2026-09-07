@@ -318,7 +318,10 @@ class Factory(BaseConfig, Generic[T]):
                 factory_type = Factory.model_from(
                     source_default, __recursive__=__recursive__
                 )
-                fields[field_name] = (factory_type, factory_type())
+                annotation = _factory_annotation(
+                    annotations[field_name], source_default, factory_type
+                )
+                fields[field_name] = (annotation, factory_type())
                 continue
             if default is Parameter.empty:
                 default = PydanticUndefined
@@ -332,6 +335,30 @@ class Factory(BaseConfig, Generic[T]):
         model.factory_target = target
         model.factory_fields = tuple(fields)
         return model
+
+
+def _factory_annotation(
+    annotation: Any,
+    value: Any,
+    factory_type: type[Factory[Any]],
+) -> Any:
+    origin = get_origin(annotation)
+    arguments = get_args(annotation)
+    if origin is not None and arguments:
+        replaced_arguments = tuple(
+            _factory_annotation(argument, value, factory_type) for argument in arguments
+        )
+        if replaced_arguments == arguments:
+            return annotation
+        copy_with = getattr(annotation, "copy_with", None)
+        if copy_with is not None:
+            return copy_with(replaced_arguments)
+        if origin is UnionType:
+            return reduce(or_, replaced_arguments)
+        return origin[replaced_arguments]
+    if _matches_factory_type_hint(value, annotation):
+        return factory_type
+    return annotation
 
 
 def _matches_factory_selector(

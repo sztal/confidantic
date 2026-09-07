@@ -818,6 +818,49 @@ class BaseConfig(BaseSettings):
         self._model_field_sources.update(updated._model_field_sources)
         return self
 
+    def model_resolve(
+        self,
+        *,
+        recursive: bool = True,
+        name: str | None = None,
+    ) -> Self:
+        """Resolve nested Factory values in a generated model copy.
+
+        Parameters
+        ----------
+        recursive
+            Whether nested factories and factories in containers are resolved.
+        name
+            Optional name for the generated resolved model class. The default
+            appends ``Resolved`` to this model's class name.
+
+        Returns
+        -------
+        Self
+            A resolved model instance. When no Factory value exists anywhere
+            in the model, this is a shallow copy of the current instance.
+        """
+        from confidantic._config.factory import (
+            _contains_factory,
+            _resolve_model_instance,
+        )
+
+        if not _contains_factory(self):
+            return shallow_copy(self)
+        token = _DISABLE_CLI_PARSE_ARGS.set(True)
+        try:
+            return cast(
+                Self,
+                _resolve_model_instance(
+                    self,
+                    set(),
+                    recursive=recursive,
+                    name=name,
+                ),
+            )
+        finally:
+            _DISABLE_CLI_PARSE_ARGS.reset(token)
+
     @property
     def model_field_sources(self) -> Mapping[str, _FieldSource]:
         """Map field names to their resolution and inheritance coordinates.

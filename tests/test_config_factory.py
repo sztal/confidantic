@@ -82,11 +82,8 @@ def test_factory_field_accepts_runtime_shortcuts() -> None:
         Model(factory="tests.test_config_factory:Product").factory.factory_target
         is Product
     )
-    assert Model(factory=source).factory().model_dump() == {
-        "count": 3,
-        "label": "source",
-        "enabled": False,
-    }
+    product = Model(factory=source).factory().model_resolve()
+    assert (product.count, product.label, product.enabled) == (3, "source", False)
 
 
 @pytest.mark.parametrize(
@@ -109,11 +106,8 @@ def test_factory_field_accepts_call_and_make_inputs(value: Any) -> None:
     class Model(BaseModel):
         factory: FactoryField[Product]
 
-    assert Model(factory=value).factory().model_dump() == {
-        "count": 7,
-        "label": "called",
-        "enabled": False,
-    }
+    product = Model(factory=value).factory().model_resolve()
+    assert (product.count, product.label, product.enabled) == (7, "called", False)
 
 
 def test_model_from_instance_returns_typed_factory() -> None:
@@ -123,11 +117,8 @@ def test_model_from_instance_returns_typed_factory() -> None:
     factory = ProductModel(factory=Factory.model_from(source)).factory
 
     assert factory.factory_target is Product
-    assert factory().model_dump() == {
-        "count": 3,
-        "label": "source",
-        "enabled": False,
-    }
+    product = factory().model_resolve()
+    assert (product.count, product.label, product.enabled) == (3, "source", False)
 
 
 def test_instance_from_uses_source_defaults_and_keyword_overrides() -> None:
@@ -142,7 +133,7 @@ def test_instance_from_uses_source_defaults_and_keyword_overrides() -> None:
         "label": "source",
         "enabled": False,
     }
-    product = factory()
+    product = factory.model_resolve()
     assert (product.count, product.label, product.enabled) == (4, "source", False)
 
 
@@ -300,32 +291,130 @@ def test_model_from_instance_copies_custom_unhashable_defaults() -> None:
     assert first.value is not second.value
 
 
-def test_materialize_validates_values_and_calls_target() -> None:
-    """Materialization passes validated fields to the target constructor."""
+def test_model_resolve_validates_values_and_calls_target() -> None:
+    """Resolution passes validated fields to the target constructor."""
     config = Factory.model_from(Product)(count="3", label="configured", enabled=False)
 
-    product = config.materialize()
+    product = config.model_resolve()
 
     assert isinstance(product, Product)
     assert product.count == 3
     assert product.label == "configured"
     assert product.enabled is False
-    assert config() is not product
-    assert Factory.__call__ is Factory.materialize
+    assert config.model_resolve() is not product
+    assert not hasattr(config, "materialize")
+    assert not callable(config)
 
 
-def test_materialize_overrides_configured_values_with_kwargs() -> None:
-    """Materialization keyword arguments override configured values."""
+def test_model_resolve_overrides_configured_values_with_kwargs() -> None:
+    """Resolution keyword arguments override configured values."""
     config = Factory.model_from(Product)(count=3, label="configured", enabled=False)
 
-    product = config.materialize(label="overridden", enabled=True)
+    product = config.model_resolve(label="overridden", enabled=True)
 
     assert product.label == "overridden"
     assert product.enabled is True
 
 
-def test_materialize_resolves_nested_factory_configs() -> None:
-    """Direct materialization recursively materializes nested factories."""
+def test_factory_model_resolve_applies_mapping_before_nested_resolution() -> None:
+    """Factory updates are validated before nested factories are resolved."""
+    config = Factory.model_from(Product)(count=1)
+
+    product = config.model_resolve({"count": "2"})
+
+    assert product.count == 2
+
+
+def test_base_config_model_resolve_generates_resolved_model() -> None:
+    """BaseConfig resolution replaces Factory fields with target instances."""
+
+    class Config(BaseConfig):
+        child: Factory[Child] = Factory.model_from(Child)
+
+    config = Config(child=Factory.model_from(Child)(value=3))
+
+    resolved = config.model_resolve(name="ResolvedConfig")
+
+    assert type(resolved).__name__ == "ResolvedConfig"
+    assert type(resolved).model_fields["child"].annotation is Child
+    assert isinstance(resolved.child, Child)
+    assert resolved.child.value == 3
+    assert config.child.value == 3
+
+
+def test_base_config_model_resolve_resolves_factory_field_classes() -> None:
+    """BaseConfig resolution materializes FactoryField class values."""
+
+    class Config(BaseConfig):
+        child: FactoryField[Child] = Factory.model_from(Child)
+
+    resolved = Config().model_resolve()
+
+    assert type(resolved).model_fields["child"].annotation is Child
+    assert isinstance(resolved.child, Child)
+
+
+def test_model_resolve_preserves_nested_model_extra_values() -> None:
+    """Nested model extras survive factory resolution alongside resolved fields."""
+
+    class Payload(BaseModel):
+        model_config = ConfigDict(
+            arbitrary_types_allowed=True,
+            extra="allow",
+        )
+
+        child: Factory[Child]
+
+    class Parent:
+        def __init__(self, payload: Payload) -> None:
+            self.payload = payload
+
+    payload = Payload(child=Factory.model_from(Child)(value=7), label="extra")
+    resolved = Factory.model_from(Parent)(payload=payload).model_resolve()
+
+    assert isinstance(resolved.payload.child, Child)
+    assert resolved.payload.child.value == 7
+    assert resolved.payload.model_extra == {"label": "extra"}
+
+
+def test_base_config_model_resolve_preserves_nested_factory_when_not_recursive() -> (
+    None
+):
+    """Factory resolution can leave nested factories in the target intact."""
+
+    class Parent:
+        def __init__(self, child: Factory[Child]) -> None:
+            self.child = child
+
+    class Config(BaseConfig):
+        parent: Factory[Parent] = Factory.model_from(Parent)
+
+    child_config = Factory.model_from(Child)(value=4)
+    config = Config(parent=Factory.model_from(Parent)(child=child_config))
+
+    resolved = config.model_resolve(recursive=False)
+
+    assert isinstance(resolved.parent, Parent)
+    assert resolved.parent.child is child_config
+
+
+def test_base_config_model_resolve_without_factories_returns_shallow_copy() -> None:
+    """Models without factories do not receive a generated resolved class."""
+
+    class Config(BaseConfig):
+        value: int
+
+    config = Config(value=1)
+
+    resolved = config.model_resolve()
+
+    assert type(resolved) is Config
+    assert resolved is not config
+    assert resolved.value == 1
+
+
+def test_model_resolve_resolves_nested_factory_configs() -> None:
+    """Direct resolution recursively resolves nested factories."""
 
     class Parent:
         def __init__(
@@ -338,13 +427,13 @@ def test_materialize_resolves_nested_factory_configs() -> None:
     parent = Factory.model_from(Parent)(
         child=child_config(value=1),
         children=[child_config(value=2), child_config(value=3)],
-    ).materialize()
+    ).model_resolve()
 
     assert isinstance(parent.child, Child)
     assert [child.value for child in parent.children] == [2, 3]
 
 
-def test_materialize_resolves_nested_factories_in_containers() -> None:
+def test_model_resolve_resolves_nested_factories_in_containers() -> None:
     """Nested factories are resolved in mappings and immutable containers."""
 
     class Parent:
@@ -369,7 +458,7 @@ def test_materialize_resolves_nested_factories_in_containers() -> None:
             set_value={child_config(value=3)},
             frozenset_value=frozenset({child_config(value=4)}),
         )
-        .materialize()
+        .model_resolve()
     )
 
     assert parent.mapping["child"].value == 1
@@ -396,14 +485,14 @@ def test_factory_accepts_nested_factories_in_set_inputs() -> None:
         frozen_children=frozenset({child_config(value=2)}),
     )
 
-    parent = config.materialize()
+    parent = config.model_resolve()
 
     assert {child.value for child in parent.children} == {1}
     assert {child.value for child in parent.frozen_children} == {2}
 
 
-def test_materialize_rejects_cyclic_values() -> None:
-    """Cyclic nested values cannot be recursively materialized."""
+def test_model_resolve_rejects_cyclic_values() -> None:
+    """Cyclic nested values cannot be recursively resolved."""
 
     class Parent:
         def __init__(self, payload: Any) -> None:
@@ -414,7 +503,7 @@ def test_materialize_rejects_cyclic_values() -> None:
     config = Factory.model_from(Parent).model_construct(payload=payload)
 
     with pytest.raises(ValueError, match="cyclic values cannot be resolved"):
-        config.materialize()
+        config.model_resolve()
 
 
 def test_factory_default_target_class_is_converted() -> None:
@@ -468,8 +557,8 @@ def test_factory_field_accepts_a_factory_for_a_target_subclass() -> None:
     config = Config(service=factory_type)
 
     assert config.service is factory_type
-    assert isinstance(config.service().value, int)
-    assert config.service().value == 2
+    assert isinstance(config.service().model_resolve().value, int)
+    assert config.service().model_resolve().value == 2
 
 
 def test_factory_field_rejects_a_factory_for_another_target() -> None:
@@ -513,7 +602,7 @@ def test_factory_default_factory_is_converted() -> None:
     assert Config().service.factory_target is Child
 
 
-def test_materialize_disables_cli_parsing(
+def test_model_resolve_disables_cli_parsing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Target construction cannot consume process command-line arguments."""
@@ -527,12 +616,7 @@ def test_materialize_disables_cli_parsing(
 
     monkeypatch.setattr(sys, "argv", ["factory.py", "--value=17"])
 
-    assert Factory.model_from(Target)().materialize().config.value == 1
-
-
-def test_model_resolve_is_not_available() -> None:
-    """Whole-model factory materialization is intentionally unsupported."""
-    assert not hasattr(BaseConfig, "model_resolve")
+    assert Factory.model_from(Target)().model_resolve().config.value == 1
 
 
 def test_invalid_factory_input_reports_validation_error() -> None:

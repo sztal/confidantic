@@ -17,8 +17,10 @@ The package requires Python 3.11 or later; the repository's default interpreter
 is Python 3.13.
 
 The package root re-exports `BaseConfig`, `ClassDefaultsSource`,
-`ConfigModelDict`, `Factory`, `FactoryField`, and `__version__`. Other core
-public APIs live in
+`ConfigModelDict`, `Factory`, `FactoryField`, and `__version__`. `Factory`
+provides `model_from`, `instance_from`, and explicit `model_resolve` methods;
+`BaseConfig` also provides `model_resolve` for nested factory values. Other
+core public APIs live in
 `confidantic/annotations.py`, `confidantic/configurable.py`,
 `confidantic/context.py`, `confidantic/logging.py`, `confidantic/paths.py`,
 `confidantic/types.py`, and `confidantic/utils.py`. Internal configuration
@@ -34,8 +36,8 @@ pytest, and coverage configuration.
 Set up the development environment with `uv sync --group dev`; add the `docs`
 group when building documentation. The repository default interpreter is read
 from `.python-version` (currently 3.13). Examples are executable scripts;
-`tests/test_examples.py` smoke-tests the listed example subset, so check that
-test before assuming every script is covered.
+`tests/test_examples.py` smoke-tests a selected subset, so check that test
+before assuming every script is covered.
 
 Keep changes focused, preserve public behavior unless the task intentionally
 changes it, and add or update tests for behavior changes.
@@ -61,11 +63,13 @@ task-session notes.
 
 Agents must run the Nox lint session before pytest. Pre-commit may apply
 formatting or lockfile updates, so linting after pytest can invalidate the test
-result:
+result. The standard checks are:
 
 ```console
 uv run noxfile.py -s lint
 uv run pytest
+uv run noxfile.py -s typecheck
+uv run noxfile.py -s docs
 ```
 
 Use the coverage target only when coverage statistics are needed:
@@ -81,9 +85,14 @@ stale paths and fail with `No source for code`. The Nox test session uses a
 temporary coverage file by default, runs pytest with xdist, combines its data,
 and reports coverage.
 
-Do not run the full Nox test matrix through `make test`, `nox -s tests`, or
-`uv run noxfile.py -s tests`. Full multi-version Nox testing is reserved for a
-human contributor.
+Do not run `make test`, `nox -s tests`, or `uv run noxfile.py -s tests` as an
+agent. The Nox `tests` session runs the full supported-Python matrix; that
+multi-version run is reserved for a human contributor. Use the direct pytest
+command for the repository test suite:
+
+```console
+uv run pytest
+```
 
 Agents may use the non-test Nox sessions directly when a focused check is
 needed:

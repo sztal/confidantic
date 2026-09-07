@@ -83,8 +83,7 @@ Use the package according to the shape of the configuration problem:
   models, environment and dotenv input, CLI parsing, inherited defaults, and
   source provenance.
 - **Configured components:** `Factory` and `FactoryField` generate validated
-  configuration from constructor signatures, then materialize the target
-  object.
+  configuration from constructor signatures, then resolve the target object.
 - **Scoped runtime state:** `BaseContext` provides context-local settings with
   persistent and temporary overrides.
 - **Flexible inputs:** annotations such as `AbsolutePath`, `CommaDelimited`,
@@ -118,7 +117,7 @@ class Config(BaseConfig):
 
 
 config = Config(service=Factory.model_from(Service("api.example.com")))
-service = config.service().materialize()
+service = config.service().model_resolve()
 ```
 
 See [`examples/factory.py`](examples/factory.py) and

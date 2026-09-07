@@ -2,8 +2,8 @@
 
 """Create an object from configuration derived from its constructor.
 
-Run cells individually to inspect the generated model, then materialize the
-target object from validated configuration values.
+Run cells individually to inspect the generated model, then resolve the target
+object from validated configuration values.
 """
 
 from confidantic import BaseConfig, Factory, FactoryField
@@ -24,16 +24,15 @@ class Config(BaseConfig, cli_parse_args=True):
     """Application settings containing a configurable service."""
 
     service: FactoryField[Service] = Factory.model_from(Service)
-    """Values passed to `Service` when it is materialized."""
+    """Values passed to `Service` when it is resolved."""
 
 
-# %% Inspect config fields, then materialize the target -----------------------------
+# %% Inspect config fields, then resolve the target ---------------------------------
 
 config = Config(service=Factory.model_from(Service("127.0.0.1", 9999)))
 config.info()
 
-service = config.service().materialize()
-# OR just `service = config.service()()` because `Factory` is callable.
+service = config.service().model_resolve()
 print(service)
 
 assert isinstance(service, Service)

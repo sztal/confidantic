@@ -93,6 +93,12 @@ def test_configurable_accepts_config_input_forms(
     assert widget.config.name == expected_name
 
 
+def test_configurable_rejects_invalid_config_input() -> None:
+    """Construction rejects values that are not configuration inputs."""
+    with pytest.raises(TypeError, match="Expected config of type WidgetConfig"):
+        Widget(1)  # type: ignore[arg-type]
+
+
 def test_configurable_replaces_existing_config_when_given_updates() -> None:
     """Keyword updates derive a validated configuration without mutating the input."""
     config = WidgetConfig(name="original")

@@ -227,7 +227,7 @@ class Factory(BaseConfig, Generic[T]):
         """
         return cast(Factory[U], cls.model_from(source, name=name)(**kwargs))
 
-    def model_resolve(
+    def model_resolve(  # type: ignore[override]
         self,
         updates: Mapping[str, Any] | None = None,
         *,
@@ -399,6 +399,8 @@ def _matches_factory_selector(
 
 
 def _matches_factory_type_hint(value: Any, type_hint: Any) -> bool:
+    if value is None:
+        return False
     try:
         adapter = TypeAdapter(
             type_hint, config=ConfigDict(arbitrary_types_allowed=True)

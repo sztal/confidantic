@@ -79,6 +79,13 @@ class ServiceHolder:
         self.label = label
 
 
+class OptionalServiceHolder:
+    """Target with an optional concrete nested service default."""
+
+    def __init__(self, service: ServiceBase | None = None) -> None:
+        self.service = service
+
+
 class RequiredServiceHolder:
     """Target with a required service field."""
 
@@ -263,6 +270,24 @@ def test_model_from_as_factory_accepts_type_hints_and_predicates() -> None:
     assert predicate_config.model_fields["label"].annotation is str
 
 
+def test_model_from_as_factory_predicate_leaves_nonmatching_defaults() -> None:
+    """A predicate selector leaves nonmatching concrete defaults unchanged."""
+    config_type = Factory.model_from(
+        ServiceHolder, as_factory=lambda value: isinstance(value, str)
+    )
+
+    assert config_type().service is _DEFAULT_SERVICE
+
+
+def test_model_from_as_factory_handles_none_union_defaults() -> None:
+    """Type-hint selectors support optional defaults that do not match."""
+    config_type = Factory.model_from(
+        OptionalServiceHolder, as_factory=ServiceBase | None
+    )
+
+    assert config_type().service is None
+
+
 def test_model_from_as_factory_uses_instance_values() -> None:
     """Instance sources provide the nested factory's concrete defaults."""
     source = ServiceHolder(Service(7), "configured")
@@ -273,11 +298,58 @@ def test_model_from_as_factory_uses_instance_values() -> None:
     assert config_type().model_resolve().label == "configured"
 
 
+def test_model_from_as_factory_wraps_required_instance_values() -> None:
+    """Instance values can provide defaults for required constructor fields."""
+    config_type = Factory.model_from(
+        RequiredServiceHolder(Service(7)), as_factory=ServiceBase
+    )
+
+    assert config_type().model_resolve().service.value == 7
+
+
 def test_model_from_as_factory_leaves_required_fields_unchanged() -> None:
     """Required fields without source values are not auto-generated."""
     config_type = Factory.model_from(RequiredServiceHolder, as_factory=ServiceBase)
 
     assert config_type.model_fields["service"].is_required()
+
+
+def test_model_from_as_factory_preserves_existing_factory_defaults() -> None:
+    """Existing factory defaults are not wrapped a second time."""
+    factory_type = Factory.model_from(Service)
+
+    class Target:
+        def __init__(self, service: Factory[ServiceBase] = factory_type) -> None:
+            self.service = service
+
+    config_type = Factory.model_from(Target, as_factory=ServiceBase)
+
+    assert config_type.model_fields["service"].default is factory_type
+
+
+def test_model_from_as_factory_isolates_nested_mutable_defaults() -> None:
+    """Generated nested factories receive independent mutable defaults."""
+
+    default_values = [1]
+
+    class MutableService:
+        def __init__(self, values: list[int] = default_values) -> None:
+            self.values = values
+
+    default_service = MutableService()
+
+    class MutableServiceHolder:
+        def __init__(self, service: MutableService = default_service) -> None:
+            self.service = service
+
+    config_type = Factory.model_from(MutableServiceHolder, as_factory=MutableService)
+    first = config_type()
+    second = config_type()
+
+    first.service.values.append(2)
+
+    assert first.service.values == [1, 2]
+    assert second.service.values == [1]
 
 
 def test_model_from_type_accepts_custom_name() -> None:

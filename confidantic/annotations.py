@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import (
     Annotated,
     Any,
-    Generic,
     TypeAlias,
     TypeVar,
     get_args,
@@ -186,19 +185,10 @@ def _call(value: Any, handler: Callable[[Any], Any]) -> Any:
     return handler(value() if callable(value) else value)
 
 
-class Call(Generic[T]):
-    """A Pydantic annotation that evaluates a callable during validation.
-
-    Callables and import strings are evaluated before validation. A mapping whose
-    ``@call`` value identifies a callable is evaluated with ``@args`` as positional
-    arguments and its remaining entries as keyword arguments. Other inputs are
-    validated unchanged against the annotated type.
-    """
-
-    @classmethod
-    def __class_getitem__(cls, item_type: type[T]) -> Any:
-        """Return a call annotation whose result is validated as ``item_type``."""
-        return Annotated[item_type, WrapValidator(_call)]
+#: A Pydantic annotation that evaluates a callable during validation. Callables and
+#: import strings are evaluated before validation; call mappings are evaluated with
+#: their positional and keyword arguments before normal validation.
+Call: TypeAlias = Annotated[T, WrapValidator(_call)]
 
 
 # -----------------------------------------------------------------------------------
@@ -206,19 +196,10 @@ class Call(Generic[T]):
 # -----------------------------------------------------------------------------------
 
 
-class Make(Generic[T]):
-    """A Pydantic annotation that evaluates nested call mappings.
-
-    The annotation behaves like :class:`Call` for a callable or import string.
-    Mappings and sequences are otherwise traversed recursively; mappings with an
-    ``@call`` key are invoked after their arguments and keyword values are built.
-    """
-
-    @classmethod
-    def __class_getitem__(cls, item_type: type[T]) -> Any:
-        """Return a make annotation whose result is validated as ``item_type``."""
-        return Annotated[item_type, WrapValidator(_make)]
-
-
 def _make(value: Any, handler: Callable[[Any], Any]) -> Any:
     return make(value, handler)
+
+
+#: A Pydantic annotation that evaluates nested call mappings. Mappings and
+#: sequences are traversed recursively before normal validation.
+Make: TypeAlias = Annotated[T, WrapValidator(_make)]

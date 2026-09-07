@@ -55,6 +55,37 @@ class Child:
         self.value = value
 
 
+class ServiceBase:
+    """Base type for selector matching tests."""
+
+
+class Service(ServiceBase):
+    """Concrete service used as a nested factory source."""
+
+    def __init__(self, value: int = 1) -> None:
+        self.value = value
+
+
+_DEFAULT_SERVICE = Service()
+
+
+class ServiceHolder:
+    """Target with a concrete nested service default."""
+
+    def __init__(
+        self, service: ServiceBase = _DEFAULT_SERVICE, label: str = "holder"
+    ) -> None:
+        self.service = service
+        self.label = label
+
+
+class RequiredServiceHolder:
+    """Target with a required service field."""
+
+    def __init__(self, service: ServiceBase) -> None:
+        self.service = service
+
+
 class ProductModel(BaseModel):
     """Model containing a typed product factory."""
 
@@ -208,6 +239,45 @@ def test_model_from_type_creates_typed_config_fields() -> None:
     assert config_type(count=1).model_dump(context={"make": True})["@call"] == (
         "tests.test_config_factory:Product"
     )
+
+
+def test_model_from_as_factory_wraps_matching_defaults() -> None:
+    """Matching defaults become recursively resolvable factory fields."""
+    config_type = Factory.model_from(ServiceHolder, as_factory=ServiceBase)
+
+    service = config_type().service
+
+    assert service.factory_target is Service
+    assert config_type().model_resolve().service.value == 1
+
+
+def test_model_from_as_factory_accepts_type_hints_and_predicates() -> None:
+    """Type hints and callable selectors use the concrete default value."""
+    type_hint_config = Factory.model_from(ServiceHolder, as_factory=ServiceBase | None)
+    predicate_config = Factory.model_from(
+        ServiceHolder, as_factory=lambda value: isinstance(value, Service)
+    )
+
+    assert type_hint_config().service.factory_target is Service
+    assert predicate_config().service.factory_target is Service
+    assert predicate_config.model_fields["label"].annotation is str
+
+
+def test_model_from_as_factory_uses_instance_values() -> None:
+    """Instance sources provide the nested factory's concrete defaults."""
+    source = ServiceHolder(Service(7), "configured")
+
+    config_type = Factory.model_from(source, as_factory=ServiceBase)
+
+    assert config_type().model_resolve().service.value == 7
+    assert config_type().model_resolve().label == "configured"
+
+
+def test_model_from_as_factory_leaves_required_fields_unchanged() -> None:
+    """Required fields without source values are not auto-generated."""
+    config_type = Factory.model_from(RequiredServiceHolder, as_factory=ServiceBase)
+
+    assert config_type.model_fields["service"].is_required()
 
 
 def test_model_from_type_accepts_custom_name() -> None:

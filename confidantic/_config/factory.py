@@ -16,7 +16,6 @@ from inspect import Parameter, signature
 from operator import or_
 from types import UnionType
 from typing import (
-    Annotated,
     Any,
     ClassVar,
     Generic,
@@ -44,15 +43,13 @@ from pydantic_core import (
     PydanticUndefined,
     core_schema,
 )
-from typing_extensions import TypeAliasType
 
 from confidantic._config.base import (
     _DISABLE_CLI_PARSE_ARGS,
     BaseConfig,
 )
-from confidantic.utils import import_from_string, make
 
-__all__ = ("Factory", "FactoryField")
+__all__ = ("Factory",)
 
 T = TypeVar("T")
 U = TypeVar("U")
@@ -113,14 +110,22 @@ class Factory(BaseConfig, Generic[T]):
                         "Input should be a Factory for the expected target type",
                     )
                 return value
+            if _is_factory_type(value):
+                if target is not None and not issubclass(value.factory_target, target):
+                    raise PydanticCustomError(
+                        "factory",
+                        "Input should be a Factory for the expected target type",
+                    )
+                return value
             if isinstance(value, Mapping):
                 return next_validator(value)
             try:
                 value_target = value if isinstance(value, type) else type(value)
-                if target is not None and value_target is not target:
+                if target is not None and not issubclass(value_target, target):
                     raise TypeError
-                config: Factory[Any] = Factory.model_from(value)()
-                return next_validator(config.model_dump())
+                if isinstance(value, type):
+                    return Factory.model_from(value)
+                return Factory.model_from(value)()
             except (TypeError, ValueError) as error:
                 raise PydanticCustomError(
                     "factory",
@@ -329,58 +334,6 @@ class Factory(BaseConfig, Generic[T]):
         return model
 
 
-class _FactoryFieldMetadata:
-    def __get_pydantic_core_schema__(
-        self,
-        source_type: Any,
-        handler: GetCoreSchemaHandler,
-    ) -> CoreSchema:
-        factory_type = get_args(source_type)[0]
-        target = factory_type.__pydantic_generic_metadata__["args"][0]
-        schema = handler(source_type)
-
-        def validate(value: Any, next_validator: Callable[[Any], Any]) -> Any:
-            try:
-                if isinstance(value, Factory):
-                    raise TypeError
-                if isinstance(value, str):
-                    value = import_from_string(value)
-                    if callable(value) and not isinstance(value, type):
-                        value = value()
-                elif isinstance(value, Mapping) and "@call" in value:
-                    value = make(value)
-                elif callable(value) and not isinstance(value, type):
-                    value = value()
-                if isinstance(value, type) and issubclass(value, Factory):
-                    if not issubclass(value.factory_target, target):
-                        raise TypeError
-                    return value
-                value_target = value if isinstance(value, type) else type(value)
-                if not issubclass(value_target, target):
-                    raise TypeError
-                factory_base = cast(
-                    type[Factory[Any]], Factory.__class_getitem__(target)
-                )
-                return next_validator(factory_base.model_from(value))
-            except (TypeError, ValueError) as error:
-                raise PydanticCustomError(
-                    "factory_field",
-                    "Input should be a compatible target or Factory type",
-                ) from error
-
-        return core_schema.no_info_wrap_validator_function(validate, schema)
-
-
-#: A Pydantic annotation for fields storing generated factory classes. Values may
-#: be compatible factory classes, target classes or instances, import strings,
-#: callables, or call/make mappings. Validation produces ``type[Factory[T]]``.
-FactoryField = TypeAliasType(
-    "FactoryField",
-    Annotated[type[Factory[T]], _FactoryFieldMetadata()],
-    type_params=(T,),
-)
-
-
 def _matches_factory_selector(
     value: Any,
     selector: Any,
@@ -452,8 +405,6 @@ def _resolved_annotation(annotation: Any) -> Any:
 
     origin = get_origin(annotation)
     arguments = get_args(annotation)
-    if getattr(origin, "__name__", None) == "FactoryField":
-        return arguments[0]
     if origin is None or not arguments:
         return annotation
 

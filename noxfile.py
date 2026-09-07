@@ -32,6 +32,11 @@ DEFAULT_PYTHON_VERSION = Path(".python-version").read_text().rstrip()
 def tests(session: nox.Session) -> None:
     """Run the test suite."""
     session.install(".[all]", "--group", "test")
+
+    if session.posargs:
+        session.run("pytest", *session.posargs)
+        return
+
     tmp_dir = Path(session.create_tmp())
 
     if os.getenv("COVERAGE_FILE") is None:

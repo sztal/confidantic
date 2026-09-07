@@ -1,9 +1,8 @@
 # %% ---------------------------------------------------------------------------------
 
-from pydantic import Field
 
 from confidantic import BaseConfig, Factory
-from confidantic.annotations import Import, Make
+from confidantic.annotations import Import
 
 # %% ---------------------------------------------------------------------------------
 
@@ -83,12 +82,15 @@ class Types(
 ):
     """A configuration model for a types router."""
 
-    database: Import[type[Database]] | Make[Database] = Field(default_factory=Database)
+    database: Import[type[Database]] = Database
     """A database dependency."""
 
 
 types = Types()
-template = Application("orders", types.database)
+
+# %% ---------------------------------------------------------------------------------
+
+template = Application("orders", types.database())
 ApplicationConfig = Factory.model_from(template, __recursive__=Database)
 
 # %% ---------------------------------------------------------------------------------

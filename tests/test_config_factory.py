@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model
 from pydantic.errors import PydanticUserError
 from typing_extensions import TypedDict
 
-from confidantic import BaseConfig, Factory, FactoryField
+from confidantic import BaseConfig, Factory
 from confidantic._config.factory import (
     _contains_factory,
     _matches_factory_type_hint,
@@ -44,7 +44,7 @@ Product.__init__.__annotations__.pop("untyped")
 
 
 def _build_product() -> Product:
-    """Build a product for FactoryField call directive tests."""
+    """Build a product for callable input regression coverage."""
     return Product(7, "called", enabled=False)
 
 
@@ -104,66 +104,38 @@ class RequiredServiceHolder:
 class ProductModel(BaseModel):
     """Model containing a typed product factory."""
 
-    factory: FactoryField[Product]
+    factory: Factory[Product]
 
 
 def test_model_from_type_returns_typed_factory() -> None:
-    """Target types produce classes accepted by typed factory fields."""
+    """Target types produce instances accepted by typed factory fields."""
 
     factory = ProductModel(factory=Factory.model_from(Product)).factory
 
     assert factory.factory_target is Product
 
 
-def test_factory_field_accepts_runtime_shortcuts() -> None:
-    """Factory fields convert target classes, instances, and import strings."""
+def test_generic_factory_accepts_target_classes_and_instances() -> None:
+    """Generic factories convert compatible target classes and instances."""
 
     class Model(BaseModel):
-        factory: FactoryField[Product]
+        factory: Factory[Product]
 
     source = Product(3, "source", enabled=False)
 
     assert Model(factory=Product).factory.factory_target is Product
-    assert (
-        Model(factory="tests.test_config_factory:Product").factory.factory_target
-        is Product
-    )
-    product = Model(factory=source).factory().model_resolve()
+    product = Model(factory=source).factory.model_resolve()
     assert (product.count, product.label, product.enabled) == (3, "source", False)
-
-
-@pytest.mark.parametrize(
-    "value",
-    [
-        _build_product,
-        "tests.test_config_factory:_build_product",
-        {"@call": "tests.test_config_factory:_build_product"},
-        {
-            "@call": "tests.test_config_factory:Product",
-            "count": {"@call": "builtins:int", "@args": ["7"]},
-            "label": "called",
-            "enabled": False,
-        },
-    ],
-)
-def test_factory_field_accepts_call_and_make_inputs(value: Any) -> None:
-    """Factory fields evaluate callables and recursive call mappings."""
-
-    class Model(BaseModel):
-        factory: FactoryField[Product]
-
-    product = Model(factory=value).factory().model_resolve()
-    assert (product.count, product.label, product.enabled) == (7, "called", False)
 
 
 def test_model_from_instance_returns_typed_factory() -> None:
     """Target instances produce typed factories with derived defaults."""
     source = Product(3, "source", enabled=False)
 
-    factory = ProductModel(factory=Factory.model_from(source)).factory
+    factory = ProductModel(factory=Factory.model_from(source)()).factory
 
     assert factory.factory_target is Product
-    product = factory().model_resolve()
+    product = factory.model_resolve()
     assert (product.count, product.label, product.enabled) == (3, "source", False)
 
 
@@ -184,7 +156,7 @@ def test_instance_from_uses_source_defaults_and_keyword_overrides() -> None:
 
 
 def test_typed_factory_field_preserves_factory_type() -> None:
-    """Typed factory fields preserve an already-generated factory type."""
+    """Typed factory fields preserve an already-generated factory class."""
     factory_type = Factory.model_from(Product)
 
     assert (
@@ -192,12 +164,13 @@ def test_typed_factory_field_preserves_factory_type() -> None:
     )
 
 
-def test_typed_factory_field_rejects_factory_instances() -> None:
-    """Factory class fields reject factory instances."""
-    factory_type = Factory.model_from(Child)
+def test_typed_factory_field_preserves_factory_instances() -> None:
+    """Typed factory fields preserve already-generated factory instances."""
+    factory_type = Factory.model_from(Product)
 
-    with pytest.raises(ValidationError):
-        ProductModel.model_validate({"factory": factory_type()})
+    factory = ProductModel.model_validate({"factory": factory_type(count=1)}).factory
+
+    assert factory.factory_target is Product
 
 
 def test_generic_factory_validation_rejects_incompatible_factory() -> None:
@@ -243,9 +216,9 @@ def test_factory_field_composes_with_containers_and_unions() -> None:
     """Generic factory validation composes with standard Pydantic annotations."""
 
     class Model(BaseModel):
-        factories: list[FactoryField[Child]]
-        optional: FactoryField[Child] | None
-        choice: FactoryField[Child] | str
+        factories: list[Factory[Child]]
+        optional: Factory[Child] | None
+        choice: Factory[Child] | str
 
     model = Model.model_validate(
         {
@@ -271,7 +244,7 @@ def test_factory_field_failure_allows_union_fallback() -> None:
     class Model(BaseModel):
         model_config = ConfigDict(arbitrary_types_allowed=True)
 
-        factory: FactoryField[Product] | PositionalTarget
+        factory: Factory[Product] | PositionalTarget
 
     assert isinstance(Model(factory=PositionalTarget(12)).factory, PositionalTarget)
 
@@ -473,7 +446,7 @@ def test_resolved_annotation_preserves_unchanged_and_union_annotations() -> None
     """Annotation resolution preserves plain types and rebuilds unions."""
     assert _resolved_annotation(Any) is Any
     assert _resolved_annotation(list[int]) == list[int]
-    assert _resolved_annotation(FactoryField[Child] | str) == Child | str
+    assert _resolved_annotation(Factory[Child] | str) == Child | str
 
 
 def test_resolved_annotation_keeps_unmodified_model_type() -> None:
@@ -681,11 +654,11 @@ def test_base_config_model_resolve_generates_resolved_model() -> None:
     assert config.child.value == 3
 
 
-def test_base_config_model_resolve_resolves_factory_field_classes() -> None:
-    """BaseConfig resolution materializes FactoryField class values."""
+def test_base_config_model_resolve_resolves_factory_values() -> None:
+    """BaseConfig resolution materializes nested factory values."""
 
     class Config(BaseConfig):
-        child: FactoryField[Child] = Factory.model_from(Child)
+        child: Factory[Child] = Factory.model_from(Child)
 
     resolved = Config().model_resolve()
 
@@ -849,7 +822,7 @@ def test_factory_default_target_class_is_converted() -> None:
     config_type = create_model(
         "Config",
         __base__=BaseConfig,
-        service=(FactoryField[Child], Factory.model_from(Child)),
+        service=(Factory[Child], Factory.model_from(Child)),
     )
 
     assert config_type().service.factory_target is Child
@@ -861,21 +834,20 @@ def test_factory_default_factory_class_is_preserved() -> None:
     factory_type = Factory.model_from(Child)
 
     class Config(BaseConfig):
-        service: FactoryField[Child] = factory_type
+        service: Factory[Child] = factory_type
 
     service = Config().service
 
     assert service is factory_type
 
 
-def test_factory_instance_default_is_rejected() -> None:
-    """Factory instances are rejected because fields store factory types."""
+def test_factory_instance_default_is_preserved() -> None:
+    """Factory instances are preserved by generic Factory fields."""
 
     class Config(BaseConfig):
-        service: FactoryField[Child] = Factory.instance_from(Child)  # type: ignore[assignment]
+        service: Factory[Child] = Factory.instance_from(Child)  # type: ignore[assignment]
 
-    with pytest.raises(ValidationError):
-        Config()
+    assert Config().service.model_resolve() is not None
 
 
 def test_factory_field_accepts_a_factory_for_a_target_subclass() -> None:
@@ -889,7 +861,7 @@ def test_factory_field_accepts_a_factory_for_a_target_subclass() -> None:
             self.value = value
 
     class Config(BaseModel):
-        service: FactoryField[Parent]
+        service: Factory[Parent]
 
     factory_type = Factory.model_from(ChildTarget(value=2))
     config = Config(service=factory_type)
@@ -907,7 +879,7 @@ def test_factory_field_rejects_a_factory_for_another_target() -> None:
             self.name = name
 
     class Config(BaseModel):
-        service: FactoryField[Child]
+        service: Factory[Child]
 
     other = Factory.model_from(Other)
 
@@ -923,7 +895,7 @@ def test_factory_field_rejects_a_target_class_for_another_target() -> None:
             self.name = name
 
     class Config(BaseModel):
-        service: FactoryField[Child]
+        service: Factory[Child]
 
     with pytest.raises(ValidationError):
         Config(service=Other)
@@ -933,7 +905,7 @@ def test_factory_default_factory_is_converted() -> None:
     """Normal Pydantic default factories remain supported."""
 
     class Config(BaseConfig):
-        service: FactoryField[Child] = Field(
+        service: Factory[Child] = Field(
             default_factory=lambda: Factory.model_from(Child)
         )
 

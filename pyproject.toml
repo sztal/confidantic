@@ -180,6 +180,7 @@ run.patch = [
 ]
 run.disable_warnings = [
   "module-not-imported",
+  "no-data-collected",
 ]
 run.source_pkgs = [
   "confidantic",

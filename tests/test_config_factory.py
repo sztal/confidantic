@@ -6,8 +6,16 @@ from typing import Any, ForwardRef
 
 import pytest
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model
+from pydantic.errors import PydanticUserError
+from typing_extensions import TypedDict
 
 from confidantic import BaseConfig, Factory, FactoryField
+from confidantic._config.factory import (
+    _contains_factory,
+    _matches_factory_type_hint,
+    _resolve_value,
+    _resolved_annotation,
+)
 
 _UNTYPED_DEFAULT = object()
 
@@ -192,6 +200,45 @@ def test_typed_factory_field_rejects_factory_instances() -> None:
         ProductModel.model_validate({"factory": factory_type()})
 
 
+def test_generic_factory_validation_rejects_incompatible_factory() -> None:
+    """Generic factory fields reject factories targeting another type."""
+
+    class Model(BaseModel):
+        child: Factory[Child]
+
+    other_type = Factory.model_from(Product)
+
+    with pytest.raises(ValidationError, match="expected target type"):
+        Model.model_validate({"child": other_type(count=1)})
+
+
+def test_generic_factory_validation_rejects_incompatible_target_instance() -> None:
+    """Generic factory fields reject incompatible target instances."""
+
+    class Model(BaseModel):
+        child: Factory[Child]
+
+    with pytest.raises(ValidationError, match="target instance"):
+        Model.model_validate({"child": Product(1)})
+
+
+def test_generic_factory_validation_converts_target_instance() -> None:
+    """Generic factory fields convert compatible target instances."""
+
+    class Model(BaseModel):
+        child: Factory[Child]
+
+    model = Model.model_validate({"child": Child(value=4)})
+
+    assert model.child.model_resolve().value == 4
+
+
+def test_specialized_factory_rejects_wrong_model_from_target() -> None:
+    """Specialized factories enforce their target type when generating models."""
+    with pytest.raises(TypeError, match="expects Child"):
+        Factory[Child].model_from(Product)
+
+
 def test_factory_field_composes_with_containers_and_unions() -> None:
     """Generic factory validation composes with standard Pydantic annotations."""
 
@@ -352,6 +399,108 @@ def test_model_from_as_factory_isolates_nested_mutable_defaults() -> None:
     assert second.service.values == [1]
 
 
+def test_factory_selector_supports_type_adapter_fallback() -> None:
+    """Type-hint selectors retry when adapter config is not applicable."""
+
+    class Payload(TypedDict):
+        value: int
+
+    assert _matches_factory_type_hint({"value": 1}, Payload)
+    assert not _matches_factory_type_hint({"value": "invalid"}, Payload)
+
+
+def test_factory_selector_propagates_invalid_type_hints() -> None:
+    """Invalid selector hints are reported instead of treated as nonmatches."""
+
+    class InvalidSchema:
+        @classmethod
+        def __get_pydantic_core_schema__(cls, source_type: Any, handler: Any) -> Any:
+            raise PydanticUserError("invalid schema", code="invalid-schema")
+
+    with pytest.raises(PydanticUserError):
+        _matches_factory_type_hint(1, InvalidSchema)
+
+
+def test_model_resolve_resolves_nested_base_models() -> None:
+    """Resolution updates nested BaseModel annotations containing factories."""
+    child_type = Factory.model_from(Child)
+
+    class Payload(BaseModel):
+        model_config = ConfigDict(arbitrary_types_allowed=True)
+
+        child: child_type
+
+    class Parent:
+        def __init__(self, payload: Payload) -> None:
+            self.payload = payload
+
+    payload = Payload(child=child_type(value=3))
+    resolved = Factory.model_from(Parent)(payload=payload).model_resolve()
+
+    assert isinstance(resolved.payload.child, Child)
+    assert resolved.payload.child.value == 3
+
+
+def test_resolved_annotation_rebuilds_container_annotations() -> None:
+    """Nested concrete factory annotations are replaced inside containers."""
+    child_type = Factory.model_from(Child)
+
+    assert _resolved_annotation(list[child_type]) == list[Child]
+
+
+def test_resolved_annotation_preserves_unchanged_and_union_annotations() -> None:
+    """Annotation resolution preserves plain types and rebuilds unions."""
+    assert _resolved_annotation(Any) is Any
+    assert _resolved_annotation(list[int]) == list[int]
+    assert _resolved_annotation(FactoryField[Child] | str) == Child | str
+
+
+def test_resolved_annotation_keeps_unmodified_model_type() -> None:
+    """Model types without factory annotations do not create a replacement."""
+
+    class Payload(BaseModel):
+        value: int
+
+    assert _resolved_annotation(Payload) is Payload
+
+
+def test_resolve_value_leaves_factory_class_when_not_recursive() -> None:
+    """Non-recursive value resolution preserves concrete factory classes."""
+    child_type = Factory.model_from(Child)
+
+    assert _resolve_value(child_type, set(), recursive=False) is child_type
+
+
+def test_resolve_value_resolves_factory_class() -> None:
+    """Recursive value resolution materializes concrete factory classes."""
+    child_type = Factory.model_from(Child)
+
+    resolved = _resolve_value(child_type, set())
+
+    assert isinstance(resolved, Child)
+
+
+def test_resolve_value_leaves_base_model_when_not_recursive() -> None:
+    """Non-recursive value resolution preserves nested BaseModel instances."""
+
+    class Payload(BaseModel):
+        value: int
+
+    payload = Payload(value=3)
+
+    assert _resolve_value(payload, set(), recursive=False) is payload
+
+
+def test_contains_factory_handles_cycles_and_mapping_keys() -> None:
+    """Factory detection handles cyclic containers and mapping keys."""
+    cyclic: list[Any] = []
+    cyclic.append(cyclic)
+    assert not _contains_factory(cyclic)
+
+    child_type = Factory.model_from(Child)
+    assert _contains_factory({child_type: "factory key"})
+
+
 def test_model_from_type_accepts_custom_name() -> None:
     """Callers can choose the generated model name."""
     assert (
@@ -471,7 +620,7 @@ def test_base_config_model_resolve_generates_resolved_model() -> None:
     """BaseConfig resolution replaces Factory fields with target instances."""
 
     class Config(BaseConfig):
-        child: Factory[Child] = Factory.model_from(Child)
+        child: Factory[Child] = Factory.model_from(Child)  # type: ignore[assignment]
 
     config = Config(child=Factory.model_from(Child)(value=3))
 
@@ -529,7 +678,7 @@ def test_base_config_model_resolve_preserves_nested_factory_when_not_recursive()
             self.child = child
 
     class Config(BaseConfig):
-        parent: Factory[Parent] = Factory.model_from(Parent)
+        parent: Factory[Parent] = Factory.model_from(Parent)  # type: ignore[assignment]
 
     child_config = Factory.model_from(Child)(value=4)
     config = Config(parent=Factory.model_from(Parent)(child=child_config))

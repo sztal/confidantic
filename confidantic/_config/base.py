@@ -103,15 +103,12 @@ _DISABLE_CLI_PARSE_ARGS: ContextVar[bool] = ContextVar(
 class _FactoryCliSettingsSource(CliSettingsSource[Any]):
     @staticmethod
     def supports(model: type[BaseModel]) -> bool:
-        from confidantic._config.factory import Factory, FactoryField
+        from confidantic._config.factory import Factory
 
         return any(
-            get_origin(field.annotation) is FactoryField
-            or (
-                isinstance(field.annotation, type)
-                and issubclass(field.annotation, Factory)
-                and isinstance(field.default, Factory)
-            )
+            isinstance(field.annotation, type)
+            and issubclass(field.annotation, Factory)
+            and isinstance(field.default, Factory)
             for field in model.model_fields.values()
         )
 
@@ -121,35 +118,13 @@ class _FactoryCliSettingsSource(CliSettingsSource[Any]):
 
         return Import[GenericAlias(type, target)]  # type: ignore[misc]
 
-    @staticmethod
-    def _factory_field_type(field_info: FieldInfo) -> type[Any] | None:
-        from confidantic._config.factory import Factory, FactoryField
-
-        if get_origin(field_info.annotation) is not FactoryField:
-            return None
-        arguments = get_args(field_info.annotation)
-        if len(arguments) != 1 or not isinstance(arguments[0], type):
-            return None
-        return cast(type[Any], Factory.__class_getitem__(arguments[0]))
-
-    def _factory_field_target(self, field_info: FieldInfo) -> type[Any] | None:
-        from confidantic._config.factory import _factory_target
-
-        factory_type = self._factory_field_type(field_info)
-        return _factory_target(factory_type) if factory_type is not None else None
-
     def _sort_arg_fields(self, model: type[BaseModel]) -> list[tuple[str, FieldInfo]]:
         from confidantic._config.factory import Factory
 
         fields = super()._sort_arg_fields(model)
         normalized: list[tuple[str, FieldInfo]] = []
         for field_name, field_info in fields:
-            target = self._factory_field_target(field_info)
-            if target is not None:
-                field_info = shallow_copy(field_info)
-                field_info.annotation = self._import_annotation(target)
-                field_info.default = target
-            elif (
+            if (
                 isinstance(field_info.annotation, type)
                 and issubclass(field_info.annotation, Factory)
                 and isinstance(field_info.default, Factory)

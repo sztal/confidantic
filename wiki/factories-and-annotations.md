@@ -40,9 +40,9 @@ ClientConfig = Factory.model_from(
 )
 ```
 
-Use `Factory[T]` or `FactoryField[T]` when a factory is nested in another
-configuration model. Factory configuration uses the same `BaseConfig` source
-resolution as ordinary settings models. See
+Use `Factory[T]` when a factory is nested in another configuration model.
+Factory configuration uses the same `BaseConfig` source resolution as ordinary
+settings models. See
 [`examples/factory.py`](../examples/factory.py) and
 [`examples/factory_gated.py`](../examples/factory_gated.py).
 

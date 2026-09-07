@@ -21,7 +21,7 @@ The package requires Python 3.11 or later; the repository's default interpreter
 is Python 3.13.
 
 The package root re-exports `BaseConfig`, `ClassDefaultsSource`,
-`ConfigModelDict`, `Factory`, `FactoryField`, and `__version__`. `Factory`
+`ConfigModelDict`, `Factory`, and `__version__`. `Factory`
 provides `model_from`, `instance_from`, and explicit `model_resolve` methods;
 `BaseConfig` also provides `model_resolve` for nested factory values. Other
 core public APIs live in

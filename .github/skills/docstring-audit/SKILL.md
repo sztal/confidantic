@@ -21,3 +21,5 @@ the modules listed in `docs/reference/api.md`.
 Record any confirmed unresolved source defect in `../../../BUGS.md`, not in
 `wiki/`, and leave its fix to a separate bug-fixing task. Never run `make test`,
 `nox -s tests`, or `uv run noxfile.py -s tests`.
+
+The repository's lint, pytest, typecheck, and docs sessions currently pass.

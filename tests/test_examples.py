@@ -89,6 +89,26 @@ def test_factory_as_factory_help_includes_nested_options() -> None:
     assert "--database.port" in result.stdout
 
 
+def test_factory_as_factory_parses_nested_options() -> None:
+    """Nested factory CLI values are passed through to the resolved target."""
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(EXAMPLES_DIRECTORY / "factory_as_factory.py"),
+            "--database.host",
+            "db.internal",
+            "--database.port",
+            "6543",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "db.internal 6543" in result.stdout
+
+
 def test_factory_gated_router_help_includes_type_selector() -> None:
     """The routing CLI exposes the importable implementation type."""
     result = subprocess.run(

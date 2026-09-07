@@ -451,6 +451,27 @@ def test_factory_instance_default_is_rejected() -> None:
         Config()
 
 
+def test_factory_field_accepts_a_factory_for_a_target_subclass() -> None:
+    """Typed factory fields accept factories for compatible target subclasses."""
+
+    class Parent:
+        pass
+
+    class ChildTarget(Parent):
+        def __init__(self, value: int = 1) -> None:
+            self.value = value
+
+    class Config(BaseModel):
+        service: FactoryField[Parent]
+
+    factory_type = Factory.model_from(ChildTarget(value=2))
+    config = Config(service=factory_type)
+
+    assert config.service is factory_type
+    assert isinstance(config.service().value, int)
+    assert config.service().value == 2
+
+
 def test_factory_field_rejects_a_factory_for_another_target() -> None:
     """Typed factory fields reject concrete factories for another target."""
 

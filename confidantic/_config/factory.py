@@ -309,7 +309,7 @@ class _FactoryFieldMetadata:
                 if isinstance(value, type) and issubclass(value, Factory):
                     if not issubclass(value.factory_target, target):
                         raise TypeError
-                    return next_validator(value)
+                    return value
                 value_target = value if isinstance(value, type) else type(value)
                 if not issubclass(value_target, target):
                     raise TypeError

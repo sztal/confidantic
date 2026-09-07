@@ -39,7 +39,7 @@ def test_log_levels_reject_unknown_names() -> None:
 
 def test_base_logging_has_no_environment_prefix() -> None:
     """Applications choose the environment variable namespace in subclasses."""
-    assert BaseLogging.model_config.get("env_prefix") == ""
+    assert BaseLogging.model_config.get("env_prefix") is None
 
 
 def test_subclass_reads_environment_and_dotenv(

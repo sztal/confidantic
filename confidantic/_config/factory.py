@@ -16,11 +16,13 @@ from inspect import Parameter, signature
 from operator import or_
 from types import UnionType
 from typing import (
+    Annotated,
     Any,
     ClassVar,
     Generic,
     Self,
     TypeVar,
+    Union,
     cast,
     get_args,
     get_origin,
@@ -344,7 +346,7 @@ def _factory_annotation(
 ) -> Any:
     origin = get_origin(annotation)
     arguments = get_args(annotation)
-    if origin is not None and arguments:
+    if origin in (Union, UnionType) and arguments:
         replaced_arguments = tuple(
             _factory_annotation(argument, value, factory_type) for argument in arguments
         )
@@ -356,6 +358,11 @@ def _factory_annotation(
         if origin is UnionType:
             return reduce(or_, replaced_arguments)
         return origin[replaced_arguments]
+    if origin is Annotated and arguments:
+        underlying = _factory_annotation(arguments[0], value, factory_type)
+        if underlying == arguments[0]:
+            return annotation
+        return Annotated[underlying, *arguments[1:]]
     if _matches_factory_type_hint(value, annotation):
         return factory_type
     return annotation

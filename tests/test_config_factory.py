@@ -2,7 +2,7 @@
 
 import sys
 from types import ModuleType
-from typing import Any, ForwardRef
+from typing import Annotated, Any, ForwardRef, Literal
 
 import pytest
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model
@@ -98,6 +98,19 @@ class AlternativeServiceHolder:
     """Target with nested factory and unrelated union alternatives."""
 
     def __init__(self, service: ServiceBase | str | None = None) -> None:
+        self.service = service
+
+
+class ParameterizedAlternativeServiceHolder:
+    """Target with literal and annotated union alternatives."""
+
+    def __init__(
+        self,
+        service: ServiceBase
+        | Literal["fallback"]
+        | Annotated[str, "tag"]
+        | None = None,
+    ) -> None:
         self.service = service
 
 
@@ -365,6 +378,18 @@ def test_model_from_as_factory_preserves_union_alternatives() -> None:
 
     assert config_type(service=None).service is None
     assert config_type(service="fallback").model_resolve().service == "fallback"
+
+
+def test_model_from_as_factory_preserves_parameterized_union_alternatives() -> None:
+    """Recursive factories leave literal values and metadata unchanged."""
+    config_type = Factory.model_from(
+        ParameterizedAlternativeServiceHolder(Service(7)),
+        __recursive__=ServiceBase,
+    )
+
+    assert config_type(service="fallback").model_resolve().service == "fallback"
+    assert config_type(service="annotated").model_resolve().service == "annotated"
+    assert config_type(service=None).model_resolve().service is None
 
 
 def test_model_from_as_factory_wraps_required_instance_values() -> None:

@@ -1,7 +1,9 @@
 # %% ---------------------------------------------------------------------------------
 
+from pydantic import Field
 
 from confidantic import BaseConfig, Factory
+from confidantic.annotations import Import, Make
 
 # %% ---------------------------------------------------------------------------------
 
@@ -63,7 +65,7 @@ class HelpRouter(
 ):
     """A configuration model for a help router."""
 
-    template: bool = False
+    types: bool = False
     """Whether to show the template help message."""
 
 
@@ -75,13 +77,13 @@ help_router = HelpRouter()
 class Types(
     BaseConfig,
     cli_parse_args=True,
-    cli_help=help_router.template,
-    cli_prefix="template",
+    cli_help=help_router.types,
+    cli_prefix="types",
     cli_ignore_unknown_args=True,
 ):
     """A configuration model for a types router."""
 
-    # database: Make[Database] = Database()
+    database: Import[type[Database]] | Make[Database] = Field(default_factory=Database)
     """A database dependency."""
 
 

@@ -277,7 +277,6 @@ class Factory(BaseConfig, Generic[T]):
         model = create_model(
             name or f"{target.__name__}Config",
             __base__=cls,
-            __module__=target.__module__,
             **cast(dict[str, Any], fields),
         )
         model.factory_target = target

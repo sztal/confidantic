@@ -205,7 +205,8 @@ def test_model_from_type_creates_typed_config_fields() -> None:
     config_type = Factory.model_from(Product)
 
     assert config_type.__name__ == "ProductConfig"
-    assert config_type.__module__ == Product.__module__
+    assert config_type.__module__ != Product.__module__
+    assert not hasattr(sys.modules[config_type.__module__], config_type.__name__)
     assert issubclass(config_type, Factory)
     assert config_type.factory_target is Product
     assert config_type.factory_fields == ("count", "label", "enabled")

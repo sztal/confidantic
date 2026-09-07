@@ -32,6 +32,7 @@ EXAMPLES_DIRECTORY = Path(__file__).parents[1] / "examples"
         ("directive_annotations.py", []),
         ("env_files.py", []),
         ("factory.py", []),
+        ("factory_as_factory.py", []),
         ("factory_gated.py", []),
         ("logging_config.py", []),
         ("multilevel_cli.py", ["project", "create", "demo", "--dry-run"]),
@@ -68,6 +69,24 @@ def test_factory_gated_help_includes_generated_options() -> None:
     assert result.returncode == 0, result.stderr
     assert "--estimator.window" in result.stdout
     assert "--estimator.center" in result.stdout
+
+
+def test_factory_as_factory_help_includes_nested_options() -> None:
+    """Automatic nested factories expose their constructor options to the CLI."""
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(EXAMPLES_DIRECTORY / "factory_as_factory.py"),
+            "--help",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "--database.host" in result.stdout
+    assert "--database.port" in result.stdout
 
 
 def test_factory_gated_router_help_includes_type_selector() -> None:

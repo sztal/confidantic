@@ -29,8 +29,14 @@ from typing import (
     overload,
 )
 
-from pydantic import BaseModel, GetCoreSchemaHandler, create_model
-from pydantic import Field as PydanticField
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    GetCoreSchemaHandler,
+    TypeAdapter,
+    create_model,
+)
+from pydantic.errors import PydanticUserError
 from pydantic.fields import FieldInfo
 from pydantic_core import (
     CoreSchema,
@@ -138,6 +144,7 @@ class Factory(BaseConfig, Generic[T]):
         source: type[U],
         *,
         name: str | None = None,
+        as_factory: type[Any] | Callable[[Any], bool] | None = None,
     ) -> type[Factory[U]]: ...
 
     @classmethod
@@ -147,6 +154,7 @@ class Factory(BaseConfig, Generic[T]):
         source: U,
         *,
         name: str | None = None,
+        as_factory: type[Any] | Callable[[Any], bool] | None = None,
     ) -> type[Factory[U]]: ...
 
     @classmethod
@@ -155,6 +163,7 @@ class Factory(BaseConfig, Generic[T]):
         source: type[Any] | Any,
         *,
         name: str | None = None,
+        as_factory: type[Any] | Callable[[Any], bool] | None = None,
     ) -> Any:
         """Create a concrete factory config from a target type or instance.
 
@@ -171,6 +180,9 @@ class Factory(BaseConfig, Generic[T]):
         name
             Optional generated model name. By default, append ``Config`` to the
             target type name.
+        as_factory
+            Optional type, type hint, or predicate used to convert matching
+            default values into nested factory fields.
 
         Returns
         -------
@@ -188,7 +200,9 @@ class Factory(BaseConfig, Generic[T]):
             if cls is Factory
             else cls
         )
-        return factory_base._model_from(instance, target, name=name)
+        return factory_base._model_from(
+            instance, target, name=name, as_factory=as_factory
+        )
 
     @classmethod
     def instance_from(
@@ -257,6 +271,7 @@ class Factory(BaseConfig, Generic[T]):
         target: type[T],
         *,
         name: str | None,
+        as_factory: type[Any] | Callable[[Any], bool] | None,
     ) -> type[Self]:
         init = target.__init__
         namespace: dict[str, Any] = {}
@@ -295,9 +310,16 @@ class Factory(BaseConfig, Generic[T]):
             default = parameter.default
             if instance is not None and hasattr(instance, field_name):
                 default = getattr(instance, field_name)
-                if _requires_default_factory(default):
-                    default = PydanticField(default_factory=_cloned_default(default))
-            elif default is Parameter.empty:
+            source_default = default
+            if (
+                as_factory is not None
+                and source_default is not Parameter.empty
+                and _matches_factory_selector(source_default, as_factory)
+            ):
+                factory_type = Factory.model_from(source_default, as_factory=as_factory)
+                fields[field_name] = (factory_type, factory_type())
+                continue
+            if default is Parameter.empty:
                 default = PydanticUndefined
             fields[field_name] = (annotations[field_name], default)
 
@@ -361,6 +383,35 @@ FactoryField = TypeAliasType(
     Annotated[type[Factory[T]], _FactoryFieldMetadata()],
     type_params=(T,),
 )
+
+
+def _matches_factory_selector(
+    value: Any,
+    selector: Any,
+) -> bool:
+    if isinstance(value, Factory) or _is_factory_type(value):
+        return False
+    if isinstance(selector, type):
+        return _matches_factory_type_hint(value, selector)
+    if callable(selector):
+        return bool(selector(value))
+    return _matches_factory_type_hint(value, selector)
+
+
+def _matches_factory_type_hint(value: Any, type_hint: Any) -> bool:
+    try:
+        adapter = TypeAdapter(
+            type_hint, config=ConfigDict(arbitrary_types_allowed=True)
+        )
+    except PydanticUserError as error:
+        if error.code != "type-adapter-config-unused":
+            raise
+        adapter = TypeAdapter(type_hint)
+    try:
+        adapter.validate_python(value, strict=True)
+    except (TypeError, ValueError):
+        return False
+    return True
 
 
 def _cloned_default(value: Any) -> Callable[[], Any]:

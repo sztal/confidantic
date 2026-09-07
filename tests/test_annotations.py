@@ -170,6 +170,8 @@ def test_map_annotations_preserve_mapping_validation_errors() -> None:
         adapter.validate_python("first=one")
     with raises(ValidationError):
         adapter.validate_python("first")
+    with raises(ValidationError):
+        adapter.validate_python(1)
 
 
 @pytest.mark.parametrize(

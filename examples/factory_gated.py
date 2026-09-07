@@ -13,7 +13,7 @@ on a runtime-selected type:
    defaults.
 3. ``Config`` uses that generated class for a nested factory instance. The
    selected constructor parameters become ordinary CLI options, and the validated
-   factory can materialize the final estimator object.
+    factory can resolve the final estimator object.
 
 Run the default implementation with its template defaults::
 
@@ -141,8 +141,8 @@ class Config(
 
 config = Config.model_validate({"estimator": {"center": True}})
 config.info()
-estimator = config.estimator.materialize()
+resolved = config.model_resolve()
 
-print(estimator)
+print(resolved.estimator)
 
 # %% ---------------------------------------------------------------------------------

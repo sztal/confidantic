@@ -30,8 +30,13 @@ have changed and agent guidance may be stale.
 1. Re-read all agent files and confirm they agree with each other.
 
 Never run `make test`, `nox -s tests`, or `uv run noxfile.py -s tests` as an
-agent. The full multi-version Nox test matrix is reserved for a human
-contributor.
+agent. The Nox `tests` session runs the full supported-Python matrix; that
+multi-version run is reserved for a human contributor. Use the direct pytest
+command for the repository test suite:
+
+```console
+uv run pytest
+```
 
 ## Later updates
 

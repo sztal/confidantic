@@ -7,7 +7,7 @@ models without replacing Pydantic validation.
 
 `Factory.model_from()` creates a concrete configuration class from a target
 class or instance. Annotated constructor parameters become validated fields;
-the resulting factory can be called or materialized to create the target:
+call `model_resolve()` to create the target:
 
 ```python
 from dataclasses import dataclass
@@ -22,7 +22,7 @@ class Client:
 
 
 ClientConfig = Factory.model_from(Client)
-client = ClientConfig(host="localhost")()
+client = ClientConfig(host="localhost").model_resolve()
 ```
 
 Use `Factory[T]` or `FactoryField[T]` when a factory is nested in another

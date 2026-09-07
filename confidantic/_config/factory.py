@@ -10,8 +10,11 @@ from collections.abc import (
     MutableSequence,
     MutableSet,
 )
-from copy import deepcopy
+from copy import copy, deepcopy
+from functools import reduce
 from inspect import Parameter, signature
+from operator import or_
+from types import UnionType
 from typing import (
     Annotated,
     Any,
@@ -21,12 +24,14 @@ from typing import (
     TypeVar,
     cast,
     get_args,
+    get_origin,
     get_type_hints,
     overload,
 )
 
+from pydantic import BaseModel, GetCoreSchemaHandler, create_model
 from pydantic import Field as PydanticField
-from pydantic import GetCoreSchemaHandler, create_model
+from pydantic.fields import FieldInfo
 from pydantic_core import (
     CoreSchema,
     PydanticCustomError,
@@ -59,12 +64,16 @@ def _factory_target(factory_type: type[Any]) -> type[Any] | None:
     return None
 
 
+def _is_factory_type(value: Any) -> bool:
+    return isinstance(value, type) and issubclass(value, Factory)
+
+
 class Factory(BaseConfig, Generic[T]):
     """Configuration generated from a target type's constructor.
 
     Concrete subclasses are created with :meth:`model_from`. Their fields
     correspond to annotated constructor parameters and validated instances can
-    create the target object by calling :meth:`materialize` or the config itself.
+    create the target object by calling :meth:`model_resolve`.
 
     Pydantic fields accept target instances and convert them to generated
     factory config instances. Mappings supplied to concrete factory config
@@ -204,24 +213,42 @@ class Factory(BaseConfig, Generic[T]):
         """
         return cast(Factory[U], cls.model_from(source, name=name)(**kwargs))
 
-    def materialize(self, **kwargs: Any) -> T:
+    def model_resolve(
+        self,
+        updates: Mapping[str, Any] | None = None,
+        *,
+        recursive: bool = True,
+        **kwargs: Any,
+    ) -> T:
         """Create the target object from the validated configuration values.
 
-        CLI parsing is disabled throughout materialization, including any
+        CLI parsing is disabled throughout resolution, including any
         configuration models constructed by the target.
+
+        Parameters
+        ----------
+        updates
+            Optional field values to validate before resolving the target.
+            Keyword updates override entries with the same field name.
+        recursive
+            Whether nested factories and factories in containers are resolved
+            after the updates have been applied.
+        **kwargs
+            Additional field values to validate before resolving the target.
 
         Returns
         -------
         T
             Instance of the target type recorded by :meth:`model_from`.
         """
+        values = dict(updates or {})
+        values.update(kwargs)
+        config = self if not values else self.copy(**values)
         token = _DISABLE_CLI_PARSE_ARGS.set(True)
         try:
-            return cast(T, _materialize_factory(self, set(), **kwargs))
+            return cast(T, _resolve_factory(config, set(), recursive=recursive))
         finally:
             _DISABLE_CLI_PARSE_ARGS.reset(token)
-
-    __call__ = materialize
 
     @classmethod
     def _model_from(
@@ -365,28 +392,171 @@ def _enter_resolution(value: Any, active: set[int]) -> int:
     return identity
 
 
-def _materialize_factory(config: Factory[Any], active: set[int], **kwargs: Any) -> Any:
+def _resolved_annotation(annotation: Any) -> Any:
+    if isinstance(annotation, type):
+        if issubclass(annotation, Factory):
+            target = _factory_target(annotation)
+            return target if target is not None else annotation
+        if issubclass(annotation, BaseModel):
+            return _resolved_model_type(annotation)
+        return annotation
+
+    origin = get_origin(annotation)
+    arguments = get_args(annotation)
+    if getattr(origin, "__name__", None) == "FactoryField":
+        return arguments[0]
+    if origin is None or not arguments:
+        return annotation
+
+    resolved_arguments = tuple(_resolved_annotation(argument) for argument in arguments)
+    if resolved_arguments == arguments:
+        return annotation
+    copy_with = getattr(annotation, "copy_with", None)
+    if copy_with is not None:
+        return copy_with(resolved_arguments)
+    if origin is UnionType:
+        return reduce(or_, resolved_arguments)
+    return origin[resolved_arguments]
+
+
+def _resolved_field(field: FieldInfo, annotation: Any) -> FieldInfo:
+    resolved = copy(field)
+    resolved.annotation = annotation
+    return resolved
+
+
+def _resolved_model_type(
+    source: type[BaseModel],
+    *,
+    force: bool = False,
+    name: str | None = None,
+) -> type[BaseModel]:
+    fields: dict[str, tuple[Any, Any]] = {}
+    for field_name, field in source.model_fields.items():
+        annotation = _resolved_annotation(field.annotation)
+        if annotation != field.annotation:
+            fields[field_name] = (annotation, _resolved_field(field, annotation))
+    if not fields and not force:
+        return source
+    return cast(
+        type[BaseModel],
+        create_model(
+            name or f"{source.__name__}Resolved",
+            __base__=source,
+            __module__=source.__module__,
+            **cast(dict[str, Any], fields),
+        ),
+    )
+
+
+def _resolve_factory(
+    config: Factory[Any],
+    active: set[int],
+    *,
+    recursive: bool = True,
+) -> Any:
     identity = _enter_resolution(config, active)
     try:
         values = {
-            field_name: _resolve_value(getattr(config, field_name), active)
+            field_name: _resolve_value(
+                getattr(config, field_name), active, recursive=recursive
+            )
             for field_name in config.factory_fields
         }
-        if kwargs:
-            values.update(kwargs)
         return config.factory_target(**values)
     finally:
         active.remove(identity)
 
 
-def _resolve_value(value: Any, active: set[int]) -> Any:
+def _resolve_model_instance(
+    model: BaseModel,
+    active: set[int],
+    *,
+    recursive: bool = True,
+    name: str | None = None,
+) -> BaseModel:
+    identity = _enter_resolution(model, active)
+    try:
+        model_type = type(model)
+        resolved_type = _resolved_model_type(model_type, force=True, name=name)
+        values = {}
+        for field_name in model_type.model_fields:
+            value = getattr(model, field_name)
+            factory = value if isinstance(value, Factory) else None
+            if factory is None and _is_factory_type(value):
+                factory = value()
+            if factory is not None:
+                values[field_name] = _resolve_factory(
+                    factory, active, recursive=recursive
+                )
+            else:
+                values[field_name] = _resolve_value(value, active, recursive=recursive)
+        if model.model_extra:
+            values.update(
+                {
+                    key: _resolve_value(value, active, recursive=recursive)
+                    for key, value in model.model_extra.items()
+                }
+            )
+        return resolved_type.model_validate(values, by_alias=True, by_name=True)
+    finally:
+        active.remove(identity)
+
+
+def _contains_factory(value: Any, seen: set[int] | None = None) -> bool:
     if isinstance(value, Factory):
-        return _materialize_factory(value, active)
+        return True
+    if _is_factory_type(value):
+        return True
+    if seen is None:
+        seen = set()
+    if isinstance(value, BaseModel | Mapping | list | tuple | set | frozenset):
+        identity = id(value)
+        if identity in seen:
+            return False
+        seen.add(identity)
+    if isinstance(value, BaseModel):
+        return any(
+            _contains_factory(getattr(value, field_name), seen)
+            for field_name in type(value).model_fields
+        ) or any(
+            _contains_factory(item, seen) for item in (value.model_extra or {}).values()
+        )
+    if isinstance(value, Mapping):
+        return any(
+            _contains_factory(key, seen) or _contains_factory(item, seen)
+            for key, item in value.items()
+        )
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return any(_contains_factory(item, seen) for item in value)
+    return False
+
+
+def _resolve_value(
+    value: Any,
+    active: set[int],
+    *,
+    recursive: bool = True,
+) -> Any:
+    if isinstance(value, Factory):
+        if not recursive:
+            return value
+        return _resolve_factory(value, active, recursive=recursive)
+    if _is_factory_type(value):
+        if not recursive:
+            return value
+        return _resolve_factory(value(), active, recursive=recursive)
+    if isinstance(value, BaseModel):
+        if not recursive:
+            return value
+        return _resolve_model_instance(value, active, recursive=recursive)
     if isinstance(value, Mapping):
         identity = _enter_resolution(value, active)
         try:
             return {
-                _resolve_value(key, active): _resolve_value(item, active)
+                _resolve_value(key, active, recursive=recursive): _resolve_value(
+                    item, active, recursive=recursive
+                )
                 for key, item in value.items()
             }
         finally:
@@ -394,25 +564,29 @@ def _resolve_value(value: Any, active: set[int]) -> Any:
     if isinstance(value, list):
         identity = _enter_resolution(value, active)
         try:
-            return [_resolve_value(item, active) for item in value]
+            return [_resolve_value(item, active, recursive=recursive) for item in value]
         finally:
             active.remove(identity)
     if isinstance(value, tuple):
         identity = _enter_resolution(value, active)
         try:
-            return tuple(_resolve_value(item, active) for item in value)
+            return tuple(
+                _resolve_value(item, active, recursive=recursive) for item in value
+            )
         finally:
             active.remove(identity)
     if isinstance(value, set):
         identity = _enter_resolution(value, active)
         try:
-            return {_resolve_value(item, active) for item in value}
+            return {_resolve_value(item, active, recursive=recursive) for item in value}
         finally:
             active.remove(identity)
     if isinstance(value, frozenset):
         identity = _enter_resolution(value, active)
         try:
-            return frozenset(_resolve_value(item, active) for item in value)
+            return frozenset(
+                _resolve_value(item, active, recursive=recursive) for item in value
+            )
         finally:
             active.remove(identity)
     return value

@@ -9,6 +9,7 @@ from confidantic.utils import (
     get_import_string,
     import_from_string,
     is_runtime_jupyterlike,
+    make,
 )
 
 
@@ -102,3 +103,11 @@ def test_import_from_string_rejects_invalid_import(
     """Invalid module and attribute paths raise validation errors."""
     with pytest.raises(ValueError):
         import_from_string(import_string)
+
+
+def test_make_evaluates_public_directive_forms() -> None:
+    """The public helper evaluates callables, imports, and nested mappings."""
+    assert make(lambda: 3) == 3
+    assert make("builtins:dict") == {}
+    assert make({"nested": {"@call": "builtins:int", "@args": ["4"]}}) == {"nested": 4}
+    assert make(3, handler=lambda value: value + 1) == 4

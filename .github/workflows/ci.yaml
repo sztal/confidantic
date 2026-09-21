@@ -115,7 +115,7 @@ jobs:
           enable-cache: true
           github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Download coverage data
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           name: coverage-data
       - name: Build the documentation and coverage report

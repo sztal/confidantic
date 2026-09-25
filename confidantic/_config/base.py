@@ -6,6 +6,7 @@ from collections.abc import Collection, Mapping
 from contextvars import ContextVar
 from copy import copy as shallow_copy
 from copy import deepcopy as deep_copy
+from dataclasses import dataclass
 from importlib import import_module
 from inspect import get_annotations, signature
 from io import StringIO
@@ -296,13 +297,24 @@ _CUSTOM_CONFIG_KEYS = set(ConfigModelDict.__annotations__) - set(
 config_keys.update(_CUSTOM_CONFIG_KEYS)
 
 
+@dataclass(frozen=True)
+class _CopiedDefault:
+    """Copy a generated default while retaining its settings-merge template."""
+
+    template: Any
+
+    def __call__(self) -> Any:
+        return deep_copy(self.template)
+
+
 class ClassDefaultsSource(PydanticBaseSettingsSource):
     """Load defaults declared directly on one settings class.
 
     Static defaults become source values so they participate in BaseConfig's
     per-MRO priority and nested merging. Default factories and discriminated
     defaults act as whole-field barriers until Pydantic evaluates them during
-    validation.
+    validation. Generated copy-default wrappers contribute independently copied
+    templates instead, preserving static-default merging without sharing state.
 
     Parameters
     ----------
@@ -335,10 +347,17 @@ class ClassDefaultsSource(PydanticBaseSettingsSource):
 
             aliases, _ = _get_alias_names(field_name, field)
             key = aliases[0] if aliases else field_name
-            if field.default_factory is not None or _field_has_discriminator(field):
+            if (
+                field.default_factory is not None
+                and not isinstance(field.default_factory, _CopiedDefault)
+            ) or _field_has_discriminator(field):
                 self.defaults[key] = _FACTORY_DEFAULT
             else:
-                default = field.get_default(call_default_factory=False)
+                default = (
+                    field.default_factory()
+                    if isinstance(field.default_factory, _CopiedDefault)
+                    else field.get_default(call_default_factory=False)
+                )
                 adapter_config = (
                     ConfigDict(arbitrary_types_allowed=True)
                     if settings_cls.model_config.get("arbitrary_types_allowed")

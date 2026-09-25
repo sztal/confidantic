@@ -986,3 +986,156 @@ def test_invalid_factory_input_reports_validation_error() -> None:
     """Factory validation exposes an ordinary Pydantic validation error."""
     with pytest.raises(ValidationError, match="Factory"):
         ProductModel.model_validate({"factory": object()})
+
+
+class HashableList(list[Any]):
+    """Mutable list that Pydantic's hash-based default copying would share."""
+
+    __hash__ = object.__hash__  # type: ignore[assignment]
+
+
+class HashableDict(dict[str, Any]):
+    """Mutable mapping with an identity hash."""
+
+    __hash__ = object.__hash__  # type: ignore[assignment]
+
+
+class HashableSet(set[int]):
+    """Mutable set with an identity hash."""
+
+    __hash__ = object.__hash__  # type: ignore[assignment]
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        HashableList([1]),
+        HashableDict(a=[1]),
+        HashableSet({1}),
+        [1],
+        {"a": [1]},
+        {1},
+        bytearray(b"a"),
+    ],
+)
+@pytest.mark.parametrize("from_instance", [False, True])
+def test_generated_defaults_are_independent(value: Any, from_instance: bool) -> None:
+    """Constructor and instance defaults are isolated regardless of hashability."""
+
+    class Target:
+        def __init__(self, items: Any = value) -> None:
+            self.items = items
+
+    model = Factory.model_from(Target() if from_instance else Target)
+    first, second = model(), model()
+    assert first.items == second.items == value
+    assert first.items is not second.items and first.items is not value
+    assert model.model_fields["items"].default_factory is not None
+    assert first.model_fields_set == set()
+    if isinstance(first.items, dict):
+        first.items["a"].append(2)
+        assert value["a"] == second.items["a"] == [1]
+    explicit = object()
+    assert model(items=explicit).items is explicit
+
+
+def test_copied_defaults_preserve_alias_merging_and_provenance() -> None:
+    """Copy factories contribute static templates to aliased settings merging."""
+    from pydantic_settings import InitSettingsSource
+
+    from confidantic import ClassDefaultsSource
+
+    default = {"kept": HashableList([1]), "replaced": [2]}
+
+    class Target:
+        def __init__(
+            self, items: Annotated[dict[str, Any], Field(alias="payload")] = default
+        ) -> None:
+            self.items = items
+
+    model = Factory.model_from(Target)
+
+    class Child(model):
+        pass
+
+    initial = Child()
+    assert initial.model_field_sources["items"] == (ClassDefaultsSource, model)
+    assert not initial.model_fields_set
+    patched = Child(payload={"replaced": [3]})
+    assert patched.items == {"kept": [1], "replaced": [3]}
+    assert patched.model_field_sources["items"] == (InitSettingsSource, Child)
+    assert patched.model_fields_set == {"items"}
+    patched.items["kept"].append(4)
+    assert Child().items["kept"] == default["kept"] == [1]
+
+
+def test_copied_defaults_merge_environment_and_cli(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """All settings sources retain partial merging with generated templates."""
+
+    default = {"default": 1}
+
+    class Target:
+        def __init__(self, items: dict[str, int] = default) -> None:
+            self.items = items
+
+    model = Factory.model_from(Target)
+
+    class Config(model, env_prefix="COPIED_", cli_parse_args=True):
+        pass
+
+    monkeypatch.setenv("COPIED_ITEMS", '{"env": 2}')
+    assert Config(_cli_parse_args=["--items", '{"cli": 3}']).items == {
+        "default": 1,
+        "env": 2,
+        "cli": 3,
+    }
+
+
+def test_recursive_copied_default_retains_partial_updates() -> None:
+    """Copied nested factory templates remain patchable without sharing lists."""
+
+    default = HashableList([1])
+
+    class Service:
+        def __init__(self, items: Any = default, count: int = 2) -> None:
+            self.items = items
+            self.count = count
+
+    service_type = Factory.model_from(Service)
+    service = service_type()
+
+    class Target:
+        def __init__(self, child: Any = service) -> None:
+            self.child = child
+
+    # Use a concrete generated annotation so nested partial-update logic applies.
+    Target.__init__.__annotations__["child"] = service_type
+    model = Factory.model_from(Target)
+    first = model(child={"count": 3})
+    second = model()
+    first.child.items.append(4)
+    assert first.child.count == 3 and second.child.count == 2
+    assert second.child.items == service.items == [1]
+
+
+def test_recursive_generation_copies_hashable_factory_templates() -> None:
+    """A nested factory's successful hash must not cause mutable-state sharing."""
+    default = HashableList([1])
+
+    class Service:
+        def __init__(self, items: Any = default) -> None:
+            self.items = items
+
+    service = Service()
+
+    class Target:
+        def __init__(self, child: Any = service) -> None:
+            self.child = child
+
+    model = Factory.model_from(Target, __recursive__=Service)
+    first, second = model(), model()
+    first.child.items.append(2)
+    assert second.child.items == service.items == [1]
+    assert model.model_fields["child"].default_factory is not None

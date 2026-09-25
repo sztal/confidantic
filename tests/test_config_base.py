@@ -988,6 +988,20 @@ def test_cli_parsing_is_disabled_in_jupyterlike_runtime(
     assert Config().value == "from-default"
 
 
+def test_cli_boolean_values_are_explicit_for_nested_models() -> None:
+    """Nested boolean CLI values use an explicit value by default."""
+
+    class Child(BaseConfig):
+        enabled: bool = False
+
+    class Config(BaseConfig):
+        child: Child = Child()
+
+    config = Config(_cli_parse_args=["--child.enabled", "true"])
+
+    assert config.child.enabled is True
+
+
 def test_class_defaults_source_is_public() -> None:
     """The public source loads only defaults declared at its class level."""
 

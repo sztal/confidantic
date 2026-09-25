@@ -32,7 +32,10 @@ EXAMPLES_DIRECTORY = Path(__file__).parents[1] / "examples"
         ("directive_annotations.py", []),
         ("env_files.py", []),
         ("logging_config.py", []),
-        ("multilevel_cli.py", ["project", "create", "demo", "--dry-run"]),
+        (
+            "multilevel_cli.py",
+            ["project", "create", "demo", "--dry-run", "true"],
+        ),
         ("nested.py", []),
         ("serialization.py", []),
     ],

@@ -243,3 +243,16 @@ def test_at_prefixed_extra_paths_resolve_against_previous_extras(
 
     assert paths.config == tmp_path / "config"
     assert paths.data == tmp_path / "config/data"
+
+
+@pytest.mark.parametrize("value", ["", ".", Path(".")])
+def test_current_directory_secondary_paths(value: str | Path, tmp_path: Path) -> None:
+    """Empty and dot paths resolve against the configured root."""
+
+    class Paths(BasePaths):
+        data: Path = Path(".")
+
+    paths = Paths(root=tmp_path, extra_path=value)
+    assert paths.data == paths.extra_path == tmp_path.resolve()
+    assert Paths(root=tmp_path, data=value).data == tmp_path.resolve()
+    assert Paths(root=tmp_path, anchored="@data/child").anchored == tmp_path / "child"

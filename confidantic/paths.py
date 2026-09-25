@@ -154,7 +154,7 @@ def _canonicalize_path(
 ) -> ExtensiblePath:
     expanded = path.expanduser()
     if root is not None and not expanded.is_absolute():
-        anchor, *segments = expanded.parts
+        anchor, *segments = expanded.parts or (".",)
         if anchor.startswith("@"):
             anchor_name = anchor[1:]
             if anchors is None or anchor_name not in anchors:

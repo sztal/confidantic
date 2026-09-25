@@ -44,13 +44,3 @@ upstream fix, and related-issue search are in the
 [prepared Pydantic issue report](reports/pydantic-attribute-docstrings-issue.md).
 The report is for manual review and submission; no upstream issue has been filed.
 This defect remains unresolved in the dependency.
-
-## Current-directory secondary paths fail validation
-
-`BasePaths(data=".")` raises a validation error with `not enough values to unpack (expected at least 1, got 0)`. Empty strings and declared path fields
-whose default is `Path(".")` hit the same path. `_canonicalize_path` unpacks
-`expanded.parts` before joining a relative secondary path to the root, but
-`Path(".").parts` is empty.
-
-Expected: a current-directory secondary path resolves to the configured root,
-just like any other relative path. Root paths themselves are unaffected.

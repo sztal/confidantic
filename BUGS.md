@@ -89,31 +89,3 @@ including hashable mutable collections. Normal list/dict isolation tests pass
 because Pydantic already handles those defaults. The audit corrected the
 unsupported docstring claim that field default factories perform this copying;
 the source isolation defect remains unresolved.
-
-## Configurable equality and hashing disagree for excluded fields
-
-`Configurable.__eq__` compares `config.model_dump()` while `__hash__` hashes the
-configuration's field values. Serialization exclusions or serializers can
-therefore discard distinctions used by hashing:
-
-```python
-from pydantic import Field
-from confidantic.configurable import Configurable, InstanceConfig
-
-
-class Options(InstanceConfig):
-    hidden: int = Field(exclude=True)
-
-
-class Component(Configurable):
-    Config = Options
-
-
-first, second = Component(hidden=1), Component(hidden=2)
-assert first == second
-assert hash(first) != hash(second)
-```
-
-Expected: equal runtime objects always have equal hashes, so dictionaries and
-sets can reliably find equal keys. Equality and hashing need compatible
-representations of configuration state.

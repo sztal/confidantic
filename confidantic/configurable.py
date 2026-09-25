@@ -150,10 +150,24 @@ class Configurable:
         return hash(self.config)
 
     def __eq__(self, other: Any) -> bool:
-        """Compare model dumps for compatible Configurable instances."""
+        """Compare stored configuration values for compatible runtime objects.
+
+        Concrete configuration types must match. Declared fields, including
+        serialization-excluded fields, and extras participate; computed fields
+        and private provenance do not. Nested values use their own equality.
+        """
         if not isinstance(other, self.__class__):
             return NotImplemented
-        return self.config.model_dump() == other.config.model_dump()
+        config_type = type(self.config)
+        if config_type is not type(other.config):
+            return False
+        return (
+            all(
+                getattr(self.config, name) == getattr(other.config, name)
+                for name in config_type.model_fields
+            )
+            and self.config.model_extra == other.config.model_extra
+        )
 
     def __getstate__(self) -> Any:
         """Return only the configuration for pickling; omit other runtime state."""

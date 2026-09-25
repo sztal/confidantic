@@ -1,5 +1,6 @@
 """Base configuration model."""
 
+import os
 import tomllib
 from collections.abc import Collection, Mapping
 from contextvars import ContextVar
@@ -33,6 +34,7 @@ from pydantic import (
     PydanticUserError,
     SerializationInfo,
     TypeAdapter,
+    ValidationError,
     ValidationInfo,
     field_validator,
     model_serializer,
@@ -98,6 +100,19 @@ _DISABLE_CLI_PARSE_ARGS: ContextVar[bool] = ContextVar(
     "_DISABLE_CLI_PARSE_ARGS",
     default=False,
 )
+
+
+def _default_use_attribute_docstrings() -> bool:
+    """Resolve the package default before configuration classes are created."""
+    value = os.getenv("CONFIDANTIC_USE_ATTRIBUTE_DOCSTRINGS")
+    if value is None:
+        return not is_runtime_jupyterlike()
+    try:
+        return TypeAdapter(bool).validate_python(value)
+    except ValidationError as error:
+        raise ValueError(
+            "CONFIDANTIC_USE_ATTRIBUTE_DOCSTRINGS must be a valid boolean"
+        ) from error
 
 
 class _FactoryCliSettingsSource(CliSettingsSource[Any]):
@@ -246,8 +261,13 @@ class ConfigModelDict(PydanticSettingsConfigDict, total=False):
         annotations override this setting.
     use_attribute_docstrings
         Whether field descriptions are read from attribute docstrings. This is
-        disabled by default in Jupyter-like runtimes because their source
-        mapping may not be available for Pydantic's inspection.
+        enabled by default except in Jupyter-like runtimes, where source
+        mapping may be unavailable. Set the process environment variable
+        ``CONFIDANTIC_USE_ATTRIBUTE_DOCSTRINGS`` to a Pydantic boolean string
+        before importing Confidantic to override this default. An explicit
+        per-class setting takes precedence. Empty or invalid environment values
+        raise ``ValueError`` during import. Explicit field descriptions remain
+        available when extraction is disabled.
     docstring_set_attributes_section
         Whether model fields replace an ``@attrs`` marker in the class
         docstring's ``Attributes`` section when a configuration subclass is
@@ -380,7 +400,7 @@ class BaseConfig(BaseSettings):
         cli_use_class_docs_for_groups=True,
         cli_ignore_unknown_args=True,
         cli_help=True,
-        use_attribute_docstrings=not is_runtime_jupyterlike(),
+        use_attribute_docstrings=_default_use_attribute_docstrings(),
         docstring_set_attributes_section=None,
         dotenv_filtering="only_existing",
         env_file_discovery=False,
@@ -1426,19 +1446,26 @@ class BaseConfig(BaseSettings):
         value: Any,
         info: ValidationInfo,
     ) -> Any:
-        baselines = _NESTED_MODEL_BASELINES.get()
-        if baselines is None or info.field_name not in baselines:
-            return value
+        return _apply_nested_model_partial_update(cls, value, info)
 
-        baseline = baselines[info.field_name]
-        if baseline is _DEFERRED_MODEL_DEFAULT:
-            baseline = cls.model_fields[info.field_name].get_default(
-                call_default_factory=True,
-                validated_data=info.data,
-            )
-        if isinstance(baseline, BaseModel) and isinstance(value, Mapping):
-            return _update_nested_model(baseline, value)
+
+def _apply_nested_model_partial_update(
+    cls: type[BaseConfig], value: Any, info: ValidationInfo
+) -> Any:
+    """Keep context-local validation state behind an importable function."""
+    baselines = _NESTED_MODEL_BASELINES.get()
+    if baselines is None or info.field_name not in baselines:
         return value
+
+    baseline = baselines[info.field_name]
+    if baseline is _DEFERRED_MODEL_DEFAULT:
+        baseline = cls.model_fields[info.field_name].get_default(
+            call_default_factory=True,
+            validated_data=info.data,
+        )
+    if isinstance(baseline, BaseModel) and isinstance(value, Mapping):
+        return _update_nested_model(baseline, value)
+    return value
 
 
 class _ResolvedSettingsSource(PydanticBaseSettingsSource):

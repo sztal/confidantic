@@ -3,7 +3,9 @@
 from collections.abc import Generator
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import Any, ClassVar, Self
+from threading import RLock
+from typing import Self, TypeVar, cast
+from weakref import WeakKeyDictionary
 
 from confidantic._config.base import BaseConfig
 
@@ -18,15 +20,9 @@ class BaseContext(BaseConfig):
     persistent activation or :meth:`temporary` for a scoped activation.
 
     The active instance is local to the current thread and asynchronous task.
-    Each subclass receives an independent context variable automatically.
+    Each subclass receives independent process-local storage lazily. Serializing
+    an instance does not transfer ambient activation into a fresh interpreter.
     """
-
-    _current: ClassVar[ContextVar[Self]] = ContextVar("BaseContext.current")
-
-    @classmethod
-    def __pydantic_init_subclass__(cls, **kwargs: Any) -> None:
-        super().__pydantic_init_subclass__(**kwargs)
-        cls._current = ContextVar(f"{cls.__module__}.{cls.__qualname__}.current")
 
     @classmethod
     def current(cls) -> Self:
@@ -42,10 +38,10 @@ class BaseContext(BaseConfig):
             Active instance of the receiving context class.
         """
         try:
-            return cls._current.get()
+            return _context_var(cls).get()
         except LookupError:
             context = cls()
-            cls._current.set(context)
+            _context_var(cls).set(context)
             return context
 
     @classmethod
@@ -71,7 +67,7 @@ class BaseContext(BaseConfig):
             raise TypeError(
                 f"Expected an instance of {cls.__name__}, got {type(context).__name__}"
             )
-        cls._current.set(context)
+        _context_var(cls).set(context)
         return context
 
     @classmethod
@@ -99,8 +95,26 @@ class BaseContext(BaseConfig):
             raise TypeError(
                 f"Expected an instance of {cls.__name__}, got {type(context).__name__}"
             )
-        token = cls._current.set(context)
+        variable = _context_var(cls)
+        token = variable.set(context)
         try:
             yield context
         finally:
-            cls._current.reset(token)
+            variable.reset(token)
+
+
+_ContextT = TypeVar("_ContextT", bound=BaseContext)
+_CONTEXT_VARS: WeakKeyDictionary[type[BaseContext], ContextVar[BaseContext]] = (
+    WeakKeyDictionary()
+)
+_CONTEXT_VARS_LOCK = RLock()
+
+
+def _context_var(cls: type[_ContextT]) -> ContextVar[_ContextT]:
+    """Keep runtime state outside serializable classes without retaining them."""
+    with _CONTEXT_VARS_LOCK:
+        variable = _CONTEXT_VARS.get(cls)
+        if variable is None:
+            variable = ContextVar(f"{cls.__module__}.{cls.__qualname__}.current")
+            _CONTEXT_VARS[cls] = variable
+        return cast(ContextVar[_ContextT], variable)

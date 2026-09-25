@@ -9,6 +9,7 @@
 
 import argparse
 import subprocess
+import sys
 from collections.abc import Sequence
 
 from packaging.version import Version
@@ -29,19 +30,26 @@ def create_parser() -> argparse.ArgumentParser:
 
 
 def check_repository() -> None:
-    """Raise if tracked working-tree files differ from the index.
-
-    This check does not inspect staged changes or untracked files.
-    """
-    subprocess.check_call(["git", "diff", "--exit-code"])
+    """Reject staged, unstaged, or untracked work; allow ignored files."""
+    status = subprocess.check_output(
+        ["git", "status", "--porcelain=v1", "--untracked-files=all"], text=True
+    )
+    if status:
+        raise RuntimeError("Release requires a clean working tree and index")
 
 
 def get_current_branch() -> str:
-    """Get the current Git branch."""
-    return subprocess.check_output(
-        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+    """Return the current branch, rejecting detached HEAD."""
+    result = subprocess.run(
+        ["git", "symbolic-ref", "--quiet", "--short", "HEAD"],
         text=True,
-    ).rstrip()
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode == 1:
+        raise RuntimeError("Release requires an attached branch")
+    result.check_returncode()
+    return result.stdout.rstrip()
 
 
 def get_release_notes(version: str) -> str:
@@ -85,21 +93,30 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = create_parser()
     args = parser.parse_args(argv)
 
-    # Check for unstaged changes to tracked files.
+    # Reject user work before staging or switching branches.
     check_repository()
     version = str(args.version)
     release_branch = f"release/{version}"
     base_branch = get_current_branch()
+    release_tag = f"v{version}"
+    for ref in (f"refs/heads/{release_branch}", f"refs/tags/{release_tag}"):
+        result = subprocess.run(
+            ["git", "show-ref", "--verify", "--quiet", ref], check=False
+        )
+        if result.returncode == 0:
+            raise RuntimeError(f"Release reference already exists: {ref}")
+        if result.returncode != 1:
+            result.check_returncode()
 
+    # Failed creation must never trigger cleanup of an existing branch.
+    subprocess.check_call(["git", "switch", "--create", release_branch])
+    tag_created = False
     try:
-        # Create the release branch and switch to it.
-        subprocess.check_call(["git", "switch", "--create", release_branch])
-
         # Update the changelog.
         release_notes = get_release_notes(version)
         update_changelog(version)
 
-        # Stage all changes, including any pre-existing staged or untracked files.
+        # Stage changes produced by the release workflow.
         subprocess.check_call(["git", "add", "--all", "."])
 
         # Commit changes.
@@ -108,26 +125,34 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         # Create the release tag.
         release_tag = create_release_tag(version)
+        tag_created = True
 
-        if args.dry_run:
-            # Remove the release tag.
-            subprocess.check_call(["git", "tag", "--delete", release_tag])
-            return 0
+        if not args.dry_run:
+            subprocess.check_call(
+                [
+                    "git",
+                    "push",
+                    "--atomic",
+                    "origin",
+                    f"{release_branch}:main",
+                    release_tag,
+                ]
+            )
+            create_release(release_tag, release_notes)
+    except BaseException:
+        retained = f"branch {release_branch!r}"
+        if tag_created:
+            retained += f" and tag {release_tag!r}"
+        print(f"Release failed; retained {retained} for recovery", file=sys.stderr)
+        raise
 
-        # Push the release branch and the release tag to the origin remote.
-        # The local release branch is pushed to the remote main branch.
-        subprocess.check_call(
-            ["git", "push", "--atomic", "origin", f"{release_branch}:main", release_tag]
-        )
-
-        # Create the GitHub release.
-        create_release(release_tag, release_notes)
-
-    finally:
-        # Switch back to the base Git branch.
-        subprocess.check_call(["git", "checkout", base_branch])
-        # Remove the release branch.
-        subprocess.check_call(["git", "branch", "--delete", "--force", release_branch])
+    # Only a completed release may discard resources created above.
+    if args.dry_run:
+        subprocess.check_call(["git", "tag", "--delete", release_tag])
+    subprocess.check_call(["git", "checkout", base_branch])
+    subprocess.check_call(["git", "branch", "--delete", "--force", release_branch])
+    if args.dry_run:
+        return 0
 
     # Fetch all changes from the remote main branch.
     subprocess.check_call(["git", "fetch", "origin", "main"])

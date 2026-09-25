@@ -33,6 +33,7 @@ from typing import (
 from pydantic import (
     BaseModel,
     ConfigDict,
+    Field,
     GetCoreSchemaHandler,
     TypeAdapter,
     create_model,
@@ -49,6 +50,7 @@ from pydantic_core import (
 from confidantic._config.base import (
     _DISABLE_CLI_PARSE_ARGS,
     BaseConfig,
+    _CopiedDefault,
 )
 
 __all__ = ("Factory",)
@@ -198,9 +200,11 @@ class Factory(BaseConfig, Generic[T]):
 
         When ``source`` is an instance, attributes with matching parameter names
         replace constructor defaults. Missing attributes retain those defaults,
-        or leave a field required if no default exists. Defaults follow
-        Pydantic's normal copying and validation rules; hashability alone does
-        not imply that a value is immutable.
+        or leave a field required if no default exists. Mutable collections and
+        unhashable defaults are deep-copied for each configuration through
+        generated field default factories. Their templates still participate
+        in settings-source merging. Other hashable objects retain normal
+        Pydantic default behavior; explicit inputs undergo normal validation.
 
         Parameters
         ----------
@@ -362,6 +366,7 @@ class Factory(BaseConfig, Generic[T]):
             if instance is not None and hasattr(instance, field_name):
                 default = getattr(instance, field_name)
             source_default = default
+            annotation = annotations[field_name]
             if (
                 __recursive__ is not None
                 and source_default is not Parameter.empty
@@ -373,11 +378,12 @@ class Factory(BaseConfig, Generic[T]):
                 annotation = _factory_annotation(
                     annotations[field_name], source_default, factory_type
                 )
-                fields[field_name] = (annotation, factory_type())
-                continue
+                default = factory_type()
             if default is Parameter.empty:
                 default = PydanticUndefined
-            fields[field_name] = (annotations[field_name], default)
+            elif _requires_default_factory(default):
+                default = Field(default_factory=_CopiedDefault(default))
+            fields[field_name] = (annotation, default)
 
         model = create_model(
             __name__ or f"{target.__name__}Config",
@@ -449,14 +455,10 @@ def _matches_factory_type_hint(value: Any, type_hint: Any) -> bool:
     return True
 
 
-def _cloned_default(value: Any) -> Callable[[], Any]:
-    def default_factory() -> Any:
-        return deepcopy(value)
-
-    return default_factory
-
-
 def _requires_default_factory(value: Any) -> bool:
+    # Factory templates can contain mutable values even when their hash works.
+    if isinstance(value, Factory):
+        return True
     if isinstance(
         value,
         MutableMapping | MutableSequence | MutableSet | bytearray,

@@ -54,38 +54,3 @@ whose default is `Path(".")` hit the same path. `_canonicalize_path` unpacks
 
 Expected: a current-directory secondary path resolves to the configured root,
 just like any other relative path. Root paths themselves are unaffected.
-
-## Hashable mutable factory defaults are shared
-
-`Factory.model_from` installs source attributes as static field defaults.
-The `_requires_default_factory` and `_cloned_default` helpers are never called.
-Pydantic copies unhashable defaults, but hashable mutable values can be shared
-by the source and all generated configuration instances:
-
-```python
-from typing import Any
-from confidantic import Factory
-
-
-class HashableList(list):
-    __hash__ = object.__hash__
-
-
-class Target:
-    def __init__(self, items: Any) -> None:
-        self.items = items
-
-
-source = Target(HashableList([1]))
-Config = Factory.model_from(source)
-first, second = Config(), Config()
-first.items.append(2)
-assert first.items is second.items is source.items
-assert second.items == [1, 2]
-```
-
-Expected: mutable collection defaults are isolated per factory configuration,
-including hashable mutable collections. Normal list/dict isolation tests pass
-because Pydantic already handles those defaults. The audit corrected the
-unsupported docstring claim that field default factories perform this copying;
-the source isolation defect remains unresolved.

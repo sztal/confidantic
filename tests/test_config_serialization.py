@@ -234,3 +234,42 @@ def test_recursive_factory_serialization_and_loky_transfer(
         tmp_path,
         worker_environment,
     )
+
+
+def test_hashable_mutable_factory_defaults_transfer(
+    tmp_path: Path, worker_environment: dict[str, str]
+) -> None:
+    """Copy-default wrappers and templates survive fresh-process cloudpickle."""
+    _run(
+        """
+        from pathlib import Path
+        from typing import Any
+        import cloudpickle
+        from confidantic import Factory
+
+        class Values(list):
+            __hash__ = object.__hash__
+
+        class Target:
+            def __init__(self, items: Any = Values([1])) -> None:
+                self.items = items
+
+        Path("copied.pkl").write_bytes(cloudpickle.dumps(Factory.model_from(Target)))
+        """,
+        tmp_path,
+        worker_environment,
+    )
+    _run(
+        """
+        from pathlib import Path
+        import cloudpickle
+
+        model = cloudpickle.loads(Path("copied.pkl").read_bytes())
+        first, second = model(), model()
+        first.items.append(2)
+        assert second.items == [1]
+        assert model().model_resolve().items == [1]
+        """,
+        tmp_path,
+        worker_environment,
+    )

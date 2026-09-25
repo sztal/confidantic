@@ -172,12 +172,24 @@ Pass `context={"make": True}` to `model_dump()` or `model_dump_json()` to add
 a `Make` directive for each serialized `BaseConfig`:
 
 ```python
-config.model_dump(context={"make": True})
+from confidantic import BaseConfig
+
+
+class AppConfig(BaseConfig):
+    retries: int = 3
+
+
+config = AppConfig()
+data = config.model_dump(context={"make": True})
 # {"@call": "package.module:AppConfig", "retries": 3}
 ```
 
 Nested `BaseConfig` instances receive their own directive; ordinary Pydantic
-models do not.
+models do not. A `Factory` writes its target class's identifier, so loading
+its directive constructs the target object. Identifiers must resolve to
+importable objects; local and unregistered generated classes are not portable.
+Use `serialize_as_any=True` when fields annotated with base classes must retain
+subclass-only data.
 
 Deserialize the result with the `Make` annotation:
 
@@ -205,11 +217,11 @@ pip install "confidantic[yaml]"
 pip install "confidantic[toml]"
 ```
 
-Both methods accept the same model-dump filtering, context, and serialization
-options as `model_dump_json()` and return a string:
+Both methods accept model-dump filtering, context, and serialization options
+and return a string. Ordinary documents can be loaded directly:
 
 ```python
-yaml_text = config.model_dump_yaml(context={"make": True})
+yaml_text = config.model_dump_yaml()
 toml_text = config.model_dump_toml(exclude_none=True)
 
 loaded_yaml = AppConfig.model_validate_yaml(yaml_text)
@@ -218,6 +230,21 @@ loaded_toml = AppConfig.model_validate_toml(toml_text)
 
 YAML uses block formatting and preserves model field order, including a leading
 Make directive. TOML has no null representation, so use `exclude_none=True` when
-the configuration can contain `None` values. The YAML loader requires the YAML
-extra; TOML loading uses Python's standard library. Both loaders forward their
-validation options to `model_validate()`.
+model fields can contain `None`. This does not remove `None` entries inside
+lists or mappings; those require preprocessing. The YAML loader requires the
+YAML extra; TOML loading uses Python's standard library. Both loaders parse into
+Python values and forward their validation options to `model_validate()`.
+Configured settings sources can still participate in construction.
+
+The loaders do not evaluate a root `@call` directive. For output produced with
+`context={"make": True}`, parse the document and validate it through `Make`:
+
+```python
+import yaml
+from pydantic import TypeAdapter
+from confidantic.annotations import Make
+
+
+yaml_text = config.model_dump_yaml(context={"make": True})
+loaded_yaml = TypeAdapter(Make[AppConfig]).validate_python(yaml.safe_load(yaml_text))
+```

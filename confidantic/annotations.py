@@ -41,11 +41,12 @@ P = TypeVarWithDefault("P", bound=Path, default=Path)
 
 
 def get_proper_args(annotation: Any) -> Iterator[type]:
-    """Iterate over the concrete types inside an annotation.
+    """Recursively yield type-valued leaves from annotation arguments.
 
-    For example, for a union annotation like ``int | str``, this yields
-    ``int`` and ``str``. For an annotated annotation like
-    ``Annotated[int, SomeValidator()]``, this yields ``int``.
+    Union members and generic arguments are traversed in order; generic origins
+    are not yielded. ``Annotated`` metadata is traversed too, so metadata that
+    is itself a type is included. Non-type leaves are ignored. This is not a
+    normalization of the annotation into its accepted runtime types.
 
     Parameters
     ----------
@@ -55,7 +56,14 @@ def get_proper_args(annotation: Any) -> Iterator[type]:
     Yields
     ------
     type
-        The next proper type in the annotation.
+        The next type-valued leaf, without deduplication.
+
+    Examples
+    --------
+    >>> list(get_proper_args(list[int | str]))
+    [<class 'int'>, <class 'str'>]
+    >>> list(get_proper_args(Annotated[int, str]))
+    [<class 'int'>, <class 'str'>]
     """
     origin = get_origin(annotation)
     if not origin:
@@ -90,13 +98,34 @@ AbsolutePath: TypeAlias = Annotated[P, AfterValidator(_resolve_absolute_path)]
 def Delimited(sep: str | None = None) -> Any:
     """Return an annotation for delimiter-separated sequence inputs.
 
-    The returned annotation accepts an existing sequence unchanged, while
-    splitting string inputs on ``sep`` before normal validation.
+    Normal validation is attempted first, including item coercion. If it
+    fails for a string, JSON decoding and validation are attempted next, then
+    delimiter splitting with whitespace stripped from every item. If all
+    attempts fail, the original validation error is raised. Settings-source
+    JSON decoding is disabled by ``NoDecode`` so this fallback handles strings.
+
+    Parameters
+    ----------
+    sep
+        Separator passed to :meth:`str.split`. The default ``None`` splits on
+        runs of whitespace; explicit separators retain empty items.
 
     Returns
     -------
     Any
-        An annotated type that validates delimiter-separated sequence inputs.
+        A generic annotation to parameterize with the desired validated type,
+        for example ``Delimited("|")[list[int]]``.
+
+    Examples
+    --------
+    >>> from pydantic import TypeAdapter
+    >>> adapter = TypeAdapter(Delimited("|")[list[int]])
+    >>> adapter.validate_python("1 | 2")
+    [1, 2]
+    >>> adapter.validate_python("[3, 4]")
+    [3, 4]
+    >>> adapter.validate_python(["5"])
+    [5]
     """
 
     def _validate_delimited(value: Any, handler: Callable[[Any], Any]) -> Any:
@@ -118,9 +147,13 @@ def Delimited(sep: str | None = None) -> Any:
     return Annotated[Annotated[T, NoDecode], WrapValidator(_validate_delimited)]
 
 
+#: Delimited input using commas; parameterize with a collection type.
 CommaDelimited = Delimited(",")
+#: Delimited input using semicolons.
 SemiColonDelimited = Delimited(";")
+#: Delimited input using runs of whitespace.
 WhitespaceDelimited = Delimited()
+#: Delimited input using tabs.
 TabDelimited = Delimited("\t")
 
 
@@ -156,6 +189,11 @@ def _dict_like(value: Any, handler: Callable[[Any], Any]) -> Any:
             raise e1 from e2
 
 
+#: Validate normally first, then try JSON and ``key=value`` parsing for strings.
+#: Pairs may be separated by commas or whitespace before the next key; surrounding
+#: whitespace and trailing commas are stripped. Repeated keys keep the last value.
+#: Parameterize with a mapping type, such as ``Map[dict[str, int]]``. Settings-source
+#: JSON decoding is disabled, and failed fallbacks re-raise the original error.
 Map: TypeAlias = Annotated[T, NoDecode, WrapValidator(_dict_like)]
 
 
@@ -165,7 +203,9 @@ Map: TypeAlias = Annotated[T, NoDecode, WrapValidator(_dict_like)]
 
 
 #: A Pydantic annotation for importable objects. Import strings are resolved using
-#: :class:`pydantic.ImportString` and objects serialize as stable import strings.
+#: :class:`pydantic.ImportString`; serialization uses :func:`get_import_string`.
+#: Importability is not checked during serialization; instances serialize as their
+#: type unless they expose their own module and qualified name.
 Import: TypeAlias = Annotated[
     ImportString[T],
     PlainSerializer(get_import_string, return_type=str),
@@ -186,8 +226,10 @@ def _call(value: Any, handler: Callable[[Any], Any]) -> Any:
 
 
 #: A Pydantic annotation that evaluates a callable during validation. Callables and
-#: import strings are evaluated before validation; call mappings are evaluated with
-#: their positional and keyword arguments before normal validation.
+#: import strings are called without arguments. A mapping with ``@call`` supplies
+#: the callable or its import string, optional ``@args``, and keyword arguments in
+#: its remaining entries. Nested arguments are not evaluated. Other values pass
+#: through to normal validation; strings are always treated as import strings.
 Call: TypeAlias = Annotated[T, WrapValidator(_call)]
 
 
@@ -200,6 +242,8 @@ def _make(value: Any, handler: Callable[[Any], Any]) -> Any:
     return make(value, handler)
 
 
-#: A Pydantic annotation that evaluates nested call mappings. Mappings and
-#: sequences are traversed recursively before normal validation.
+#: Evaluate directives with :func:`confidantic.utils.make` before validation.
+#: Mapping values, lists, and tuples are traversed recursively. Nested strings
+#: and callables remain data; top-level strings and callables are called without
+#: arguments. Mapping keys and values returned by calls are not traversed.
 Make: TypeAlias = Annotated[T, WrapValidator(_make)]

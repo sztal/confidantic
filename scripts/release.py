@@ -29,7 +29,10 @@ def create_parser() -> argparse.ArgumentParser:
 
 
 def check_repository() -> None:
-    """Check whether the local repository is dirty or clean."""
+    """Raise if tracked working-tree files differ from the index.
+
+    This check does not inspect staged changes or untracked files.
+    """
     subprocess.check_call(["git", "diff", "--exit-code"])
 
 
@@ -82,7 +85,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = create_parser()
     args = parser.parse_args(argv)
 
-    # Check whether the local repository is dirty or clean.
+    # Check for unstaged changes to tracked files.
     check_repository()
     version = str(args.version)
     release_branch = f"release/{version}"
@@ -96,7 +99,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         release_notes = get_release_notes(version)
         update_changelog(version)
 
-        # Add all changes as the local repository was clean.
+        # Stage all changes, including any pre-existing staged or untracked files.
         subprocess.check_call(["git", "add", "--all", "."])
 
         # Commit changes.

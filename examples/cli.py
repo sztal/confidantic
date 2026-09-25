@@ -31,7 +31,7 @@ class Config(
 
 # %% Resolve and inspect the command-line configuration -----------------------------
 
-# CLI values override dotenv values; `info()` shows the resolved value and its source.
+# CLI values override dotenv values; `info()` shows the resolved values; `model_field_sources` tracks sources.
 config = Config()
 config.info()
 

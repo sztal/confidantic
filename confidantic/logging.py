@@ -63,14 +63,13 @@ class BaseLogging(BaseConfig):
     """The logging level for the file handler.
     If ``None``, defaults to the value of ``level``."""
     file_format: str | None = None
-    """The log message format for the file handler.
-    If ``None``, defaults to the value of ``format``."""
+    """The file handler format; ``None`` or an empty string uses ``format``."""
     file_max_bytes: PositiveInt = 5 * 1024 * 1024
     """The maximum size in bytes of the log file before it is rotated."""
     file_backup_count: PositiveInt = 3
     """The number of backup log files to keep when rotating."""
     version: PositiveInt = 1
-    """The version of the logging configuration schema."""
+    """Schema version passed through to dictConfig, which supports only 1."""
     disable_existing_loggers: bool = False
     """Whether to disable existing loggers when configuring logging."""
 
@@ -147,7 +146,9 @@ class BaseLogging(BaseConfig):
     ) -> logging.Logger:
         """Apply this logging configuration and return a logger.
 
-        The generated configuration always applies to the root logger.
+        The generated configuration always applies to the root logger and
+        replaces its handlers. Calling this method has process-wide effects;
+        file-handler parent directories must already exist.
 
         Parameters
         ----------

@@ -20,7 +20,10 @@ class BaseContext(BaseConfig):
     persistent activation or :meth:`temporary` for a scoped activation.
 
     The active instance is local to the current thread and asynchronous task.
-    Each subclass receives independent process-local storage lazily. Serializing
+    New asynchronous tasks inherit the current activation by reference;
+    replacing it in one task does not replace it in another. Mutating a shared
+    active instance can still affect both tasks. Each subclass receives
+    independent process-local storage lazily. Serializing
     an instance does not transfer ambient activation into a fresh interpreter.
     """
 
@@ -51,7 +54,8 @@ class BaseContext(BaseConfig):
         Parameters
         ----------
         context
-            Validated instance to activate.
+            Instance to activate by reference. Its class is checked, but its
+            fields are not revalidated.
 
         Returns
         -------
@@ -75,11 +79,14 @@ class BaseContext(BaseConfig):
     def temporary(cls, context: Self) -> Generator[Self, None, None]:
         """Temporarily activate an instance in the current execution context.
 
+        The previous activation, including an unset state, is restored on
+        exit even when the block raises an exception.
+
         Parameters
         ----------
         context
-            Validated instance to activate for the duration of the context
-            manager.
+            Instance to activate by reference for the duration of the context
+            manager. Its class is checked, but its fields are not revalidated.
 
         Yields
         ------

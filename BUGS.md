@@ -44,3 +44,93 @@ upstream fix, and related-issue search are in the
 [prepared Pydantic issue report](reports/pydantic-attribute-docstrings-issue.md).
 The report is for manual review and submission; no upstream issue has been filed.
 This defect remains unresolved in the dependency.
+
+## Current-directory secondary paths fail validation
+
+`BasePaths(data=".")` raises a validation error with `not enough values to unpack (expected at least 1, got 0)`. Empty strings and declared path fields
+whose default is `Path(".")` hit the same path. `_canonicalize_path` unpacks
+`expanded.parts` before joining a relative secondary path to the root, but
+`Path(".").parts` is empty.
+
+Expected: a current-directory secondary path resolves to the configured root,
+just like any other relative path. Root paths themselves are unaffected.
+
+## Hashable mutable factory defaults are shared
+
+`Factory.model_from` installs source attributes as static field defaults.
+The `_requires_default_factory` and `_cloned_default` helpers are never called.
+Pydantic copies unhashable defaults, but hashable mutable values can be shared
+by the source and all generated configuration instances:
+
+```python
+from typing import Any
+from confidantic import Factory
+
+
+class HashableList(list):
+    __hash__ = object.__hash__
+
+
+class Target:
+    def __init__(self, items: Any) -> None:
+        self.items = items
+
+
+source = Target(HashableList([1]))
+Config = Factory.model_from(source)
+first, second = Config(), Config()
+first.items.append(2)
+assert first.items is second.items is source.items
+assert second.items == [1, 2]
+```
+
+Expected: mutable collection defaults are isolated per factory configuration,
+including hashable mutable collections. Normal list/dict isolation tests pass
+because Pydantic already handles those defaults. The audit corrected the
+unsupported docstring claim that field default factories perform this copying;
+the source isolation defect remains unresolved.
+
+## Configurable equality and hashing disagree for excluded fields
+
+`Configurable.__eq__` compares `config.model_dump()` while `__hash__` hashes the
+configuration's field values. Serialization exclusions or serializers can
+therefore discard distinctions used by hashing:
+
+```python
+from pydantic import Field
+from confidantic.configurable import Configurable, InstanceConfig
+
+
+class Options(InstanceConfig):
+    hidden: int = Field(exclude=True)
+
+
+class Component(Configurable):
+    Config = Options
+
+
+first, second = Component(hidden=1), Component(hidden=2)
+assert first == second
+assert hash(first) != hash(second)
+```
+
+Expected: equal runtime objects always have equal hashes, so dictionaries and
+sets can reliably find equal keys. Equality and hashing need compatible
+representations of configuration state.
+
+## Release cleanliness check misses staged and untracked files
+
+`scripts/release.py:check_repository` runs only `git diff --exit-code`, which
+compares tracked working-tree files with the index. A staged change or an
+untracked file passes that check. The release workflow subsequently runs
+`git add --all .` and commits, so unrelated user work can enter a release.
+In dry-run mode the temporary release branch is deleted afterward, potentially
+leaving that work recoverable only through Git history.
+
+Reproduction: in a temporary Git repository, commit a file, modify and stage
+it, and add an untracked file. `git diff --exit-code` exits successfully while
+`git status --porcelain` reports both changes.
+
+Expected: reject any staged, unstaged, or untracked work before switching
+branches or staging release files. The audit narrowed the helper's docstring
+to its actual check; the release workflow still needs a separate source fix.

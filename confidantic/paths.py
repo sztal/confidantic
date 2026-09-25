@@ -44,17 +44,18 @@ class ExtensiblePath(_ExtensiblePathBase):
         )
 
     def __call__(self, *pathsegments: str | PathLike[str]) -> Self:
-        """Join path segments and return a dynamic path.
+        """Join path segments and return a path of the same concrete type.
 
         Parameters
         ----------
         *pathsegments
-                Child path segments to append.
+            Segments passed to :meth:`pathlib.Path.joinpath`. An absolute
+            segment replaces the preceding path on the current platform.
 
         Returns
         -------
         ExtensiblePath
-                Joined path.
+            Joined path, without expansion or filesystem resolution.
         """
         return type(self)(self.joinpath(*pathsegments))
 
@@ -70,7 +71,10 @@ class BasePaths(BaseConfig):
 
     Subclasses may declare additional :class:`pathlib.Path`-compatible fields.
     Their validated values are canonicalized to ``ExtensiblePath``. Undeclared
-    path values are accepted as Pydantic extra fields by default.
+    path values are accepted as Pydantic extra fields by default. Declared fields
+    are resolved in model field order, followed by extras in their input order.
+    All declared fields must have a concrete ``Path`` subclass annotation;
+    optional and union path annotations are not accepted.
 
     Examples
     --------
@@ -92,14 +96,16 @@ class BasePaths(BaseConfig):
         Parameters
         ----------
         *args
-            Path segments to append to the root directory.
+            Segments passed to :meth:`pathlib.Path.joinpath`. An absolute
+            segment replaces the root on the current platform.
         **kwargs
-            Keyword arguments forwarded to :meth:`pathlib.Path.joinpath`.
+            Forwarded to :meth:`pathlib.Path.joinpath`, whose standard
+            implementation accepts only positional path segments.
 
         Returns
         -------
         ExtensiblePath
-            Joined path.
+            Joined path, without additional expansion or canonicalization.
         """
         return self.root.joinpath(*args, **kwargs)
 

@@ -134,3 +134,14 @@ it, and add an untracked file. `git diff --exit-code` exits successfully while
 Expected: reject any staged, unstaged, or untracked work before switching
 branches or staging release files. The audit narrowed the helper's docstring
 to its actual check; the release workflow still needs a separate source fix.
+
+## Failed release branch creation deletes an existing branch
+
+If `release/<version>` already exists, `git switch --create` fails, but
+`scripts/release.py` still executes its unconditional `finally` cleanup and
+force-deletes that pre-existing branch. This reproduces with `--dry-run` in a
+clean disposable repository.
+
+Expected: reject existing release branches and tags before modification, and
+only clean up resources successfully created by the current invocation.
+Failures after branch creation must retain release work for recovery.

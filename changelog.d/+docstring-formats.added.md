@@ -1,0 +1,1 @@
+Support NumPy and Google `@attrs` sections with automatic detection and an inherited `docstring_style` setting. Preserve surrounding docstring text and validate marked sections and generated output, raising `ValueError` for invalid requests.

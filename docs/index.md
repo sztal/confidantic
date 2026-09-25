@@ -95,8 +95,9 @@ configuration class takes precedence over the package default.
 Disabling extraction does not remove explicit `Field(description=...)`
 descriptions or disable the `@attrs` replacement below.
 
-Add an `@attrs` marker to a `BaseConfig` subclass's NumPy-style `Attributes`
-section to replace it with effective model field names and descriptions:
+Add an `@attrs` marker to a `BaseConfig` subclass's NumPy or Google `Attributes`
+section to replace the entire section with effective model field names and descriptions.
+The format is detected automatically, and text outside the section is preserved:
 
 ```python
 from confidantic import BaseConfig
@@ -104,14 +105,46 @@ from pydantic import Field
 
 
 class AppConfig(BaseConfig):
-	"""Application configuration."""
+	"""Application configuration.
 
 	Attributes
 	----------
 	@attrs
+	"""
 
 	retries: int = Field(3, description="Number of retry attempts.")
 ```
+
+Google sections accept either `@attrs` or `@attrs:`:
+
+```python
+from confidantic import BaseConfig, ConfigModelDict
+from pydantic import Field
+
+
+class AppConfig(BaseConfig):
+    """Application configuration.
+
+    Attributes:
+        @attrs
+    """
+
+    model_config = ConfigModelDict(docstring_style="google")
+    retries: int = Field(3, description="Number of retry attempts.")
+```
+
+`docstring_style` accepts `"numpy"`, `"google"`, or `None` (the default, for
+automatic detection). The setting is inherited; set it to `None` on a subclass
+to restore detection. An explicit style specifies the expected input format
+and does not convert docstrings.
+
+Generation validates the completed docstring using the selected parser and
+requires exactly one Attributes section with the generated fields. Invalid
+marked sections, conflicting styles, duplicate sections, and invalid generated
+output raise `ValueError` during class creation. An empty marked Google section
+also raises because the parser requires an attribute entry; an empty NumPy
+section is accepted. Unmarked docstrings and marker mentions in prose, examples,
+or nested literal content are unchanged.
 
 Set `docstring_set_attributes_section=False` to retain an `@attrs` marker
 without replacing it:
@@ -121,11 +154,12 @@ from confidantic import BaseConfig, ConfigModelDict
 
 
 class AppConfig(BaseConfig):
-	"""Application configuration."""
+	"""Application configuration.
 
 	Attributes
 	----------
 	@attrs
+	"""
 
 	model_config = ConfigModelDict(
 		docstring_set_attributes_section=False,

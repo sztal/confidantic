@@ -1,6 +1,10 @@
 """Tests for context-local configuration state."""
 
-from contextvars import ContextVar, copy_context
+import asyncio
+import gc
+import weakref
+from concurrent.futures import ThreadPoolExecutor
+from contextvars import Context, ContextVar, copy_context
 from typing import cast
 
 import pytest
@@ -8,7 +12,7 @@ from pydantic import Field, ValidationError, field_validator
 from pydantic_settings import EnvSettingsSource, InitSettingsSource
 
 from confidantic import ConfigModelDict as ConfigModelDict
-from confidantic.context import BaseContext
+from confidantic.context import _CONTEXT_VARS, BaseContext, _context_var
 
 
 class ExampleContext(BaseContext):
@@ -26,8 +30,8 @@ class OtherContext(BaseContext):
 @pytest.fixture(autouse=True)
 def isolate_contexts(monkeypatch: pytest.MonkeyPatch) -> None:
     """Reset module-level context variables between tests."""
-    monkeypatch.setattr(ExampleContext, "_current", ContextVar("EXAMPLE_CONTEXT"))
-    monkeypatch.setattr(OtherContext, "_current", ContextVar("OTHER_CONTEXT"))
+    monkeypatch.setitem(_CONTEXT_VARS, ExampleContext, ContextVar("EXAMPLE_CONTEXT"))
+    monkeypatch.setitem(_CONTEXT_VARS, OtherContext, ContextVar("OTHER_CONTEXT"))
 
 
 def test_construction_does_not_activate_context() -> None:
@@ -84,7 +88,7 @@ def test_context_subclasses_have_independent_storage() -> None:
     ExampleContext.set(example)
     OtherContext.set(other)
 
-    assert id(ExampleContext._current) != id(OtherContext._current)
+    assert _context_var(ExampleContext) is not _context_var(OtherContext)
     assert ExampleContext.current() is example
     assert OtherContext.current() is other
 
@@ -192,3 +196,78 @@ def test_copied_execution_context_isolates_replacement() -> None:
 
     assert child_context.run(ExampleContext.current) is child
     assert ExampleContext.current() is parent
+
+
+def test_parent_and_same_name_contexts_are_independent() -> None:
+    """Registry keys distinguish concrete classes rather than their names."""
+
+    def make_context() -> type[ExampleContext]:
+        class Local(ExampleContext):
+            pass
+
+        return Local
+
+    first, second = make_context(), make_context()
+    ExampleContext.set(ExampleContext(value=9))
+    first.set(first(value=2))
+    assert second.current().value == 1
+    assert first.current().value == 2
+    assert ExampleContext.current().value == 9
+
+
+def test_inactive_context_class_can_be_collected() -> None:
+    """Allocating storage does not retain a class after temporary activation."""
+
+    class Local(BaseContext):
+        value: int = 1
+
+    reference = weakref.ref(Local)
+    with Local.temporary(Local()):
+        assert Local.current().value == 1
+    del Local
+    gc.collect()
+    assert reference() is None
+
+
+def test_temporary_preserves_unrelated_context_changes() -> None:
+    """Resetting one class does not roll back another class's activation."""
+    with ExampleContext.temporary(ExampleContext(value=9)):
+        OtherContext.set(OtherContext(name="changed"))
+    assert ExampleContext.current().value == 1
+    assert OtherContext.current().name == "changed"
+
+
+def test_context_thread_isolation() -> None:
+    """Threads share one storage variable but retain independent active values."""
+    baseline = ExampleContext.set(ExampleContext(value=99))
+
+    def worker(value: int) -> tuple[int, int]:
+        def fresh() -> tuple[int, int]:
+            assert ExampleContext.current().value == 1
+            ExampleContext.set(ExampleContext(value=value))
+            return id(_context_var(ExampleContext)), ExampleContext.current().value
+
+        return Context().run(fresh)
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        result = list(pool.map(worker, range(8)))
+    assert len({key for key, _ in result}) == 1
+    assert [value for _, value in result] == list(range(8))
+    assert ExampleContext.current() is baseline
+
+
+def test_context_async_task_isolation() -> None:
+    """Concurrent temporary activations restore each task's inherited value."""
+    baseline = ExampleContext.set(ExampleContext(value=99))
+
+    async def worker(value: int) -> None:
+        with ExampleContext.temporary(ExampleContext(value=value)):
+            await asyncio.sleep(0)
+            assert ExampleContext.current().value == value
+        assert ExampleContext.current() is baseline
+
+    async def run() -> None:
+        await asyncio.gather(worker(2), worker(3))
+
+    asyncio.run(run())
+    assert ExampleContext.current() is baseline

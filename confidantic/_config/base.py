@@ -373,7 +373,7 @@ class BaseConfig(BaseSettings):
         nested_model_default_partial_update=True,
         cli_parse_none_str="null",
         cli_avoid_json=True,
-        cli_implicit_flags=True,
+        cli_implicit_flags=False,
         cli_kebab_case=True,
         cli_hide_none_type=True,
         cli_show_env_vars=True,

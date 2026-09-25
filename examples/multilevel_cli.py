@@ -4,7 +4,7 @@
 
 Run this file with one of the following command paths:
 
-    python examples/multilevel_cli.py project create demo --dry-run
+    python examples/multilevel_cli.py project create demo --dry-run true
     python examples/multilevel_cli.py project show
 
 Use `--help` after any command level to inspect the commands available there.

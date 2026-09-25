@@ -42,5 +42,6 @@ in the producer and workers is a workaround, not a fix to Pydantic inspection.
 A complete producer/worker reproduction, verified versions, proposed narrow
 upstream fix, and related-issue search are in the
 [prepared Pydantic issue report](reports/pydantic-attribute-docstrings-issue.md).
-The report is for manual review and submission; no upstream issue has been filed.
+The defect is tracked upstream as
+[Pydantic #13870](https://github.com/pydantic/pydantic/issues/13870).
 This defect remains unresolved in the dependency.

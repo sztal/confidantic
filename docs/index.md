@@ -87,8 +87,15 @@ Jupyter-like runtimes.
 
 The variable is read once when the package is imported, directly from the
 process environment. Settings prefixes and dotenv files do not affect it;
-changing the environment afterward does not update the default. Set it before
-starting worker processes as well when their source inspection is unavailable.
+changing the environment afterward does not update the default.
+
+For worker reconstruction affected by
+[Pydantic #13870](https://github.com/pydantic/pydantic/issues/13870), disable
+extraction before importing Confidantic and creating the producer classes, and
+propagate the setting to workers. Setting it only in the worker cannot change
+extraction settings already serialized with a class. This workaround disables
+automatic attribute descriptions while preserving explicit field descriptions;
+it does not fix every dynamic-class serialization problem.
 An explicit `model_config = ConfigModelDict(use_attribute_docstrings=...)` on a
 configuration class takes precedence over the package default.
 

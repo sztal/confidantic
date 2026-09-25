@@ -105,6 +105,8 @@ _DISABLE_CLI_PARSE_ARGS: ContextVar[bool] = ContextVar(
 
 def _default_use_attribute_docstrings() -> bool:
     """Resolve the package default before configuration classes are created."""
+    # Worker flows may opt out before creating producer classes to work around
+    # https://github.com/pydantic/pydantic/issues/13870; this does not patch Pydantic.
     value = os.getenv("CONFIDANTIC_USE_ATTRIBUTE_DOCSTRINGS")
     if value is None:
         return not is_runtime_jupyterlike()

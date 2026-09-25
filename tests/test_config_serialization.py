@@ -12,6 +12,24 @@ import pytest
 @pytest.fixture
 def worker_environment() -> dict[str, str]:
     """Disable source inspection before either interpreter imports Confidantic."""
+    # Work around https://github.com/pydantic/pydantic/issues/13870.
+    # Cloudpickle reconstructs local classes by value in workers where the
+    # defining module may be unavailable. Pydantic's metaclass extracts attribute
+    # docstrings while constructing the skeleton class, before cloudpickle has
+    # restored its state. inspect.getsourcelines() can raise TypeError here,
+    # whereas the affected Pydantic implementation catches only OSError.
+    #
+    # Set this in the producer BEFORE importing Confidantic and creating classes,
+    # and propagate it to workers. Disabling extraction only in the consumer
+    # cannot change settings already embedded in serialized producer classes.
+    # This suppresses automatic attribute descriptions, not validation or explicit
+    # Field(description=...) metadata. It is neither a dependency fix nor a cure
+    # for every dynamic-class serialization failure.
+    #
+    # Remove this workaround only after verifying a released upstream fix,
+    # raising our dependency floor to exclude affected versions, and passing the
+    # unavailable-module regressions with extraction enabled. Issue closure alone
+    # is not sufficient evidence that all supported installations are fixed.
     return {**os.environ, "CONFIDANTIC_USE_ATTRIBUTE_DOCSTRINGS": "false"}
 
 
@@ -271,5 +289,50 @@ def test_hashable_mutable_factory_defaults_transfer(
         assert model().model_resolve().items == [1]
         """,
         tmp_path,
+        worker_environment,
+    )
+
+
+def test_unavailable_module_workaround_preserves_explicit_descriptions(
+    tmp_path: Path, worker_environment: dict[str, str]
+) -> None:
+    """The #13870 opt-out works before class creation without losing Field docs."""
+    producer = tmp_path / "producer"
+    consumer = tmp_path / "consumer"
+    producer.mkdir()
+    consumer.mkdir()
+    (producer / "model_defs.py").write_text(
+        "from confidantic import BaseConfig\n"
+        "from pydantic import Field\n"
+        "def make_model():\n"
+        "    class Parent(BaseConfig):\n"
+        "        pass\n"
+        "    class Config(Parent):\n"
+        "        value: int = Field(7, description='Explicit description')\n"
+        "    return Config\n"
+    )
+    _run(
+        """
+        from pathlib import Path
+        import cloudpickle
+        from model_defs import make_model
+        config = make_model()()
+        assert config.model_config["use_attribute_docstrings"] is False
+        Path("../consumer/payload.pkl").write_bytes(cloudpickle.dumps(config))
+        """,
+        producer,
+        worker_environment,
+    )
+    _run(
+        """
+        from importlib.util import find_spec
+        from pathlib import Path
+        import cloudpickle
+        assert find_spec("model_defs") is None
+        config = cloudpickle.loads(Path("payload.pkl").read_bytes())
+        assert config.value == 7
+        assert type(config).model_fields["value"].description == "Explicit description"
+        """,
+        consumer,
         worker_environment,
     )

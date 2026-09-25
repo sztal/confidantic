@@ -1,4 +1,26 @@
-# Suggested title: Attribute-docstring inspection raises TypeError while cloudpickle reconstructs a local model in a fresh worker
+# Upstream issue: Attribute-docstring inspection raises TypeError while cloudpickle reconstructs a local model in a fresh worker
+
+Tracked as [Pydantic #13870](https://github.com/pydantic/pydantic/issues/13870).
+
+The accompanying [review patch](pydantic-13870.patch) contains the narrow source
+change and a fresh-process regression test. It is a review artifact, not a
+runtime patch or an installed dependency change. The regression test uses
+`pytest.importorskip("cloudpickle")`; install cloudpickle when validating it.
+The test includes an ordinary attribute-extraction control and verifies that
+explicit descriptions survive worker reconstruction.
+
+Confidantic currently uses an explicit environment opt-out for affected worker
+flows. Set `CONFIDANTIC_USE_ATTRIBUTE_DOCSTRINGS=false` before importing
+Confidantic and creating the producer classes; propagate it to workers too.
+A consumer-only change does not repair settings serialized with a class.
+Automatic attribute descriptions are disabled, while explicit
+`Field(description=...)` metadata remains available. This is a workaround for
+this issue, not a general solution to serialization failures.
+
+Remove the workaround only after a released fix has been verified, the minimum
+supported dependency version excludes affected releases, and fresh-process
+regressions pass with extraction enabled. Closing the upstream issue alone is
+not enough. Do not remove the unresolved dependency entry from `BUGS.md` yet.
 
 ## Initial Checks
 

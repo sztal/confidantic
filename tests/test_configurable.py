@@ -214,3 +214,60 @@ def test_configurable_converts_unrelated_configuration_instances() -> None:
 
     assert isinstance(widget.config, WidgetConfig)
     assert widget.config.name == "other"
+
+
+@pytest.mark.parametrize("mode", ["excluded", "serializer"])
+def test_equality_uses_stored_values(mode: str) -> None:
+    """Serialization must not erase distinctions used by configuration hashing."""
+    from pydantic import field_serializer
+
+    class Options(InstanceConfig):
+        value: int = Field(exclude=mode == "excluded")
+
+        @field_serializer("value")
+        def serialize_value(self, value: int) -> int:
+            return 0
+
+    class Component(Configurable):
+        Config = Options
+
+    first, different, equal = Component(value=1), Component(value=2), Component(value=1)
+    assert first.config.model_dump() == different.config.model_dump()
+    assert first != different
+    assert first == equal and hash(first) == hash(equal)
+    assert equal in {first}
+    assert {first: "found"}[equal] == "found"
+    assert different not in {first}
+
+
+def test_equality_ignores_provenance_but_checks_types_and_extras() -> None:
+    """Only stored public configuration state determines runtime equality."""
+    from pydantic import computed_field
+
+    class Options(InstanceConfig, extra="allow"):
+        value: int = 1
+
+        @computed_field
+        @property
+        def source(self) -> str:
+            return self.model_field_sources["value"][0].__name__
+
+    class DerivedOptions(Options):
+        pass
+
+    class Component(Configurable):
+        Config = Options
+
+    class Child(Component):
+        pass
+
+    first, equal = Component(), Component(value=1)
+    assert first.config.source != equal.config.source
+    assert first == equal and hash(first) == hash(equal)
+    assert first == Child() and Child() == first
+    assert first != Component(DerivedOptions())
+    assert Component(label="a") != Component(label="b")
+    assert Component(label="a") == Component(label="a")
+    assert first.__eq__(object()) is NotImplemented
+    with pytest.raises(TypeError):
+        hash(Widget())

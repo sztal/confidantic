@@ -240,6 +240,7 @@ def test_config_model_dict_documents_all_settings_options() -> None:
         "pyproject_toml_table_header",
         "enable_decoding",
         "docstring_set_attributes_section",
+        "docstring_style",
         "env_file_discovery",
     }
 

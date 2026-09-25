@@ -24,7 +24,6 @@ from typing import (
     overload,
 )
 
-from docstring_parser import DocstringParam, DocstringStyle, compose, parse
 from dotenv import find_dotenv
 from pydantic import (
     BaseModel,
@@ -66,6 +65,7 @@ from rich.style import Style
 from rich.table import Table
 from rich.text import Text
 
+from confidantic._config._docstrings import replace_attributes
 from confidantic.utils import (
     get_import_string,
     is_runtime_jupyterlike,
@@ -272,9 +272,14 @@ class ConfigModelDict(PydanticSettingsConfigDict, total=False):
         Whether model fields replace an ``@attrs`` marker in the class
         docstring's ``Attributes`` section when a configuration subclass is
         created. ``None`` enables marker replacement by default.
+    docstring_style
+        Expected format for marked class docstrings: ``"numpy"`` or
+        ``"google"``. ``None`` detects the format from the Attributes section.
+        Invalid marked docstrings raise ``ValueError`` during class creation.
     """
 
     docstring_set_attributes_section: bool | None
+    docstring_style: Literal["numpy", "google"] | None
     env_file_discovery: bool
     cli_help: bool
 
@@ -376,8 +381,10 @@ class BaseConfig(BaseSettings):
     or :meth:`mutate` to update an instance in place. Set ``frozen=False`` in
     ``model_config`` when a subclass intentionally requires mutable fields.
 
-    Add an ``@attrs`` marker to a NumPy-style ``Attributes`` section to replace
-    that marker with the effective model field names and descriptions. Set
+    Add an ``@attrs`` marker to a NumPy or Google ``Attributes`` section to
+    replace the section with effective model field names and descriptions.
+    Google sections also accept ``@attrs:``. The format is detected unless
+    ``docstring_style`` specifies ``"numpy"`` or ``"google"``. Set
     ``docstring_set_attributes_section=False`` in ``model_config`` to disable
     the replacement.
     """
@@ -402,6 +409,7 @@ class BaseConfig(BaseSettings):
         cli_help=True,
         use_attribute_docstrings=_default_use_attribute_docstrings(),
         docstring_set_attributes_section=None,
+        docstring_style=None,
         dotenv_filtering="only_existing",
         env_file_discovery=False,
     )
@@ -481,31 +489,13 @@ class BaseConfig(BaseSettings):
         ):
             return
 
-        parsed = parse(cls.__doc__, style=DocstringStyle.NUMPYDOC)
-        attributes = [
-            item
-            for item in parsed.meta
-            if isinstance(item, DocstringParam) and item.args[0] == "attribute"
-        ]
-        if not any(item.arg_name == "@attrs" for item in attributes):
-            return
-
-        parsed.meta = [item for item in parsed.meta if item not in attributes]
-        parsed.meta.extend(
-            DocstringParam(
-                args=["attribute", field_name],
-                description=field.description,
-                arg_name=field_name,
-                type_name=None,
-                is_optional=None,
-                default=None,
-            )
-            for field_name, field in cls.model_fields.items()
-        )
-        cls.__doc__ = compose(
-            parsed,
-            style=DocstringStyle.NUMPYDOC,
-            indent="    ",
+        cls.__doc__ = replace_attributes(
+            cls.__doc__,
+            fields={
+                name: field.description for name, field in cls.model_fields.items()
+            },
+            style=cls.model_config.get("docstring_style"),
+            class_name=cls.__qualname__,
         )
 
     def model_dump_yaml(

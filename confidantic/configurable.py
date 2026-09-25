@@ -53,6 +53,12 @@ class InstanceConfig(BaseConfig):
         -------
         Configurable
             New instance of the directly associated parent class.
+
+        Raises
+        ------
+        TypeError
+            If this concrete configuration class has no directly declared
+            ``Parent`` attribute referring to a Configurable subclass.
         """
         parent_cls = type(self).__dict__.get("Parent")
         if not isinstance(parent_cls, type) or not issubclass(parent_cls, Configurable):
@@ -68,8 +74,9 @@ class InstanceConfig(BaseConfig):
 class Configurable:
     """Base class for runtime objects whose durable behavior comes from configuration.
 
-    Subclasses directly declare a concrete :class:`InstanceConfig` as ``Config``.
-    Constructor input is validated into that type and exposed through ``config``.
+    Subclasses declare or inherit a concrete :class:`InstanceConfig` as
+    ``Config``. New input is validated into that type and exposed through
+    ``config``; an existing instance is reused when no updates are supplied.
     Core behavior should derive from this configuration, while instance-specific
     caches and resources remain transient. Copying, equality, hashing, and pickle
     state operate on the configuration rather than arbitrary runtime attributes.
@@ -91,9 +98,14 @@ class Configurable:
         ----------
         config
             The configuration for this object. If not provided, a default
-            configuration will be created.
+            configuration will be created. An instance of ``self.Config`` is
+            reused without revalidation when no updates are supplied; with
+            updates, :meth:`BaseConfig.copy` creates a validated replacement.
+            Other Pydantic models are dumped to mappings before construction.
         **kwargs
-            Configuration values used to create or update ``config``.
+            Configuration values used to create or update ``config``, taking
+            precedence over mapping input. Normal settings-source priorities
+            still apply during construction.
         """
         if not isinstance(getattr(self, "Config", None), type) or not issubclass(
             self.Config, InstanceConfig
@@ -124,7 +136,7 @@ class Configurable:
         self.config = config
 
     def __init_subclass__(cls) -> None:
-        """Automatically set the Parent attribute of the nested Config class, if it exists."""
+        """Associate a directly declared InstanceConfig class with this subclass."""
         super().__init_subclass__()
         if (
             (config_cls := cls.__dict__.get("Config")) is not None
@@ -138,33 +150,42 @@ class Configurable:
         return hash(self.config)
 
     def __eq__(self, other: Any) -> bool:
-        """Check equality based on the configuration of the object."""
+        """Compare model dumps for compatible Configurable instances."""
         if not isinstance(other, self.__class__):
             return NotImplemented
         return self.config.model_dump() == other.config.model_dump()
 
     def __getstate__(self) -> Any:
-        """Return the state of the object for pickling."""
+        """Return only the configuration for pickling; omit other runtime state."""
         return {"config": self.config}
 
     def __setstate__(self, state: dict[str, Any]) -> None:
         self.config = self.Config.model_validate(state["config"])
 
     def __copy__(self) -> Self:
-        """Return with a shallow copy of the configuration."""
+        """Construct a new runtime object from a shallow configuration copy."""
         return self.__class__(config=self.config.__copy__())
 
     def __deepcopy__(self, memo: dict[int, Any] | None = None) -> Self:
-        """Return with a deep copy of the configuration."""
+        """Construct a new runtime object from a deep configuration copy."""
         return self.__class__(config=self.config.__deepcopy__(memo))
 
     def reconfigure(self, **kwargs: Any) -> Self:
-        """Reconfigure the object with new configuration values.
+        """Mutate the existing configuration and return this runtime object.
+
+        Objects sharing this configuration observe the update. The runtime
+        constructor is not called again, so derived caches are not refreshed.
+        See :meth:`BaseConfig.mutate` for validation and hash implications.
 
         Parameters
         ----------
         **kwargs
             Keyword arguments to update the configuration of the object.
+
+        Returns
+        -------
+        Self
+            This runtime object.
         """
         self.config.mutate(**kwargs)
         return self
@@ -174,25 +195,53 @@ class Configurable:
         return self.reconfigure(**kwargs)
 
     def copy(self, **kwargs: Any) -> Self:
-        """Return a copy of the object with updated configuration values.
+        """Construct a new object, then apply validated configuration updates.
+
+        The constructor receives a shallow configuration copy before updates
+        are applied. Arbitrary runtime attributes are not copied.
 
         Parameters
         ----------
         **kwargs
             Keyword arguments to update the configuration of the copied object.
+
+        Returns
+        -------
+        Self
+            Newly constructed runtime object with its configuration updated.
         """
         return self.__copy__().reconfigure(**kwargs)
 
     def deepcopy(self, **kwargs: Any) -> Self:
-        """Return a deep copy of the object with updated configuration values.
+        """Construct a new object from a deep configuration copy, then update it.
+
+        Updates are validated after construction. Arbitrary runtime attributes
+        are not copied.
 
         Parameters
         ----------
         **kwargs
             Keyword arguments to update the configuration of the copied object.
+
+        Returns
+        -------
+        Self
+            Newly constructed runtime object with its configuration updated.
         """
         return self.__deepcopy__().reconfigure(**kwargs)
 
     def info(self, *args: Any, **kwargs: Any) -> Any:
-        """Get information about the object configuration."""
+        """Display configuration values through :meth:`BaseConfig.info`.
+
+        Parameters
+        ----------
+        *args, **kwargs
+            Arguments forwarded unchanged to the configuration's ``info`` method.
+
+        Returns
+        -------
+        Table | str | None
+            The configuration method's table, rendered string, or ``None`` after
+            printing, according to its ``output`` argument.
+        """
         return self.config.info(*args, **kwargs)

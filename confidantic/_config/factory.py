@@ -80,9 +80,20 @@ class Factory(BaseConfig, Generic[T]):
     correspond to annotated constructor parameters and validated instances can
     create the target object by calling :meth:`model_resolve`.
 
-    Pydantic fields accept target instances and convert them to generated
-    factory config instances. Mappings supplied to concrete factory config
-    fields retain normal Pydantic model validation.
+    In lax validation, Pydantic fields convert compatible target instances to
+    generated factory instances and target classes to generated factory classes.
+    Existing compatible factory instances and classes are retained without
+    field revalidation. Mappings undergo model validation. Strict validation
+    does not perform the target-class or target-instance conversions.
+
+    Attributes
+    ----------
+    factory_target
+        Target class constructed during resolution.
+    factory_fields
+        Constructor field names forwarded as keyword arguments during
+        resolution. Additional fields declared on a factory subclass are not
+        forwarded to the target.
     """
 
     factory_target: ClassVar[type[T]]
@@ -180,10 +191,16 @@ class Factory(BaseConfig, Generic[T]):
     ) -> Any:
         """Create a concrete factory config from a target type or instance.
 
-        Constructor annotations define the generated fields. When ``source``
-        is an instance, its available values replace constructor defaults;
-        mutable and unhashable values are copied through field default
-        factories.
+        Annotated positional-or-keyword and keyword-only constructor parameters
+        define the generated fields. Unannotated parameters, ``*args``, and
+        ``**kwargs`` are omitted. Annotated positional-only parameters are
+        rejected because resolution calls the constructor by keyword.
+
+        When ``source`` is an instance, attributes with matching parameter names
+        replace constructor defaults. Missing attributes retain those defaults,
+        or leave a field required if no default exists. Defaults follow
+        Pydantic's normal copying and validation rules; hashability alone does
+        not imply that a value is immutable.
 
         Parameters
         ----------
@@ -195,15 +212,30 @@ class Factory(BaseConfig, Generic[T]):
             target type name.
         __recursive__
             Optional type, type hint, or predicate used to convert matching
-            default values into nested factory fields.
+            default values into nested factory fields, recursively inspecting
+            their constructors. Type hints use strict Pydantic validation for
+            matching and exclude ``None``; predicates receive the default value.
+            Existing factories are skipped. Required fields without a source
+            value remain unchanged. Matching union branches are replaced while
+            unrelated alternatives are retained.
         *args, **kwargs
             Arguments used to construct ``source`` when it is a type. The
-            resulting instance values become generated defaults.
+            resulting instance values become generated defaults. With no
+            arguments, the target is not constructed. These arguments are not
+            configuration-field overrides; use :meth:`instance_from` for those.
 
         Returns
         -------
         type[Factory[U]]
-            Generated concrete configuration class.
+            Generated concrete configuration class. It is not registered as
+            an importable module attribute.
+
+        Raises
+        ------
+        TypeError
+            If constructor arguments accompany an instance, the target is
+            incompatible with a specialized factory, or an annotated parameter
+            is positional-only. Constructor and annotation errors propagate.
         """
         if isinstance(source, type):
             target = source
@@ -255,13 +287,27 @@ class Factory(BaseConfig, Generic[T]):
     ) -> T:
         """Create the target object from the validated configuration values.
 
-        CLI parsing is disabled throughout resolution, including any
-        configuration models constructed by the target.
+        Nested factory instances and classes are resolved recursively in model
+        fields, model extras, mapping keys and values, lists, tuples, sets, and
+        frozensets. Factory classes are instantiated with their defaults first.
+        Mappings become dictionaries and nested Pydantic models are rebuilt and
+        validated. Other objects are passed through unchanged.
+
+        Only ``factory_fields`` are passed to the target, as keyword arguments.
+        Each call constructs a new target. CLI parsing is disabled throughout
+        resolution, including configuration models constructed by the target;
+        other settings sources remain active.
 
         Returns
         -------
         T
             Instance of the target type recorded by :meth:`model_from`.
+
+        Raises
+        ------
+        ValueError
+            If recursive traversal encounters a cycle. Nested validation and
+            target constructor errors also propagate.
         """
         token = _DISABLE_CLI_PARSE_ARGS.set(True)
         try:

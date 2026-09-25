@@ -18,19 +18,19 @@ from confidantic import BaseConfig
 
 
 class Create(BaseConfig):
-    """Create a project from a required positional name."""
+    """Select a project name for the simulated create command."""
 
     name: CliPositionalArg[str]
     """Name of the project to create."""
     dry_run: bool = False
-    """Report the action without creating the project."""
+    """Print "Would create" instead of "Creating"; neither creates files."""
 
 
 class Show(BaseConfig):
     """Display the selected project workspace."""
 
     details: bool = False
-    """Include detailed project information."""
+    """Select the "with details" label in the simulated output."""
 
 
 # %% Group related commands under one subprogram ------------------------------------

@@ -50,7 +50,11 @@ def generate_badge(percentage: float) -> str:
 
 
 def get_coverage_percentage(report_path: Path) -> float:
-    """Read and validate the total percentage from a Coverage.py JSON report."""
+    """Read the numeric total percentage from a Coverage.py JSON report.
+
+    Missing files or keys, malformed JSON, and nonnumeric values raise
+    ``ValueError``. No finiteness or percentage-range check is performed.
+    """
     try:
         report = json.loads(report_path.read_text())
         percentage = report["totals"]["percent_covered"]

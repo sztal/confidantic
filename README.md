@@ -83,7 +83,7 @@ Use the package according to the shape of the configuration problem:
   models, environment and dotenv input, CLI parsing, inherited defaults, and
   source provenance.
 - **Configured components:** `Factory` generates validated
-  configuration from constructor signatures, then resolve the target object.
+  configuration from constructor signatures, then constructs target objects with `model_resolve()`.
 - **Scoped runtime state:** `BaseContext` provides context-local settings with
   persistent and temporary overrides.
 - **Flexible inputs:** annotations such as `AbsolutePath`, `CommaDelimited`,
@@ -120,9 +120,9 @@ config = Config(service=Factory.model_from(Service("api.example.com"))())
 service = config.service.model_resolve()
 ```
 
-See [`examples/factory.py`](examples/factory.py) and
-[`examples/factory_gated.py`](examples/factory_gated.py) for nested and
-conditional factory patterns.
+See [`examples/factory_template.py`](examples/factory_template.py) and
+[`examples/factory_dynamic_template.py`](examples/factory_dynamic_template.py)
+for recursive defaults and runtime selection of dependency types.
 
 ### Context-local settings
 
@@ -152,14 +152,14 @@ guides with the details:
 - [`basic.py`](examples/basic.py), [`cli.py`](examples/cli.py), and [`multilevel_cli.py`](examples/multilevel_cli.py): settings sources, environment variables, and CLI input.
 - [`env_files.py`](examples/env_files.py): explicit single- and multi-file dotenv configuration plus automatic discovery.
 - [`delimited.py`](examples/delimited.py): comma-delimited lists and flexible `key=value` mappings from environment values or standard Pydantic Settings CLI input.
-- [`nested.py`](examples/nested.py), [`factory.py`](examples/factory.py), and [`factory_gated.py`](examples/factory_gated.py): nested, path-aware, and constructor-derived configuration.
+- [`nested.py`](examples/nested.py), [`factory_template.py`](examples/factory_template.py), and [`factory_dynamic_template.py`](examples/factory_dynamic_template.py): nested, path-aware, and constructor-derived configuration.
 - [`configurable.py`](examples/configurable.py): instance configuration for configurable classes.
 - [`context.py`](examples/context.py): context-local configuration and scoped overrides.
 - [`logging_config.py`](examples/logging_config.py): logging configuration.
-- [`directive_annotations.py`](examples/directive_annotations.py) and [`serialization.py`](examples/serialization.py): trusted portable documents and YAML/TOML serialization.
+- [`directive_annotations.py`](examples/directive_annotations.py) and [`serialization.py`](examples/serialization.py): trusted call directives and portable configuration dumps.
 
 Run a guide as a script or open it in VS Code's Python Interactive Window. The
-project smoke-tests every example.
+project smoke-tests the subset listed in `tests/test_examples.py`.
 
 For deeper design and API details, see the [API reference](docs/reference/api.md)
 and the focused wiki pages on [configuration resolution](wiki/configuration-resolution.md),

@@ -103,6 +103,10 @@ class Factory(BaseConfig, Generic[T]):
             if target is not None and generic_arguments
             else source_type
         )
+        if target is not None and generic_arguments:
+            # Shared schema dictionaries can restore a SchemaSerializer before
+            # its schema is populated during unpickling.
+            schema = deepcopy(schema)
 
         def validate(value: Any, next_validator: Callable[[Any], Any]) -> Any:
             if isinstance(value, Factory):

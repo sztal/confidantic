@@ -117,31 +117,3 @@ assert hash(first) != hash(second)
 Expected: equal runtime objects always have equal hashes, so dictionaries and
 sets can reliably find equal keys. Equality and hashing need compatible
 representations of configuration state.
-
-## Release cleanliness check misses staged and untracked files
-
-`scripts/release.py:check_repository` runs only `git diff --exit-code`, which
-compares tracked working-tree files with the index. A staged change or an
-untracked file passes that check. The release workflow subsequently runs
-`git add --all .` and commits, so unrelated user work can enter a release.
-In dry-run mode the temporary release branch is deleted afterward, potentially
-leaving that work recoverable only through Git history.
-
-Reproduction: in a temporary Git repository, commit a file, modify and stage
-it, and add an untracked file. `git diff --exit-code` exits successfully while
-`git status --porcelain` reports both changes.
-
-Expected: reject any staged, unstaged, or untracked work before switching
-branches or staging release files. The audit narrowed the helper's docstring
-to its actual check; the release workflow still needs a separate source fix.
-
-## Failed release branch creation deletes an existing branch
-
-If `release/<version>` already exists, `git switch --create` fails, but
-`scripts/release.py` still executes its unconditional `finally` cleanup and
-force-deletes that pre-existing branch. This reproduces with `--dry-run` in a
-clean disposable repository.
-
-Expected: reject existing release branches and tags before modification, and
-only clean up resources successfully created by the current invocation.
-Failures after branch creation must retain release work for recovery.

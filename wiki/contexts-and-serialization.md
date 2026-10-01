@@ -20,7 +20,9 @@ with RequestContext.temporary(RequestContext(request_id="request-42")):
 ```
 
 The context uses Python context-local state, so the active value is isolated per
-thread or asynchronous task. See [`examples/context.py`](../examples/context.py)
+thread or asynchronous task. New asynchronous tasks inherit an activation by
+reference: replacing it is local, while mutating the shared configuration can
+still affect other tasks. See [`examples/context.py`](../examples/context.py)
 for persistent and temporary replacements.
 
 ## Portable configuration documents
@@ -59,8 +61,11 @@ and ordinary Pydantic models.
 ## Optional formats and integrations
 
 YAML and TOML serialization helpers are optional layers over the same model dump
-and validation APIs. Install the corresponding package extra before using them;
-[`examples/serialization.py`](../examples/serialization.py) covers both formats.
+and validation APIs. YAML loading and dumping require the `yaml` extra; TOML
+dumping requires the `toml` extra, while TOML loading uses the standard library.
+See the [format examples](../docs/index.md#yaml-and-toml) for both formats and
+[`examples/serialization.py`](../examples/serialization.py) for JSON and Python
+mapping round trips.
 
 Other public integrations include [`Configurable`](../confidantic/configurable.py)
 for configurable classes, [`paths.py`](../confidantic/paths.py) for path-aware

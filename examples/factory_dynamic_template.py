@@ -65,7 +65,7 @@ class HelpRouter(
     """A configuration model for a help router."""
 
     types: bool = False
-    """Whether to show the template help message."""
+    """Whether --help shows the dependency-type selector's options."""
 
 
 help_router = HelpRouter()

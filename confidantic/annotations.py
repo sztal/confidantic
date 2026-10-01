@@ -1,3 +1,5 @@
+"""Pydantic annotations for paths, flexible inputs, and executable directives."""
+
 import json
 import re
 from collections.abc import Callable, Iterator, Mapping
@@ -87,6 +89,9 @@ def _resolve_absolute_path(value: Path) -> Path:
 #: Used without a type parameter, validates values as :class:`pathlib.Path`.
 #: A path annotation can be provided to retain its validation, for example
 #: ``AbsolutePath[FilePath]`` or ``AbsolutePath[DirectoryPath]``.
+#: Resolution follows symlinks and uses the current working directory for relative
+#: inputs; it does not expand ``~``. Existence is required only by a supplied
+#: constraint such as ``FilePath``, which runs before resolution.
 AbsolutePath: TypeAlias = Annotated[P, AfterValidator(_resolve_absolute_path)]
 
 
@@ -103,6 +108,8 @@ def Delimited(sep: str | None = None) -> Any:
     delimiter splitting with whitespace stripped from every item. If all
     attempts fail, the original validation error is raised. Settings-source
     JSON decoding is disabled by ``NoDecode`` so this fallback handles strings.
+    CLI sources may parse list syntax before this validator receives the value.
+    Splitting has no quoting or escape syntax; use JSON for embedded separators.
 
     Parameters
     ----------
@@ -192,6 +199,8 @@ def _dict_like(value: Any, handler: Callable[[Any], Any]) -> Any:
 #: Validate normally first, then try JSON and ``key=value`` parsing for strings.
 #: Pairs may be separated by commas or whitespace before the next key; surrounding
 #: whitespace and trailing commas are stripped. Repeated keys keep the last value.
+#: Only the first ``=`` in each pair separates the key and value. This syntax has
+#: no quoting or escaping; use JSON for values containing pair separators.
 #: Parameterize with a mapping type, such as ``Map[dict[str, int]]``. Settings-source
 #: JSON decoding is disabled, and failed fallbacks re-raise the original error.
 Map: TypeAlias = Annotated[T, NoDecode, WrapValidator(_dict_like)]
@@ -230,6 +239,7 @@ def _call(value: Any, handler: Callable[[Any], Any]) -> Any:
 #: the callable or its import string, optional ``@args``, and keyword arguments in
 #: its remaining entries. Nested arguments are not evaluated. Other values pass
 #: through to normal validation; strings are always treated as import strings.
+#: The called result is validated as T; the directive is not retained for dumping.
 Call: TypeAlias = Annotated[T, WrapValidator(_call)]
 
 
@@ -246,4 +256,6 @@ def _make(value: Any, handler: Callable[[Any], Any]) -> Any:
 #: Mapping values, lists, and tuples are traversed recursively. Nested strings
 #: and callables remain data; top-level strings and callables are called without
 #: arguments. Mapping keys and values returned by calls are not traversed.
+#: The built value is validated as T; dumping uses that value's serialization,
+#: without automatically recovering its original directive.
 Make: TypeAlias = Annotated[T, WrapValidator(_make)]

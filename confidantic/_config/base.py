@@ -183,8 +183,10 @@ class ConfigModelDict(PydanticSettingsConfigDict, total=False):
     nested_model_default_partial_update
         Whether source values may partially update default nested models.
     env_prefix
-        Prefix applied to environment variable names. ``None`` disables process
-        environment parsing, while an empty string enables it without a prefix.
+        Prefix applied to environment variable names at this class's MRO level.
+        ``None`` disables process environment parsing at that level; an empty
+        string enables it without a prefix. Parent levels retain their own
+        settings. Dotenv and secret-file loading are not disabled by ``None``.
     env_prefix_target
         Names to which ``env_prefix`` applies: ``"variable"``, ``"alias"``,
         or ``"all"``.
@@ -198,7 +200,11 @@ class ConfigModelDict(PydanticSettingsConfigDict, total=False):
     env_file_encoding
         Text encoding used to read ``env_file``.
     dotenv_filtering
-        Policy for filtering dotenv variables before validation.
+        Policy for filtering dotenv variables before validation. The default
+        ``"only_existing"`` keeps variables matching declared fields;
+        ``"match_prefix"`` also includes otherwise unused prefixed variables.
+        ``None`` includes unused variables regardless of prefix, subject to
+        the model's extra-field policy during validation.
     env_ignore_empty
         Whether empty environment and dotenv values are ignored.
     env_nested_delimiter
@@ -215,7 +221,10 @@ class ConfigModelDict(PydanticSettingsConfigDict, total=False):
     cli_prog_name
         Program name displayed in command-line help.
     cli_parse_args
-        Whether to parse process arguments, or an explicit argument sequence.
+        ``True`` parses process arguments; a list or tuple supplies explicit
+        arguments. ``None`` and ``False`` disable automatic parsing. Only the
+        most-derived class parses CLI arguments, and notebook-like runtimes
+        suppress automatic parsing even for an explicit argument sequence.
     cli_parse_none_str
         Command-line string value interpreted as ``None``. When
         ``env_parse_none_str`` is set, the settings CLI uses that value instead.
@@ -276,7 +285,8 @@ class ConfigModelDict(PydanticSettingsConfigDict, total=False):
         before importing Confidantic to override this default. An explicit
         per-class setting takes precedence. Empty or invalid environment values
         raise ``ValueError`` during import. Explicit field descriptions remain
-        available when extraction is disabled.
+        available when extraction is disabled and take precedence over attribute
+        docstrings when extraction is enabled.
     docstring_set_attributes_section
         Whether model fields replace an ``@attrs`` marker in the class
         docstring's ``Attributes`` section when a configuration subclass is
@@ -394,9 +404,14 @@ class BaseConfig(BaseSettings):
     See :class:`pydantic_settings.BaseSettings` to determine which settings
     options can also be configured at initialization with a leading underscore.
 
-    Each class is resolved using Pydantic Settings source ordering, followed by
-    defaults declared directly on that class. Remaining values continue through
-    Python's C3 MRO. Nested values retain Pydantic Settings deep-merge behavior.
+    By default, CLI input for the most-derived class has highest priority.
+    Each class then contributes initialization, environment, dotenv, and secret
+    sources, followed by defaults declared directly on that class, in Python's
+    C3 MRO. Source customization can change the ordering within a level. A child
+    default can therefore outrank a parent's environment value. Sources are
+    evaluated even when higher-priority values already fill all fields; final
+    validation uses the most-derived model. Nested mappings are deep-merged.
+    Lists and other non-mapping values are replaced rather than concatenated.
     Partial updates to Pydantic models retain the concrete type and current
     values of the default or lower-priority initialization instance when
     ``nested_model_default_partial_update`` is enabled (the default).
@@ -504,6 +519,12 @@ class BaseConfig(BaseSettings):
     def find_dotenv(cls) -> str:
         """Locate the dotenv file used when automatic discovery is enabled.
 
+        Delegates to ``dotenv.find_dotenv()`` with its default search policy.
+        In ordinary script execution, the search starts at this method's source
+        directory in Confidantic and walks upward. Interactive or debugger
+        execution can instead start at the current working directory. Override
+        this method to choose an application-specific search location.
+
         Returns
         -------
         str
@@ -562,8 +583,10 @@ class BaseConfig(BaseSettings):
             configuration class's identifier, or a Factory's target identifier.
             Load directives through a Make annotation; :meth:`model_validate_yaml`
             and :meth:`model_validate_toml` do not evaluate a root directive.
-            Targets must be importable. Use ``serialize_as_any=True`` when
-            subclass-only fields must be retained.
+            Targets must be importable. Factory dumps currently include fields
+            beyond ``factory_fields``; exclude any unsupported constructor
+            keywords and ensure aliases match the constructor. Use
+            ``serialize_as_any=True`` when subclass-only fields must be retained.
         exclude_none, exclude_computed_fields, round_trip, warnings, fallback
             Options forwarded to :meth:`model_dump`.
         serialize_as_any, polymorphic_serialization
@@ -645,8 +668,10 @@ class BaseConfig(BaseSettings):
             configuration class's identifier, or a Factory's target identifier.
             Load directives through a Make annotation; :meth:`model_validate_yaml`
             and :meth:`model_validate_toml` do not evaluate a root directive.
-            Targets must be importable. Use ``serialize_as_any=True`` when
-            subclass-only fields must be retained.
+            Targets must be importable. Factory dumps currently include fields
+            beyond ``factory_fields``; exclude any unsupported constructor
+            keywords and ensure aliases match the constructor. Use
+            ``serialize_as_any=True`` when subclass-only fields must be retained.
         exclude_none, exclude_computed_fields, round_trip, warnings, fallback
             Options forwarded to :meth:`model_dump`.
         serialize_as_any, polymorphic_serialization
@@ -661,6 +686,8 @@ class BaseConfig(BaseSettings):
         ------
         ImportError
             If tomli-w is not installed.
+        TypeError
+            If dumped values cannot be represented in TOML, including ``None``.
         """
         try:
             tomli_w = cast(_TomlModule, import_module("tomli_w"))
@@ -722,6 +749,17 @@ class BaseConfig(BaseSettings):
         ------
         ImportError
             If PyYAML is not installed.
+        yaml.YAMLError
+            If the YAML document cannot be parsed by ``safe_load``.
+        ValidationError
+            If the parsed value or resolved settings fail model validation.
+
+        Notes
+        -----
+        Options are forwarded to ``model_validate``, but settings construction
+        currently loses per-call ``strict``, ``extra``, and validation ``context``
+        for field validation. Configure ``strict`` and ``extra`` on the model
+        when required; passing them here does not reliably override that policy.
         """
         try:
             yaml = cast(_YamlModule, import_module("yaml"))
@@ -769,6 +807,20 @@ class BaseConfig(BaseSettings):
         -------
         Self
             The validated configuration.
+
+        Raises
+        ------
+        tomllib.TOMLDecodeError
+            If the document is not valid TOML.
+        ValidationError
+            If the parsed value or resolved settings fail model validation.
+
+        Notes
+        -----
+        Options are forwarded to ``model_validate``, but settings construction
+        currently loses per-call ``strict``, ``extra``, and validation ``context``
+        for field validation. Configure ``strict`` and ``extra`` on the model
+        when required; passing them here does not reliably override that policy.
         """
         return cls.model_validate(
             tomllib.loads(toml_data),
@@ -786,6 +838,8 @@ class BaseConfig(BaseSettings):
         Without updates this is a structural copy. With updates, all current
         field and extra values are revalidated as a new instance, so validators
         may rebuild containers and configured settings sources may participate.
+        Non-idempotent validators can change fields that were not updated.
+        Private attributes are initialized afresh during reconstruction.
 
         Parameters
         ----------
@@ -796,6 +850,31 @@ class BaseConfig(BaseSettings):
         -------
         Self
             A shallow copy of this configuration, with any updates applied.
+
+        Notes
+        -----
+        Updated declared fields are marked as explicitly set and attributed to
+        initialization; other fields retain their previous metadata. This can
+        currently leave stale provenance if a settings source replaces a value
+        during reconstruction. Newly added extras are currently omitted from
+        ``model_fields_set``.
+
+        Examples
+        --------
+        >>> from pydantic import field_validator
+        >>> class Config(BaseConfig):
+        ...     count: int = 1
+        ...     label: str = "original"
+        ...
+        ...     @field_validator("count")
+        ...     @classmethod
+        ...     def double(cls, value: int) -> int:
+        ...         return value * 2
+        >>> config = Config()
+        >>> config.count, config.copy().count
+        (2, 2)
+        >>> config.copy(label="updated").count
+        4
         """
         copied = shallow_copy(self)
         return copied if not kwargs else copied._copy_with_updates(kwargs)
@@ -805,6 +884,8 @@ class BaseConfig(BaseSettings):
 
         Existing state is deep-copied first; supplied updates then follow the
         revalidation behavior of :meth:`copy` and are not themselves deep-copied.
+        With updates, reconstruction initializes private attributes afresh and
+        has the same metadata limitations as :meth:`copy`.
 
         Parameters
         ----------
@@ -821,6 +902,12 @@ class BaseConfig(BaseSettings):
 
     def mutate(self, **kwargs: Any) -> Self:
         """Update this configuration in place with validated field values.
+
+        With updates, all current fields and extras undergo the reconstruction
+        described by :meth:`copy`, including settings-source participation and
+        its metadata limitations. The resulting fields, extras, and metadata
+        replace those on this instance; existing private attributes are retained.
+        With no updates, return the instance without validation.
 
         Parameters
         ----------
@@ -892,6 +979,14 @@ class BaseConfig(BaseSettings):
         ValueError
             If resolution traverses a cycle. Nested validation and target
             constructor errors also propagate.
+
+        Notes
+        -----
+        Resolution rebuilds traversed containers and Pydantic models but does
+        not deep-copy arbitrary objects. Shared factories are resolved separately
+        at each occurrence. Rebuilt models initialize private state and source
+        metadata anew. Self-referential model annotations currently cause a
+        ``RecursionError`` during class generation even when values are acyclic.
         """
         from confidantic._config.factory import (
             _contains_factory,
@@ -932,6 +1027,8 @@ class BaseConfig(BaseSettings):
             Read-only view of field provenance for this instance. If any
             configured source is a bare callable rather than a settings-source
             instance, automatic provenance tracking returns an empty mapping.
+            Extras and computed fields are not tracked. Validated updates use
+            the metadata rules and current limitations described in :meth:`copy`.
         """
         return MappingProxyType(self._model_field_sources)
 
@@ -989,9 +1086,11 @@ class BaseConfig(BaseSettings):
         describe
             Whether to include the ``Description`` column.
         colors
-            Whether to enable Rich colors and text styles. Rendered output still
-            respects Rich terminal detection and the ``NO_COLOR`` environment
-            variable.
+            Whether to enable Rich colors and text styles. For printed and
+            string output, ``True`` forces terminal rendering, including ANSI
+            escapes when supported. Rich still honors environment controls such
+            as ``NO_COLOR`` and ``TERM``. A returned table is styled but its
+            eventual rendering is controlled by the caller's console.
 
         Returns
         -------
@@ -1068,9 +1167,11 @@ class BaseConfig(BaseSettings):
         describe
             Whether to include the ``Description`` column.
         colors
-            Whether to enable Rich colors and text styles. Rendered output still
-            respects Rich terminal detection and the ``NO_COLOR`` environment
-            variable.
+            Whether to enable Rich colors and text styles. For printed and
+            string output, ``True`` forces terminal rendering, including ANSI
+            escapes when supported. Rich still honors environment controls such
+            as ``NO_COLOR`` and ``TERM``. A returned table is styled but its
+            eventual rendering is controlled by the caller's console.
         types
             Whether to include the ``Type`` column.
 

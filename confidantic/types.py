@@ -21,7 +21,8 @@ class FrozenDict(Mapping[Key, Value], Generic[Key, Value]):
     Notes
     -----
     Immutability is shallow: values are retained by reference and may themselves
-    be mutable. Equality follows :class:`collections.abc.Mapping` semantics.
+    be mutable. Iteration preserves the input mapping's iteration order, while
+    equality follows :class:`collections.abc.Mapping` semantics and ignores order.
     Calling :func:`hash` raises :class:`TypeError` unless every key and value
     is hashable.
     """

@@ -19,7 +19,9 @@ from typing import (
     Annotated,
     Any,
     ClassVar,
+    ForwardRef,
     Generic,
+    NewType,
     Self,
     TypeVar,
     Union,
@@ -51,6 +53,7 @@ from confidantic._config.base import (
     _DISABLE_CLI_PARSE_ARGS,
     BaseConfig,
     _CopiedDefault,
+    _settings_schema,
 )
 
 __all__ = ("Factory",)
@@ -75,6 +78,12 @@ def _is_factory_type(value: Any) -> bool:
     return isinstance(value, type) and issubclass(value, Factory)
 
 
+def _serialize_factory(value: Any, handler: Any) -> Any:
+    if _is_factory_type(value):
+        return value
+    return handler(value)
+
+
 class Factory(BaseConfig, Generic[T]):
     """Configuration generated from a target type's constructor.
 
@@ -86,9 +95,8 @@ class Factory(BaseConfig, Generic[T]):
     generated factory instances and target classes to generated factory classes.
     Existing compatible factory instances and classes are retained without
     field revalidation. Mappings undergo model validation. Strict validation
-    does not perform the target-class or target-instance conversions. Its
-    current fallback, however, accepts existing factory instances without
-    checking target compatibility; use lax validation for that check.
+    does not perform the target-class or target-instance conversions and rejects
+    factory classes. Both modes check the target compatibility of instances.
 
     Attributes
     ----------
@@ -98,8 +106,9 @@ class Factory(BaseConfig, Generic[T]):
         Constructor field names forwarded as keyword arguments during
         resolution. Additional fields declared on a factory subclass are not
         forwarded to the target by :meth:`model_resolve`. Make serialization
-        currently includes those additional fields, so exclude them from a
-        directive dump when the target constructor does not accept them.
+        includes only constructor fields and uses their canonical keyword names.
+        Serialization filters and field serializers still apply; ambiguous
+        serialized constructor keys raise an error.
     """
 
     factory_target: ClassVar[type[T]]
@@ -115,31 +124,33 @@ class Factory(BaseConfig, Generic[T]):
         generic_arguments = getattr(cls, "__pydantic_generic_metadata__", {}).get(
             "args", ()
         )
-        schema = handler(
+        schema = _settings_schema(
             cls.model_from(target)
             if target is not None and generic_arguments
-            else source_type
+            else source_type,
+            handler,
         )
         if target is not None and generic_arguments:
             # Shared schema dictionaries can restore a SchemaSerializer before
             # its schema is populated during unpickling.
             schema = deepcopy(schema)
 
+        def check_target(value: Any) -> Any:
+            value_target = _factory_target(
+                type(value) if isinstance(value, Factory) else value
+            )
+            if target is not None and (
+                value_target is None or not issubclass(value_target, target)
+            ):
+                raise PydanticCustomError(
+                    "factory",
+                    "Input should be a Factory for the expected target type",
+                )
+            return value
+
         def validate(value: Any, next_validator: Callable[[Any], Any]) -> Any:
-            if isinstance(value, Factory):
-                if target is not None and not issubclass(value.factory_target, target):
-                    raise PydanticCustomError(
-                        "factory",
-                        "Input should be a Factory for the expected target type",
-                    )
-                return value
-            if _is_factory_type(value):
-                if target is not None and not issubclass(value.factory_target, target):
-                    raise PydanticCustomError(
-                        "factory",
-                        "Input should be a Factory for the expected target type",
-                    )
-                return value
+            if isinstance(value, Factory) or _is_factory_type(value):
+                return check_target(value)
             if isinstance(value, Mapping):
                 return next_validator(value)
             try:
@@ -163,7 +174,13 @@ class Factory(BaseConfig, Generic[T]):
             [schema, core_schema.is_instance_schema(factory_base)],
             mode="left_to_right",
         )
-        return core_schema.lax_or_strict_schema(lax_schema, strict_schema)
+        return core_schema.lax_or_strict_schema(
+            lax_schema,
+            core_schema.no_info_after_validator_function(check_target, strict_schema),
+            serialization=core_schema.wrap_serializer_function_ser_schema(
+                _serialize_factory, schema=schema
+            ),
+        )
 
     @classmethod
     @overload
@@ -229,9 +246,9 @@ class Factory(BaseConfig, Generic[T]):
             value remain unchanged. Matching union branches are replaced while
             unrelated alternatives are retained. Selection examines each
             parameter's whole default, not elements inside collection defaults.
-            Callable typing aliases such as ``typing.Optional[T]`` and
-            ``Annotated[T, ...]`` are currently mistaken for predicates; use a
-            concrete type, a ``T | None`` union, or an explicit predicate instead.
+            Callable typing forms, including ``typing.Optional[T]``,
+            ``Annotated[T, ...]``, and ``NewType``, use type matching without
+            invoking their constructors.
         *args, **kwargs
             Arguments used to construct ``source`` when it is a type. The
             resulting instance values become generated defaults. With no
@@ -339,9 +356,9 @@ class Factory(BaseConfig, Generic[T]):
         can supply invalid scalar values. Traversed containers and models are
         rebuilt, while arbitrary objects remain shared. Repeated occurrences
         of the same factory invoke its target separately; aliasing is not
-        preserved. Self-referential Pydantic model annotations currently cause
-        ``RecursionError`` during resolved class generation, even for acyclic
-        values.
+        preserved. Self-referential and mutually recursive Pydantic model
+        annotations are supported for acyclic values. Generated model types are
+        reused within the resolution call without modifying the original types.
         """
         token = _DISABLE_CLI_PARSE_ARGS.set(True)
         try:
@@ -460,7 +477,7 @@ def _matches_factory_selector(
 ) -> bool:
     if isinstance(value, Factory) or _is_factory_type(value):
         return False
-    if isinstance(selector, type):
+    if isinstance(selector, (type, NewType)) or get_origin(selector) is not None:
         return _matches_factory_type_hint(value, selector)
     if callable(selector):
         return bool(selector(value))
@@ -510,13 +527,18 @@ def _enter_resolution(value: Any, active: set[int]) -> int:
     return identity
 
 
-def _resolved_annotation(annotation: Any) -> Any:
+def _resolved_annotation(
+    annotation: Any,
+    resolve_model: Callable[[type[BaseModel]], Any] | None = None,
+) -> Any:
+    if resolve_model is None:
+        resolve_model = _ResolutionTypes().resolve
     if isinstance(annotation, type):
         if issubclass(annotation, Factory):
             target = _factory_target(annotation)
             return target if target is not None else annotation
         if issubclass(annotation, BaseModel):
-            return _resolved_model_type(annotation)
+            return resolve_model(annotation)
         return annotation
 
     origin = get_origin(annotation)
@@ -524,7 +546,13 @@ def _resolved_annotation(annotation: Any) -> Any:
     if origin is None or not arguments:
         return annotation
 
-    resolved_arguments = tuple(_resolved_annotation(argument) for argument in arguments)
+    if origin is Annotated:
+        return Annotated[
+            _resolved_annotation(arguments[0], resolve_model), *arguments[1:]
+        ]
+    resolved_arguments = tuple(
+        _resolved_annotation(argument, resolve_model) for argument in arguments
+    )
     if resolved_arguments == arguments:
         return annotation
     copy_with = getattr(annotation, "copy_with", None)
@@ -541,28 +569,79 @@ def _resolved_field(field: FieldInfo, annotation: Any) -> FieldInfo:
     return resolved
 
 
-def _resolved_model_type(
-    source: type[BaseModel],
-    *,
-    force: bool = False,
-    name: str | None = None,
-) -> type[BaseModel]:
-    fields: dict[str, tuple[Any, Any]] = {}
-    for field_name, field in source.model_fields.items():
-        annotation = _resolved_annotation(field.annotation)
-        if annotation != field.annotation:
-            fields[field_name] = (annotation, _resolved_field(field, annotation))
-    if not fields and not force:
-        return source
-    return cast(
-        type[BaseModel],
-        create_model(
-            name or f"{source.__name__}Resolved",
-            __base__=source,
-            __module__=source.__module__,
-            **cast(dict[str, Any], fields),
-        ),
-    )
+class _ResolutionTypes:
+    """Build each required model type once within a resolution traversal."""
+
+    def __init__(self) -> None:
+        self.models: dict[type[BaseModel], type[BaseModel]] = {}
+
+    def resolve(
+        self,
+        source: type[BaseModel],
+        *,
+        force: bool = False,
+        name: str | None = None,
+    ) -> type[BaseModel]:
+        if source in self.models:
+            return self.models[source]
+        nodes = [source]
+        dependencies: dict[type[BaseModel], set[type[BaseModel]]] = {}
+        changed = {source} if force else set()
+        for node in nodes:
+            references: set[type[BaseModel]] = set()
+
+            def collect(
+                model: type[BaseModel], references: set[type[BaseModel]] = references
+            ) -> type[BaseModel]:
+                references.add(model)
+                if model not in nodes and model not in self.models:
+                    nodes.append(model)
+                return self.models.get(model, model)
+
+            for field in node.model_fields.values():
+                if _resolved_annotation(field.annotation, collect) != field.annotation:
+                    changed.add(node)
+            dependencies[node] = references
+        while True:
+            affected = {node for node, refs in dependencies.items() if refs & changed}
+            if affected <= changed:
+                break
+            changed.update(affected)
+        if source not in changed:
+            return source
+
+        names = {
+            node: f"_ConfidanticResolved_{id(self)}_{index}"
+            for index, node in enumerate(nodes)
+            if node in changed
+        }
+
+        def reference(model: type[BaseModel]) -> Any:
+            if model in names:
+                return ForwardRef(names[model])
+            return self.models.get(model, model)
+
+        for node in nodes:
+            if node not in changed:
+                continue
+            fields: dict[str, Any] = {}
+            for field_name, field in node.model_fields.items():
+                annotation = _resolved_annotation(field.annotation, reference)
+                if annotation != field.annotation:
+                    fields[field_name] = (
+                        annotation,
+                        _resolved_field(field, annotation),
+                    )
+            self.models[node] = create_model(
+                name if node is source and name else f"{node.__name__}Resolved",
+                __base__=node,
+                __module__=node.__module__,
+                **fields,
+            )
+        namespace = {key: self.models[node] for node, key in names.items()}
+        for node in names:
+            self.models[node].model_rebuild(force=True, _types_namespace=namespace)
+        return self.models[source]
 
 
 def _resolve_factory(
@@ -570,12 +649,15 @@ def _resolve_factory(
     active: set[int],
     *,
     recursive: bool = True,
+    types: _ResolutionTypes | None = None,
 ) -> Any:
+    if types is None:
+        types = _ResolutionTypes()
     identity = _enter_resolution(config, active)
     try:
         values = {
             field_name: _resolve_value(
-                getattr(config, field_name), active, recursive=recursive
+                getattr(config, field_name), active, recursive=recursive, types=types
             )
             for field_name in config.factory_fields
         }
@@ -589,12 +671,15 @@ def _resolve_model_instance(
     active: set[int],
     *,
     recursive: bool = True,
+    types: _ResolutionTypes | None = None,
     name: str | None = None,
 ) -> BaseModel:
+    if types is None:
+        types = _ResolutionTypes()
     identity = _enter_resolution(model, active)
     try:
         model_type = type(model)
-        resolved_type = _resolved_model_type(model_type, force=True, name=name)
+        resolved_type = types.resolve(model_type, force=True, name=name)
         values = {}
         for field_name in model_type.model_fields:
             value = getattr(model, field_name)
@@ -603,14 +688,16 @@ def _resolve_model_instance(
                 factory = value()
             if factory is not None:
                 values[field_name] = _resolve_factory(
-                    factory, active, recursive=recursive
+                    factory, active, recursive=recursive, types=types
                 )
             else:
-                values[field_name] = _resolve_value(value, active, recursive=recursive)
+                values[field_name] = _resolve_value(
+                    value, active, recursive=recursive, types=types
+                )
         if model.model_extra:
             values.update(
                 {
-                    key: _resolve_value(value, active, recursive=recursive)
+                    key: _resolve_value(value, active, recursive=recursive, types=types)
                     for key, value in model.model_extra.items()
                 }
             )
@@ -653,26 +740,29 @@ def _resolve_value(
     active: set[int],
     *,
     recursive: bool = True,
+    types: _ResolutionTypes | None = None,
 ) -> Any:
+    if types is None:
+        types = _ResolutionTypes()
     if isinstance(value, Factory):
         if not recursive:
             return value
-        return _resolve_factory(value, active, recursive=recursive)
+        return _resolve_factory(value, active, recursive=recursive, types=types)
     if _is_factory_type(value):
         if not recursive:
             return value
-        return _resolve_factory(value(), active, recursive=recursive)
+        return _resolve_factory(value(), active, recursive=recursive, types=types)
     if isinstance(value, BaseModel):
         if not recursive:
             return value
-        return _resolve_model_instance(value, active, recursive=recursive)
+        return _resolve_model_instance(value, active, recursive=recursive, types=types)
     if isinstance(value, Mapping):
         identity = _enter_resolution(value, active)
         try:
             return {
-                _resolve_value(key, active, recursive=recursive): _resolve_value(
-                    item, active, recursive=recursive
-                )
+                _resolve_value(
+                    key, active, recursive=recursive, types=types
+                ): _resolve_value(item, active, recursive=recursive, types=types)
                 for key, item in value.items()
             }
         finally:
@@ -680,28 +770,36 @@ def _resolve_value(
     if isinstance(value, list):
         identity = _enter_resolution(value, active)
         try:
-            return [_resolve_value(item, active, recursive=recursive) for item in value]
+            return [
+                _resolve_value(item, active, recursive=recursive, types=types)
+                for item in value
+            ]
         finally:
             active.remove(identity)
     if isinstance(value, tuple):
         identity = _enter_resolution(value, active)
         try:
             return tuple(
-                _resolve_value(item, active, recursive=recursive) for item in value
+                _resolve_value(item, active, recursive=recursive, types=types)
+                for item in value
             )
         finally:
             active.remove(identity)
     if isinstance(value, set):
         identity = _enter_resolution(value, active)
         try:
-            return {_resolve_value(item, active, recursive=recursive) for item in value}
+            return {
+                _resolve_value(item, active, recursive=recursive, types=types)
+                for item in value
+            }
         finally:
             active.remove(identity)
     if isinstance(value, frozenset):
         identity = _enter_resolution(value, active)
         try:
             return frozenset(
-                _resolve_value(item, active, recursive=recursive) for item in value
+                _resolve_value(item, active, recursive=recursive, types=types)
+                for item in value
             )
         finally:
             active.remove(identity)

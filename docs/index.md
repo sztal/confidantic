@@ -199,10 +199,12 @@ data = config.model_dump(context={"make": True})
 
 Nested `BaseConfig` instances receive their own directive; ordinary Pydantic
 models do not. A `Factory` writes its target class's identifier, so loading
-its directive calls the target constructor. Factory dumps currently also include
-subclass-only fields, extras, and computed fields; exclude any that the target
-does not accept, and use constructor keyword names rather than incompatible
-serialization aliases. Identifiers must resolve to
+its directive calls the target constructor. Factory directives contain only
+`factory_fields`, using canonical constructor keyword names even when
+`by_alias=True` or `serialize_by_alias` is configured. Field serializers and
+include/exclude filters still apply. Ambiguous serialized constructor keys and
+serializer failures raise errors instead of producing unusable directives.
+Identifiers must resolve to
 importable objects; local and unregistered generated classes are not portable.
 Use `serialize_as_any=True` when fields annotated with base classes must retain
 subclass-only data.
@@ -251,10 +253,21 @@ lists or mappings; those require preprocessing. The YAML loader requires the
 YAML extra; TOML loading uses Python's standard library. Both loaders parse into
 Python values and forward their validation options to `model_validate()`.
 Configured settings sources can still participate in construction, so loading
-a document is not a source-isolated round trip. The current settings constructor
-also loses per-call `strict`, `extra`, and field-validation `context` options.
-Set `strict` and `extra` in the model configuration when needed; passing these
-options to a loader does not reliably override the class policy.
+a document can use values from sources in addition to the document itself.
+Per-call `strict`, `extra`, and field-validation `context` apply to validation of
+the merged settings. Source assembly precedes user model validators.
+
+Subclasses defining their own `__init__` retain Pydantic's custom-constructor
+limitations on per-call validation options. The validation wrapper also retains
+the upstream strict-JSON limitation for representations such as date strings
+and tuple arrays: these can be rejected under `model_validate_json(strict=True)`.
+YAML and TOML use Python-mode validation.
+
+Partial updates to existing nested model instances still perform a separate
+validation pass without forwarding per-call options. Disable
+`nested_model_default_partial_update` when those options must apply throughout
+nested validation; this also uses the annotated model type instead of retaining
+a baseline instance's concrete subclass.
 
 The loaders do not evaluate a root `@call` directive. For output produced with
 `context={"make": True}`, parse the document and validate it through `Make`:

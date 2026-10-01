@@ -1,0 +1,1 @@
+Preserve per-call strict, extra, and context options by assembling settings inside the active Pydantic validation schema, before user model validators. Custom constructors, strict JSON representations, and nested partial reconstruction retain their documented limitations.

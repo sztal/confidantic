@@ -2,11 +2,12 @@
 
 import os
 import tomllib
-from collections.abc import Collection, Mapping
+from collections.abc import Callable, Collection, Mapping
 from contextvars import ContextVar
 from copy import copy as shallow_copy
 from copy import deepcopy as deep_copy
 from dataclasses import dataclass
+from functools import wraps
 from importlib import import_module
 from inspect import get_annotations, signature
 from io import StringIO
@@ -27,9 +28,12 @@ from typing import (
 
 from dotenv import find_dotenv
 from pydantic import (
+    AliasChoices,
+    AliasPath,
     BaseModel,
     ConfigDict,
     Discriminator,
+    GetCoreSchemaHandler,
     PrivateAttr,
     PydanticUserError,
     SerializationInfo,
@@ -41,6 +45,7 @@ from pydantic import (
 )
 from pydantic._internal._config import config_keys
 from pydantic.fields import FieldInfo
+from pydantic_core import CoreSchema, PydanticUndefined, core_schema
 from pydantic_settings import (
     BaseSettings,
     CliSettingsSource,
@@ -161,6 +166,114 @@ class _FactoryCliHelpDisabledSettingsSource(_FactoryCliSettingsSource):
 class _CliHelpDisabledSettingsSource(CliSettingsSource[Any]):
     def _add_default_help(self) -> None:
         pass
+
+
+def _validate_settings(
+    cls: type["BaseConfig"], value: Any, handler: Callable[[Any], Any]
+) -> Any:
+    """Keep context-local source assembly behind an importable callback."""
+    if not isinstance(value, Mapping):
+        return handler(value)
+    kwargs = dict(value)
+    if _DISABLE_CLI_PARSE_ARGS.get() or is_runtime_jupyterlike():
+        kwargs["_cli_parse_args"] = False
+
+    config_options = {
+        name: kwargs.pop(f"_{name}")
+        for name in _CUSTOM_CONFIG_KEYS
+        if f"_{name}" in kwargs
+    }
+
+    build_sources = kwargs.pop("_build_sources", None)
+    if build_sources is None:
+        option_names = signature(cls._settings_init_sources).parameters.keys()
+        source_options = {
+            key: kwargs.pop(key)
+            for key in tuple(kwargs)
+            if key in option_names and key != "_init_kwargs"
+        }
+        build_sources = cls._settings_init_sources(
+            **source_options,
+            _init_kwargs={
+                **kwargs,
+                "__confidantic_config_options": config_options,
+            },
+        )
+
+    token = _NESTED_MODEL_BASELINES.set({})
+    try:
+        result = handler(cls._settings_build_values(*build_sources))
+    finally:
+        _NESTED_MODEL_BASELINES.reset(token)
+
+    sources, _ = build_sources
+    resolved_source = next(
+        (
+            source
+            for source in reversed(sources)
+            if isinstance(source, _ResolvedSettingsSource)
+        ),
+        None,
+    )
+    if resolved_source is not None:
+        result._model_field_sources = resolved_source.field_sources.copy()
+        result._model_init_fields = resolved_source.init_fields.copy()
+    return result
+
+
+def _settings_schema(source: Any, handler: GetCoreSchemaHandler) -> CoreSchema:
+    schema = handler(source)
+    if schema["type"] == "definition-ref":
+        return schema
+    model_schema = dict(schema)
+    # Recursive references must include source assembly, not just the inner model.
+    reference = model_schema.pop("ref", None)
+    return core_schema.no_info_wrap_validator_function(
+        source._validate_settings, cast(CoreSchema, model_schema), ref=reference
+    )
+
+
+def _track_init_settings(method: Callable[..., Any]) -> Callable[..., Any]:
+    @wraps(method)
+    def tracked(*args: Any, **kwargs: Any) -> Any:
+        # Mark the actual source supplied to the customization hook, rather
+        # than treating every user-created InitSettingsSource as carried input.
+        init_settings = kwargs["init_settings"]
+        inputs = dict(init_settings.init_kwargs)
+        sources = method(*args, **kwargs)
+        init_settings._confidantic_init_input = {
+            key
+            for key, value in inputs.items()
+            if key in init_settings.init_kwargs
+            and init_settings.init_kwargs[key] is value
+        }
+        return sources
+
+    cast(Any, tracked)._confidantic_tracks_init = True
+    return tracked
+
+
+def _updated_fields(cls: type[BaseSettings], updates: Mapping[str, Any]) -> set[str]:
+    case_sensitive = cls.model_config.get("case_sensitive", False)
+    normalized = {
+        key if case_sensitive else key.lower(): value for key, value in updates.items()
+    }
+    updated = set()
+    for name, field in cls.model_fields.items():
+        alias = field.validation_alias
+        aliases = alias.choices if isinstance(alias, AliasChoices) else [alias]
+        for candidate in [name, *aliases]:
+            path = candidate.path if isinstance(candidate, AliasPath) else [candidate]
+            if not isinstance(path[0], str):
+                continue
+            root = path[0] if case_sensitive else path[0].lower()
+            if (
+                AliasPath(root, *path[1:]).search_dict_for_path(normalized)
+                is not PydanticUndefined
+            ):
+                updated.add(name)
+                break
+    return updated
 
 
 class _InitSettingsSource(InitSettingsSource):
@@ -420,6 +533,13 @@ class BaseConfig(BaseSettings):
     dotenv loading and CLI parsing are opt-in. Notebook-like runtimes suppress
     automatic CLI parsing.
 
+    Validation of merged settings retains per-call ``strict``, ``extra``, and
+    ``context`` options. Custom ``__init__`` methods retain Pydantic's limitations.
+    The schema wrapper also retains Pydantic's strict-JSON limitation for inputs
+    such as date strings and tuple arrays; strict JSON validation can reject
+    those representations. Partial updates to existing nested models validate
+    separately and do not yet forward per-call options to that nested pass.
+
     Resolved instances expose each field's source class and the configuration
     class for which that source was constructed through ``model_field_sources``.
 
@@ -462,50 +582,21 @@ class BaseConfig(BaseSettings):
     )
 
     _model_field_sources: dict[str, _FieldSource] = PrivateAttr(default_factory=dict)
+    _model_init_fields: set[str] = PrivateAttr(default_factory=set)
 
-    def __init__(self, **kwargs: Any) -> None:
-        if _DISABLE_CLI_PARSE_ARGS.get() or is_runtime_jupyterlike():
-            kwargs["_cli_parse_args"] = False
+    # Retain Pydantic's native initialization path, so model_validate and
+    # TypeAdapter keep their active strict/extra/context options.
+    __init__ = BaseModel.__init__
 
-        config_options = {
-            name: kwargs.pop(f"_{name}")
-            for name in _CUSTOM_CONFIG_KEYS
-            if f"_{name}" in kwargs
-        }
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls, source_type: Any, handler: GetCoreSchemaHandler
+    ) -> CoreSchema:
+        return _settings_schema(source_type, handler)
 
-        build_sources = kwargs.pop("_build_sources", None)
-        if build_sources is None:
-            option_names = signature(self._settings_init_sources).parameters.keys()
-            source_options = {
-                key: kwargs.pop(key)
-                for key in tuple(kwargs)
-                if key in option_names and key != "_init_kwargs"
-            }
-            build_sources = self._settings_init_sources(
-                **source_options,
-                _init_kwargs={
-                    **kwargs,
-                    "__confidantic_config_options": config_options,
-                },
-            )
-
-        token = _NESTED_MODEL_BASELINES.set({})
-        try:
-            super().__init__(_build_sources=build_sources)
-        finally:
-            _NESTED_MODEL_BASELINES.reset(token)
-
-        sources, _ = build_sources
-        resolved_source = next(
-            (
-                source
-                for source in reversed(sources)
-                if isinstance(source, _ResolvedSettingsSource)
-            ),
-            None,
-        )
-        if resolved_source is not None:
-            self._model_field_sources = resolved_source.field_sources.copy()
+    @classmethod
+    def _validate_settings(cls, value: Any, handler: Callable[[Any], Any]) -> Any:
+        return _validate_settings(cls, value, handler)
 
     def __copy__(self) -> Self:
         """Return a shallow structural copy of this configuration."""
@@ -536,6 +627,21 @@ class BaseConfig(BaseSettings):
     @classmethod
     def __pydantic_init_subclass__(cls, **kwargs: Any) -> None:
         super().__pydantic_init_subclass__(**kwargs)
+        descriptor = next(
+            base.__dict__["settings_customise_sources"]
+            for base in cls.__mro__
+            if "settings_customise_sources" in base.__dict__
+        )
+        method = (
+            descriptor.__func__
+            if isinstance(descriptor, (classmethod, staticmethod))
+            else descriptor
+        )
+        if not getattr(method, "_confidantic_tracks_init", False):
+            tracked: Any = _track_init_settings(method)
+            if isinstance(descriptor, (classmethod, staticmethod)):
+                tracked = type(descriptor)(tracked)
+            cast(Any, cls).settings_customise_sources = tracked
         if (
             cls.model_config.get("docstring_set_attributes_section") is False
             or cls.__doc__ is None
@@ -583,10 +689,11 @@ class BaseConfig(BaseSettings):
             configuration class's identifier, or a Factory's target identifier.
             Load directives through a Make annotation; :meth:`model_validate_yaml`
             and :meth:`model_validate_toml` do not evaluate a root directive.
-            Targets must be importable. Factory dumps currently include fields
-            beyond ``factory_fields``; exclude any unsupported constructor
-            keywords and ensure aliases match the constructor. Use
-            ``serialize_as_any=True`` when subclass-only fields must be retained.
+            Targets must be importable. Factory directives contain only
+            ``factory_fields``, using constructor keyword names even when
+            aliases are enabled. Ambiguous serialized constructor keys raise
+            an error. For other models, use ``serialize_as_any=True`` when
+            subclass-only fields must be retained.
         exclude_none, exclude_computed_fields, round_trip, warnings, fallback
             Options forwarded to :meth:`model_dump`.
         serialize_as_any, polymorphic_serialization
@@ -668,10 +775,11 @@ class BaseConfig(BaseSettings):
             configuration class's identifier, or a Factory's target identifier.
             Load directives through a Make annotation; :meth:`model_validate_yaml`
             and :meth:`model_validate_toml` do not evaluate a root directive.
-            Targets must be importable. Factory dumps currently include fields
-            beyond ``factory_fields``; exclude any unsupported constructor
-            keywords and ensure aliases match the constructor. Use
-            ``serialize_as_any=True`` when subclass-only fields must be retained.
+            Targets must be importable. Factory directives contain only
+            ``factory_fields``, using constructor keyword names even when
+            aliases are enabled. Ambiguous serialized constructor keys raise
+            an error. For other models, use ``serialize_as_any=True`` when
+            subclass-only fields must be retained.
         exclude_none, exclude_computed_fields, round_trip, warnings, fallback
             Options forwarded to :meth:`model_dump`.
         serialize_as_any, polymorphic_serialization
@@ -756,10 +864,11 @@ class BaseConfig(BaseSettings):
 
         Notes
         -----
-        Options are forwarded to ``model_validate``, but settings construction
-        currently loses per-call ``strict``, ``extra``, and validation ``context``
-        for field validation. Configure ``strict`` and ``extra`` on the model
-        when required; passing them here does not reliably override that policy.
+        Per-call options apply to validation of the merged settings. A subclass
+        with its own ``__init__`` retains Pydantic's custom-constructor limitations.
+        Partial updates to an existing nested model still validate that model
+        separately without forwarding these options; disable
+        ``nested_model_default_partial_update`` when this distinction matters.
         """
         try:
             yaml = cast(_YamlModule, import_module("yaml"))
@@ -817,10 +926,11 @@ class BaseConfig(BaseSettings):
 
         Notes
         -----
-        Options are forwarded to ``model_validate``, but settings construction
-        currently loses per-call ``strict``, ``extra``, and validation ``context``
-        for field validation. Configure ``strict`` and ``extra`` on the model
-        when required; passing them here does not reliably override that policy.
+        Per-call options apply to validation of the merged settings. A subclass
+        with its own ``__init__`` retains Pydantic's custom-constructor limitations.
+        Partial updates to an existing nested model still validate that model
+        separately without forwarding these options; disable
+        ``nested_model_default_partial_update`` when this distinction matters.
         """
         return cls.model_validate(
             tomllib.loads(toml_data),
@@ -853,11 +963,11 @@ class BaseConfig(BaseSettings):
 
         Notes
         -----
-        Updated declared fields are marked as explicitly set and attributed to
-        initialization; other fields retain their previous metadata. This can
-        currently leave stale provenance if a settings source replaces a value
-        during reconstruction. Newly added extras are currently omitted from
-        ``model_fields_set``.
+        Field names and validation aliases are accepted as updates. Carried-over
+        initialization values retain their original provenance and explicit-field
+        status. Values supplied by active settings sources receive fresh metadata,
+        including when they override requested updates. Accepted extra updates
+        participate in ``model_fields_set``; ignored extras do not.
 
         Examples
         --------
@@ -885,7 +995,7 @@ class BaseConfig(BaseSettings):
         Existing state is deep-copied first; supplied updates then follow the
         revalidation behavior of :meth:`copy` and are not themselves deep-copied.
         With updates, reconstruction initializes private attributes afresh and
-        has the same metadata limitations as :meth:`copy`.
+        uses the same source and metadata rules as :meth:`copy`.
 
         Parameters
         ----------
@@ -905,7 +1015,7 @@ class BaseConfig(BaseSettings):
 
         With updates, all current fields and extras undergo the reconstruction
         described by :meth:`copy`, including settings-source participation and
-        its metadata limitations. The resulting fields, extras, and metadata
+        its metadata rules. The resulting fields, extras, and metadata
         replace those on this instance; existing private attributes are retained.
         With no updates, return the instance without validation.
 
@@ -944,6 +1054,7 @@ class BaseConfig(BaseSettings):
         )
         self._model_field_sources.clear()
         self._model_field_sources.update(updated._model_field_sources)
+        self._model_init_fields = updated._model_init_fields.copy()
         return self
 
     def model_resolve(
@@ -985,8 +1096,9 @@ class BaseConfig(BaseSettings):
         Resolution rebuilds traversed containers and Pydantic models but does
         not deep-copy arbitrary objects. Shared factories are resolved separately
         at each occurrence. Rebuilt models initialize private state and source
-        metadata anew. Self-referential model annotations currently cause a
-        ``RecursionError`` during class generation even when values are acyclic.
+        metadata anew. Self-referential and mutually recursive model annotations
+        are supported for acyclic values. Generated types are shared within one
+        resolution call; original model types are not modified.
         """
         from confidantic._config.factory import (
             _contains_factory,
@@ -1028,7 +1140,7 @@ class BaseConfig(BaseSettings):
             configured source is a bare callable rather than a settings-source
             instance, automatic provenance tracking returns an empty mapping.
             Extras and computed fields are not tracked. Validated updates use
-            the metadata rules and current limitations described in :meth:`copy`.
+            the metadata rules described in :meth:`copy`.
         """
         return MappingProxyType(self._model_field_sources)
 
@@ -1347,7 +1459,7 @@ class BaseConfig(BaseSettings):
         ):
             source_options["_env_file"] = cls.find_dotenv()
         levels = [
-            level
+            cast(type[BaseConfig], level)
             for level in cls.__mro__
             if issubclass(level, BaseConfig) and level is not BaseConfig
         ]
@@ -1425,18 +1537,23 @@ class BaseConfig(BaseSettings):
                 "_init_kwargs": init_kwargs,
             }
             level_sources, _ = source_builder(**level_options)
-            level_sources = tuple(
-                _InitSettingsSource(
-                    source.settings_cls,
-                    source.init_kwargs,
-                    source.nested_model_default_partial_update,
-                    source._init_state,
-                )
-                if type(source) is InitSettingsSource
-                else source
-                for source in level_sources
-                if env_prefix is not None or type(source) is not EnvSettingsSource
-            )
+            normalized_sources = []
+            for source in level_sources:
+                if env_prefix is None and type(source) is EnvSettingsSource:
+                    continue
+                if type(source) is InitSettingsSource:
+                    replacement = _InitSettingsSource(
+                        source.settings_cls,
+                        source.init_kwargs,
+                        source.nested_model_default_partial_update,
+                        source._init_state,
+                    )
+                    cast(Any, replacement)._confidantic_init_input = getattr(
+                        source, "_confidantic_init_input", ()
+                    )
+                    source = replacement
+                normalized_sources.append(source)
+            level_sources = tuple(normalized_sources)
             default_source = next(
                 source
                 for source in reversed(level_sources)
@@ -1558,27 +1675,29 @@ class BaseConfig(BaseSettings):
 
     def _copy_with_updates(self, updates: Mapping[str, Any]) -> Self:
         cls = type(self)
+        updated_fields = _updated_fields(cls, updates)
         values = {
-            field_name: getattr(self, field_name) for field_name in cls.model_fields
+            name: getattr(self, name)
+            for name in cls.model_fields
+            if name not in updated_fields
         }
         values.update(self.model_extra or {})
         values.update(updates)
         copied = cls.model_validate(values, by_alias=True, by_name=True)
-
-        updated_fields = {
-            field_name
-            for field_name, field in cls.model_fields.items()
-            if field_name in updates
-            or any(alias in updates for alias in _get_alias_names(field_name, field)[0])
-        }
-        copied._model_field_sources = self._model_field_sources.copy()
-        copied._model_field_sources.update(
-            dict.fromkeys(updated_fields, (InitSettingsSource, cls))
+        explicit_updates = updated_fields | (
+            set(updates) & set(copied.model_extra or {})
         )
+        carried_fields = copied._model_init_fields - explicit_updates
+        for name in carried_fields:
+            previous = self._model_field_sources.get(name)
+            if previous is None:
+                copied._model_field_sources.pop(name, None)
+            else:
+                copied._model_field_sources[name] = previous
         object.__setattr__(
             copied,
             "__pydantic_fields_set__",
-            self.model_fields_set | updated_fields,
+            self.model_fields_set | (copied.model_fields_set - carried_fields),
         )
         return copied
 
@@ -1600,11 +1719,31 @@ class BaseConfig(BaseSettings):
             )
         from confidantic._config.factory import Factory
 
-        target = self.factory_target if isinstance(self, Factory) else self
-        return {
-            "@call": get_import_string(target),
-            **data,
-        }
+        if isinstance(self, Factory):
+            by_alias = cast(bool | None, info.by_alias)
+            if by_alias is None:
+                by_alias = self.model_config.get("serialize_by_alias", False)
+            owners: dict[str, list[str]] = {}
+            for name, field in type(self).model_fields.items():
+                key = (field.serialization_alias if by_alias else None) or name
+                owners.setdefault(key, []).append(name)
+            for name, computed in type(self).model_computed_fields.items():
+                key = (computed.alias if by_alias else None) or name
+                owners.setdefault(key, []).append(name)
+            for name in self.model_extra or {}:
+                owners.setdefault(name, []).append(name)
+            arguments = {}
+            for name in self.factory_fields:
+                field = type(self).model_fields[name]
+                key = (field.serialization_alias if by_alias else None) or name
+                if key in data:
+                    if len(owners[key]) != 1:
+                        raise ValueError(
+                            f"Ambiguous serialized constructor argument: {name}"
+                        )
+                    arguments[name] = data[key]
+            return {"@call": get_import_string(self.factory_target), **arguments}
+        return {"@call": get_import_string(self), **data}
 
     @field_validator("*", mode="before", check_fields=False)
     @classmethod
@@ -1647,18 +1786,25 @@ class _ResolvedSettingsSource(PydanticBaseSettingsSource):
         self.sources = sources
         self.nested_model_default_partial_update = nested_model_default_partial_update
         self.field_sources: dict[str, _FieldSource] = {}
+        self.init_fields: set[str] = set()
 
     def __call__(self) -> dict[str, Any]:
         self.field_sources.clear()
+        self.init_fields.clear()
         if not all(
             isinstance(source, PydanticBaseSettingsSource) for source in self.sources
         ):
             return {}
 
-        for field_name, field in self.settings_cls.model_fields.items():
-            aliases, _ = _get_alias_names(field_name, field)
-            keys = aliases or (field_name,)
-
+        field_keys = {
+            name: (*_get_alias_names(name, field)[0], name)
+            for name, field in self.settings_cls.model_fields.items()
+        }
+        known_keys = {key for keys in field_keys.values() for key in keys}
+        extra_keys = self.current_state.keys() - known_keys
+        for field_name, keys in (
+            field_keys | {key: (key,) for key in extra_keys}
+        ).items():
             for index, source in enumerate(self.sources):
                 next_state = (
                     self.sources[index + 1].current_state
@@ -1669,12 +1815,18 @@ class _ResolvedSettingsSource(PydanticBaseSettingsSource):
                     key not in source.current_state and key in next_state
                     for key in keys
                 ):
-                    self.field_sources[field_name] = (
-                        InitSettingsSource
-                        if isinstance(source, _InitSettingsSource)
-                        else type(source),
-                        source.settings_cls,
-                    )
+                    if field_name in field_keys:
+                        self.field_sources[field_name] = (
+                            InitSettingsSource
+                            if isinstance(source, _InitSettingsSource)
+                            else type(source),
+                            source.settings_cls,
+                        )
+                    if any(
+                        key in getattr(source, "_confidantic_init_input", ())
+                        for key in keys
+                    ):
+                        self.init_fields.add(field_name)
                     break
 
         return {}

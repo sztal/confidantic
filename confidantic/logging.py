@@ -53,12 +53,18 @@ class BaseLogging(BaseConfig):
     level: LogLevelT = "INFO"
     """The logging level for the console handler."""
     root_level: LogLevelT = "NOTSET"
-    """The logging level at which the root logger admits records."""
+    """Root logger level, inherited by named loggers without their own level.
+    Ancestor logger levels do not filter records propagated by a named logger
+    with an explicit level; handler levels still apply.
+    """
     format: str = "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
     """The log message format for the console handler."""
     file: Path | None = None
     """The file to which logging output will be written.
-    If ``None``, file logging is disabled."""
+    If ``None``, file logging is disabled. Relative paths are made absolute
+    against the working directory when :meth:`config` is called; ``~`` is not
+    expanded and parent directories are not created.
+    """
     file_level: LogLevelT | None = None
     """The logging level for the file handler.
     If ``None``, defaults to the value of ``level``."""
@@ -75,6 +81,11 @@ class BaseLogging(BaseConfig):
 
     def config(self) -> dict[str, Any]:
         """Return a :func:`logging.config.dictConfig`-compatible dictionary.
+
+        This method builds data only; :meth:`get_logger` applies it. No handlers
+        are created and no files are opened here. Values such as schema version,
+        formatter syntax, and stream references are checked by ``dictConfig``
+        when the configuration is applied.
 
         Builds a configuration dict with:
 

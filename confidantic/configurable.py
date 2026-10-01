@@ -30,9 +30,10 @@ class InstanceConfig(BaseConfig):
     validation methods form the portable persistence boundary; call
     :meth:`to_parent` after validation to construct the runtime object.
 
-    A configuration class receives ``Parent`` only when a configurable class
-    directly declares it as ``Config``. This avoids silently associating an
-    inherited configuration with an unrelated subclass.
+    A configuration class is automatically assigned ``Parent`` only when a
+    configurable class directly declares it as ``Config``. Inheriting ``Config``
+    does not change that association. If several classes directly declare the
+    same configuration type, the last declaration replaces its ``Parent``.
     """
 
     Parent: ClassVar[type["Configurable"]]
@@ -80,6 +81,8 @@ class Configurable:
     Core behavior should derive from this configuration, while instance-specific
     caches and resources remain transient. Copying, equality, hashing, and pickle
     state operate on the configuration rather than arbitrary runtime attributes.
+    Copying calls the runtime constructor again; pickle restoration only installs
+    the configuration and does not initialize transient attributes.
 
     Serialize and deserialize the concrete ``Config`` class instead of the runtime
     object, then use :meth:`InstanceConfig.to_parent` to materialize an instance.
@@ -152,8 +155,10 @@ class Configurable:
     def __eq__(self, other: Any) -> bool:
         """Compare stored configuration values for compatible runtime objects.
 
-        Concrete configuration types must match. Declared fields, including
-        serialization-excluded fields, and extras participate; computed fields
+        Runtime classes must be the same or related by inheritance; otherwise
+        comparison returns ``NotImplemented``. Concrete configuration types must
+        match. Declared fields, including serialization-excluded fields, and
+        extras participate; computed fields
         and private provenance do not. Nested values use their own equality.
         """
         if not isinstance(other, self.__class__):
@@ -174,6 +179,16 @@ class Configurable:
         return {"config": self.config}
 
     def __setstate__(self, state: dict[str, Any]) -> None:
+        """Restore the configuration without calling the runtime constructor.
+
+        Parameters
+        ----------
+        state
+            Pickle state containing ``"config"``, passed to the concrete
+            ``Config.model_validate`` method. Existing configuration instances
+            follow that model's instance-revalidation policy. Other state keys
+            are ignored; subclasses must restore their own transient resources.
+        """
         self.config = self.Config.model_validate(state["config"])
 
     def __copy__(self) -> Self:
@@ -212,7 +227,9 @@ class Configurable:
         """Construct a new object, then apply validated configuration updates.
 
         The constructor receives a shallow configuration copy before updates
-        are applied. Arbitrary runtime attributes are not copied.
+        are applied. Derived runtime state therefore reflects the configuration
+        before these updates unless the subclass refreshes it. Arbitrary runtime
+        attributes are not copied.
 
         Parameters
         ----------
@@ -229,8 +246,9 @@ class Configurable:
     def deepcopy(self, **kwargs: Any) -> Self:
         """Construct a new object from a deep configuration copy, then update it.
 
-        Updates are validated after construction. Arbitrary runtime attributes
-        are not copied.
+        Updates are validated after construction, so derived runtime state can
+        still reflect the old configuration. Arbitrary runtime attributes are
+        not copied. Supplied update values are not themselves deep-copied.
 
         Parameters
         ----------

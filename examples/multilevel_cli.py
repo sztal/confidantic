@@ -61,8 +61,9 @@ class Program(BaseConfig, cli_parse_args=True):
 # %% Parse and dispatch the selected command -----------------------------------------
 
 # CliSubCommand fields cannot have defaults and must be their outermost annotation.
-# Consequently, a missing or unknown command exits with generated argparse help;
-# do not use `CliSubCommand[Create] | None` to make a command optional.
+# Unknown commands fail during argument parsing. A missing command is rejected
+# by get_subcommand() below, whose default is to exit on a missing selection.
+# Do not use `CliSubCommand[Create] | None` to make a command optional.
 program = Program()
 project = get_subcommand(program)
 command = get_subcommand(project)

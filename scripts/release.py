@@ -5,7 +5,7 @@
 #   "towncrier>=25.8",
 # ]
 # ///
-"""Release a new version."""
+"""Prepare a changelog commit, publish its tag and GitHub release, and update main."""
 
 import argparse
 import subprocess
@@ -53,7 +53,7 @@ def get_current_branch() -> str:
 
 
 def get_release_notes(version: str) -> str:
-    """Return the release notes."""
+    """Draft Towncrier notes, replace their first line, and add a release heading."""
     release_notes = subprocess.check_output(
         ["towncrier", "build", "--version", version, "--draft"],
         stderr=subprocess.DEVNULL,
@@ -65,12 +65,12 @@ def get_release_notes(version: str) -> str:
 
 
 def update_changelog(version: str) -> None:
-    """Update the changelog."""
+    """Build the changelog with Towncrier and remove consumed fragments."""
     subprocess.check_call(["towncrier", "build", "--version", version, "--yes"])
 
 
 def create_release_tag(version: str) -> str:
-    """Create and return the release tag."""
+    """Create an annotated v-prefixed tag at HEAD and return its name."""
     release_tag = f"v{version}"
     message = f"bump version to {version}"
     # Make sure to create an annotated tag.
@@ -88,7 +88,28 @@ def create_release(release_tag: str, release_notes: str) -> None:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Release a new version."""
+    """Prepare and publish a release from the current clean, attached branch.
+
+    A temporary release branch holds the Towncrier changelog commit and an
+    annotated tag. Normal execution pushes that commit to origin/main and the
+    tag atomically, creates the GitHub release, and finishes on updated main.
+    Failed preparation or publication retains the release branch and any created
+    tag for recovery; remote publication is not rolled back.
+
+    Parameters
+    ----------
+    argv
+        Arguments for the parser, or ``None`` to use process arguments.
+        ``--dry-run`` still builds and commits the changelog and creates a local
+        tag. A successful dry run deletes those temporary references and restores
+        the original branch without publishing.
+
+    Returns
+    -------
+    int
+        Zero after successful completion. Parser, subprocess, and preflight
+        errors propagate or exit instead of returning a failure code.
+    """
     # Parse command-line arguments.
     parser = create_parser()
     args = parser.parse_args(argv)

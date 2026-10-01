@@ -74,12 +74,26 @@ class BasePaths(BaseConfig):
     path values are accepted as Pydantic extra fields by default. Declared fields
     are resolved in model field order, followed by extras in their input order.
     All declared fields must have a concrete ``Path`` subclass annotation;
-    optional and union path annotations are not accepted.
+    optional and union path annotations are not accepted. Field constraints such
+    as ``FilePath`` run before canonicalization, so relative existence checks
+    use the current working directory rather than ``root``.
+
+    ``~`` is expanded and existing symlinks are followed. A bare ``@field``
+    resolves to the anchor itself; unknown or forward anchors raise a validation
+    error. Root is resolved independently and cannot reference an anchor.
+    Only canonical paths are retained: changing ``root`` or an anchor with
+    :meth:`copy` or :meth:`mutate` does not relocate existing absolute paths.
+    Supply new relative definitions for paths that should move.
 
     Examples
     --------
     >>> paths = BasePaths(root=Path.cwd(), data="data")
     >>> paths.data == Path.cwd().joinpath("data").resolve(strict=False)
+    True
+    >>> moved = paths.copy(root=paths.root / "elsewhere")
+    >>> moved.data == paths.data
+    True
+    >>> moved.copy(data="data").data == moved.root / "data"
     True
     """
 

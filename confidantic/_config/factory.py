@@ -86,7 +86,9 @@ class Factory(BaseConfig, Generic[T]):
     generated factory instances and target classes to generated factory classes.
     Existing compatible factory instances and classes are retained without
     field revalidation. Mappings undergo model validation. Strict validation
-    does not perform the target-class or target-instance conversions.
+    does not perform the target-class or target-instance conversions. Its
+    current fallback, however, accepts existing factory instances without
+    checking target compatibility; use lax validation for that check.
 
     Attributes
     ----------
@@ -95,7 +97,9 @@ class Factory(BaseConfig, Generic[T]):
     factory_fields
         Constructor field names forwarded as keyword arguments during
         resolution. Additional fields declared on a factory subclass are not
-        forwarded to the target.
+        forwarded to the target by :meth:`model_resolve`. Make serialization
+        currently includes those additional fields, so exclude them from a
+        directive dump when the target constructor does not accept them.
     """
 
     factory_target: ClassVar[type[T]]
@@ -196,7 +200,9 @@ class Factory(BaseConfig, Generic[T]):
         Annotated positional-or-keyword and keyword-only constructor parameters
         define the generated fields. Unannotated parameters, ``*args``, and
         ``**kwargs`` are omitted. Annotated positional-only parameters are
-        rejected because resolution calls the constructor by keyword.
+        rejected because resolution calls the constructor by keyword. An
+        omitted unannotated required parameter can consequently cause a
+        constructor ``TypeError`` at resolution time.
 
         When ``source`` is an instance, attributes with matching parameter names
         replace constructor defaults. Missing attributes retain those defaults,
@@ -221,7 +227,11 @@ class Factory(BaseConfig, Generic[T]):
             matching and exclude ``None``; predicates receive the default value.
             Existing factories are skipped. Required fields without a source
             value remain unchanged. Matching union branches are replaced while
-            unrelated alternatives are retained.
+            unrelated alternatives are retained. Selection examines each
+            parameter's whole default, not elements inside collection defaults.
+            Callable typing aliases such as ``typing.Optional[T]`` and
+            ``Annotated[T, ...]`` are currently mistaken for predicates; use a
+            concrete type, a ``T | None`` union, or an explicit predicate instead.
         *args, **kwargs
             Arguments used to construct ``source`` when it is a type. The
             resulting instance values become generated defaults. With no
@@ -269,6 +279,12 @@ class Factory(BaseConfig, Generic[T]):
     ) -> Factory[U]:
         """Create a new factory config instance from a source.
 
+        Generate the class with :meth:`model_from`, then construct it using
+        normal settings sources. Keyword arguments are configuration inputs,
+        so higher-priority sources such as CLI input can override them.
+        To supply constructor arguments or enable recursive default generation,
+        call :meth:`model_from` separately and instantiate its result.
+
         Parameters
         ----------
         source
@@ -277,7 +293,7 @@ class Factory(BaseConfig, Generic[T]):
             Optional generated model name.
         **kwargs
             Values for the generated fields. Unspecified fields use their
-            default values.
+            defaults after consulting configured settings sources.
 
         Returns
         -------
@@ -291,14 +307,17 @@ class Factory(BaseConfig, Generic[T]):
     ) -> T:
         """Create the target object from the validated configuration values.
 
-        Nested factory instances and classes are resolved recursively in model
-        fields, model extras, mapping keys and values, lists, tuples, sets, and
+        Traversal starts from ``factory_fields``; additional fields and extras
+        on this factory are ignored. Within those constructor inputs, nested
+        factory instances and classes are resolved recursively in Pydantic model
+        fields and extras, mapping keys and values, lists, tuples, sets, and
         frozensets. Factory classes are instantiated with their defaults first.
         Mappings become dictionaries and nested Pydantic models are rebuilt and
         validated. Other objects are passed through unchanged.
 
         Only ``factory_fields`` are passed to the target, as keyword arguments.
-        Each call constructs a new target. CLI parsing is disabled throughout
+        Each call invokes the target constructor; instance identity is subject
+        to that constructor's behavior. CLI parsing is disabled throughout
         resolution, including configuration models constructed by the target;
         other settings sources remain active.
 
@@ -312,6 +331,17 @@ class Factory(BaseConfig, Generic[T]):
         ValueError
             If recursive traversal encounters a cycle. Nested validation and
             target constructor errors also propagate.
+
+        Notes
+        -----
+        Factory field values are not revalidated before calling the target.
+        In particular, ``model_construct`` and unchecked ``model_copy`` updates
+        can supply invalid scalar values. Traversed containers and models are
+        rebuilt, while arbitrary objects remain shared. Repeated occurrences
+        of the same factory invoke its target separately; aliasing is not
+        preserved. Self-referential Pydantic model annotations currently cause
+        ``RecursionError`` during resolved class generation, even for acyclic
+        values.
         """
         token = _DISABLE_CLI_PARSE_ARGS.set(True)
         try:

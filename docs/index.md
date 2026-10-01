@@ -39,7 +39,13 @@ updated = config.copy(retries=5)
 
 `copy()` is shallow and `deepcopy()` recursively copies field values. Both
 methods accept validated keyword updates. The standard-library `copy.copy()`
-and `copy.deepcopy()` functions are also supported.
+and `copy.deepcopy()` functions are also supported. With keyword updates, all
+current fields and extras are validated again through settings construction;
+validators can change untouched fields, CLI input can override updates, and
+private attributes are initialized afresh. Deep copying happens before the
+updates are applied, so supplied update objects are not themselves deep-copied.
+Without updates, both methods preserve private state with the requested copy
+depth. `mutate()` retains existing private state.
 
 Use `mutate()` to apply validated updates to the same instance, including a
 frozen configuration:
@@ -193,7 +199,10 @@ data = config.model_dump(context={"make": True})
 
 Nested `BaseConfig` instances receive their own directive; ordinary Pydantic
 models do not. A `Factory` writes its target class's identifier, so loading
-its directive constructs the target object. Identifiers must resolve to
+its directive calls the target constructor. Factory dumps currently also include
+subclass-only fields, extras, and computed fields; exclude any that the target
+does not accept, and use constructor keyword names rather than incompatible
+serialization aliases. Identifiers must resolve to
 importable objects; local and unregistered generated classes are not portable.
 Use `serialize_as_any=True` when fields annotated with base classes must retain
 subclass-only data.
@@ -241,7 +250,11 @@ model fields can contain `None`. This does not remove `None` entries inside
 lists or mappings; those require preprocessing. The YAML loader requires the
 YAML extra; TOML loading uses Python's standard library. Both loaders parse into
 Python values and forward their validation options to `model_validate()`.
-Configured settings sources can still participate in construction.
+Configured settings sources can still participate in construction, so loading
+a document is not a source-isolated round trip. The current settings constructor
+also loses per-call `strict`, `extra`, and field-validation `context` options.
+Set `strict` and `extra` in the model configuration when needed; passing these
+options to a loader does not reliably override the class policy.
 
 The loaders do not evaluate a root `@call` directive. For output produced with
 `context={"make": True}`, parse the document and validate it through `Make`:

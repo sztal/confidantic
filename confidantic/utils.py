@@ -1,3 +1,5 @@
+"""Runtime detection, object import identifiers, and call-directive evaluation."""
+
 import sys
 from collections.abc import Callable, Iterable, Mapping
 from functools import singledispatch
@@ -135,6 +137,9 @@ def make(value: Any, handler: Callable[[Any], Any] | None = None) -> Any:
     callable is also called without arguments. Nested strings and callables
     remain unchanged unless used as an ``@call`` target. Return values from
     calls are not traversed again. Other container types are not traversed.
+    Lists and tuples are rebuilt as plain lists and tuples; shared directives
+    are evaluated separately at each occurrence. Cycles are not detected and
+    recursive input can raise ``RecursionError``.
 
     Parameters
     ----------
@@ -150,12 +155,22 @@ def make(value: Any, handler: Callable[[Any], Any] | None = None) -> Any:
         The value after recursively evaluating call mappings and applying the
         optional handler once, after evaluation.
 
+    Raises
+    ------
+    ValueError
+        If an ``@args`` value is not iterable. Import validation errors,
+        callable exceptions, and errors from the final handler also propagate.
+    TypeError
+        If an ``@call`` target is not callable or its arguments cannot be bound.
+
     Examples
     --------
     >>> make("builtins:list")
     []
     >>> make({"label": "builtins:list", "value": {"@call": "builtins:list"}})
     {'label': 'builtins:list', 'value': []}
+    >>> make({"@call": "builtins:dict", "@args": [[("@call", "builtins:list")]]})
+    {'@call': 'builtins:list'}
     """
 
     def build(item: Any) -> Any:

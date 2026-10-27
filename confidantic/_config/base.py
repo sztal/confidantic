@@ -586,7 +586,7 @@ class BaseConfig(BaseSettings):
 
     # Retain Pydantic's native initialization path, so model_validate and
     # TypeAdapter keep their active strict/extra/context options.
-    __init__ = BaseModel.__init__
+    __init__ = BaseModel.__init__  # type: ignore[assignment]
 
     @classmethod
     def __get_pydantic_core_schema__(

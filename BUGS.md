@@ -5,9 +5,10 @@ concise symptom, reproduction or evidence, affected behavior, and expected
 behavior. Remove an entry after its regression test and required checks pass.
 Do not track bugs in `wiki/`.
 
-## Attribute-docstring inspection can fail during class reconstruction
+## Attribute-docstring inspection during class reconstruction (fixed; cleanup pending)
 
-A class defined in a module unavailable to a worker can fail cloudpickle
+With affected Pydantic versions, a class defined in a module unavailable to a
+worker can fail cloudpickle
 restoration with `TypeError: <class 'unavailable_worker_module.Config'> is a built-in class`. Observed with Python 3.13.9, Pydantic 2.13.4, and cloudpickle
 3.1.2. This reduced reproduction also fails without Confidantic:
 
@@ -44,7 +45,18 @@ upstream fix, and related-issue search are in the
 [prepared Pydantic issue report](reports/pydantic-attribute-docstrings-issue.md).
 The defect is tracked upstream as
 [Pydantic #13870](https://github.com/pydantic/pydantic/issues/13870).
-This defect remains unresolved in the dependency.
+Upstream fixed it in
+[Pydantic #13874](https://github.com/pydantic/pydantic/pull/13874), released in
+[Pydantic 2.14.0](https://github.com/pydantic/pydantic/releases/tag/v2.14.0).
+Verified on 2026-10-27 with Python 3.13.9: fresh producer/worker reproductions with attribute
+docstrings enabled fail for both plain Pydantic and Confidantic models on the
+previously locked Pydantic 2.13.4, and pass on Pydantic 2.14.0 and 2.14.1.
+The current dependency requirement is `pydantic>=2.14`, and `uv.lock` selects
+2.14.1, so this defect is now fixed for supported installations. The worker
+opt-out is no longer necessary for this specific failure. Entry removal and
+workaround cleanup remain pending the required checks: the Nox typecheck
+session currently reports incompatible optional annotations passed to
+`TypeAdapter` in `confidantic/_config/base.py` (lines 493 and 498).
 
 ## Nested model partial updates lose per-call validation options
 
@@ -84,3 +96,12 @@ partial updates from mappings to default or lower-priority model instances,
 including retained concrete subclasses. Disabling
 `nested_model_default_partial_update` avoids this path but changes subtype and
 baseline-value retention. This defect is deferred from the semantic-audit fixes.
+
+Verified on 2026-10-27 with Python 3.13.9 and both Pydantic 2.13.4 and the updated
+lock's 2.14.1: `strict=True` still accepts `"2"`, integer input with
+`context={"offset": 10}` produces `2` instead of `12`,
+and `extra="forbid"` silently drops unknown nested keys. Conversely,
+`extra="ignore"` still raises when the nested model declares `extra="forbid"`.
+The failures occur with static defaults and default factories, including
+concrete subclass defaults. Disabling partial updates restores strictness,
+context, and the per-call extra policy in the corresponding controls.

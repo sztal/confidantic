@@ -31,7 +31,7 @@ DEFAULT_PYTHON_VERSION = Path(".python-version").read_text().rstrip()
 @nox.session(python=SUPPORTED_PYTHON_VERSIONS, tags=["tests"])
 def tests(session: nox.Session) -> None:
     """Run the test suite."""
-    session.install(".[all]", "--group", "test")
+    session.install(".[all]", "--group", "dev")
 
     if session.posargs:
         session.run("pytest", *session.posargs)

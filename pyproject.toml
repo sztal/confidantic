@@ -38,6 +38,7 @@ dynamic = [
 ]
 dependencies = [
   "docstring-parser>=0.18",
+  "pydantic>=2.14",
   "pydantic-settings>=2.15",
   "rich>=15",
 ]
@@ -67,6 +68,8 @@ test = [
   "nox>=2025.2.9",
   "pytest>=9",
   "pytest-xdist>=3.8",
+  "pyyaml>=6",
+  "tomli-w>=1",
 ]
 type = [
   "mypy>=1.15",

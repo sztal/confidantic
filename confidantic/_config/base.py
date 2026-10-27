@@ -9,7 +9,7 @@ from copy import deepcopy as deep_copy
 from dataclasses import dataclass
 from functools import wraps
 from importlib import import_module
-from inspect import get_annotations, signature
+from inspect import Parameter, get_annotations, signature
 from io import StringIO
 from types import GenericAlias, MappingProxyType, UnionType
 from typing import (
@@ -57,12 +57,7 @@ from pydantic_settings import (
     SettingsConfigDict as PydanticSettingsConfigDict,
 )
 from pydantic_settings.sources import DefaultSettingsSource
-from pydantic_settings.sources.types import (
-    ENV_FILE_SENTINEL,
-    DotenvType,
-    EnvPrefixTarget,
-    PathType,
-)
+from pydantic_settings.sources.types import ENV_FILE_SENTINEL
 from pydantic_settings.sources.utils import InitState, _get_alias_names
 from rich.console import Console
 from rich.highlighter import NullHighlighter
@@ -186,7 +181,16 @@ def _validate_settings(
 
     build_sources = kwargs.pop("_build_sources", None)
     if build_sources is None:
-        option_names = signature(cls._settings_init_sources).parameters.keys()
+        option_names = {
+            name
+            for method in (
+                BaseSettings._settings_init_sources,
+                cls._settings_init_sources,
+            )
+            for name, parameter in signature(method).parameters.items()
+            if parameter.kind
+            in (Parameter.POSITIONAL_OR_KEYWORD, Parameter.KEYWORD_ONLY)
+        }
         source_options = {
             key: kwargs.pop(key)
             for key in tuple(kwargs)
@@ -312,6 +316,9 @@ class ConfigModelDict(PydanticSettingsConfigDict, total=False):
         also requests discovery when enabled; disable discovery to suppress it.
     env_file_encoding
         Text encoding used to read ``env_file``.
+    env_file_depth
+        Number of parent directories to search for a relative ``env_file``.
+        Requires Pydantic Settings 2.16 or later.
     dotenv_filtering
         Policy for filtering dotenv variables before validation. The default
         ``"only_existing"`` keeps variables matching declared fields;
@@ -1414,48 +1421,24 @@ class BaseConfig(BaseSettings):
     @classmethod
     def _settings_init_sources(
         cls,
-        _case_sensitive: bool | None = None,
-        _nested_model_default_partial_update: bool | None = None,
-        _env_prefix: str | None = None,
-        _env_prefix_target: EnvPrefixTarget | None = None,
-        _env_file: DotenvType | None = ENV_FILE_SENTINEL,
-        _env_file_encoding: str | None = None,
-        _env_ignore_empty: bool | None = None,
-        _env_nested_delimiter: str | None = None,
-        _env_nested_max_split: int | None = None,
-        _env_parse_none_str: str | None = None,
-        _env_parse_enums: bool | None = None,
-        _cli_prog_name: str | None = None,
-        _cli_parse_args: bool | list[str] | tuple[str, ...] | None = None,
-        _cli_settings_source: CliSettingsSource[Any] | None = None,
-        _cli_parse_none_str: str | None = None,
-        _cli_hide_none_type: bool | None = None,
-        _cli_avoid_json: bool | None = None,
-        _cli_enforce_required: bool | None = None,
-        _cli_use_class_docs_for_groups: bool | None = None,
-        _cli_show_env_vars: bool | None = None,
-        _cli_exit_on_error: bool | None = None,
-        _cli_prefix: str | None = None,
-        _cli_flag_prefix_char: str | None = None,
-        _cli_implicit_flags: bool | Literal["dual", "toggle"] | None = None,
-        _cli_ignore_unknown_args: bool | None = None,
-        _cli_kebab_case: bool | Literal["all", "no_enums"] | None = None,
-        _cli_shortcuts: Mapping[str, str | list[str]] | None = None,
-        _secrets_dir: PathType | None = None,
-        _init_kwargs: dict[str, Any] | None = None,
+        *args: Any,
+        **upstream_options: Any,
     ) -> tuple[tuple[PydanticBaseSettingsSource, ...], dict[str, Any]]:
-        local_options = locals()
-        source_options: dict[str, Any] = {
-            name: local_options[name]
-            for name in signature(BaseSettings._settings_init_sources).parameters
-            if name in local_options
-        }
-        init_kwargs = _init_kwargs if _init_kwargs is not None else {}
+        bound_options = signature(BaseSettings._settings_init_sources).bind(
+            *args, **upstream_options
+        )
+        bound_options.apply_defaults()
+        local_options = dict(bound_options.arguments)
+        source_options = local_options.copy()
+        init_kwargs = local_options["_init_kwargs"]
+        if init_kwargs is None:
+            init_kwargs = {}
+        env_file = local_options["_env_file"]
         config_options = init_kwargs.pop("__confidantic_config_options", {})
         model_config: dict[str, Any] = {**cls.model_config, **config_options}
         if model_config.get("env_file_discovery") and (
-            _env_file is None
-            or (_env_file is ENV_FILE_SENTINEL and model_config.get("env_file") is None)
+            env_file is None
+            or (env_file is ENV_FILE_SENTINEL and model_config.get("env_file") is None)
         ):
             source_options["_env_file"] = cls.find_dotenv()
         levels = [
@@ -1504,7 +1487,9 @@ class BaseConfig(BaseSettings):
                 cli_source_options["cli_parse_none_str"] = env_source_options[
                     "env_parse_none_str"
                 ]
-            cli_settings_source = _cli_settings_source if index == 0 else None
+            cli_settings_source = (
+                local_options["_cli_settings_source"] if index == 0 else None
+            )
             if (
                 index == 0
                 and cli_source_options["cli_parse_args"] is not None
@@ -1532,7 +1517,9 @@ class BaseConfig(BaseSettings):
                     )
             level_options = source_options | {
                 "_env_prefix": env_prefix or "",
-                "_cli_parse_args": _cli_parse_args if index == 0 else False,
+                "_cli_parse_args": local_options["_cli_parse_args"]
+                if index == 0
+                else False,
                 "_cli_settings_source": cli_settings_source,
                 "_init_kwargs": init_kwargs,
             }

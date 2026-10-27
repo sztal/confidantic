@@ -5,7 +5,7 @@ import tomllib
 from copy import copy, deepcopy
 from enum import Enum
 from importlib import import_module
-from inspect import signature
+from inspect import Parameter, signature
 from io import StringIO
 from pathlib import Path
 from typing import Any, ClassVar, Literal, cast
@@ -149,14 +149,68 @@ def test_base_config_accepts_base_settings_sunder_arguments() -> None:
         for name in signature(BaseSettings._settings_init_sources).parameters
         if name != "_init_kwargs"
     )
-    config_options = tuple(
-        name
-        for name in signature(BaseConfig._settings_init_sources).parameters
-        if name != "_init_kwargs"
-    )
-
-    assert config_options == base_settings_options
     BaseConfig(**dict.fromkeys(base_settings_options))
+
+
+def test_base_config_accepts_positional_source_options() -> None:
+    """Positional arguments follow the installed upstream source signature."""
+
+    class Config(BaseConfig):
+        value: str = "default"
+
+    sources, _ = Config._settings_init_sources(True)
+    dotenv = next(
+        source for source in sources if isinstance(source, DotEnvSettingsSource)
+    )
+    assert dotenv.case_sensitive is True
+
+
+def test_base_config_forwards_future_settings_options(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """New upstream options reach each settings source without a local signature edit."""
+    original = BaseSettings.__dict__["_settings_init_sources"].__func__
+    original_signature = signature(original)
+    received: list[tuple[type[BaseSettings], int | None]] = []
+
+    def upstream(settings_cls: type[BaseSettings], **kwargs: Any) -> Any:
+        received.append((settings_cls, kwargs.pop("_future_option", None)))
+        return original(settings_cls, **kwargs)
+
+    cast(Any, upstream).__signature__ = original_signature.replace(
+        parameters=(
+            *original_signature.parameters.values(),
+            Parameter("_future_option", Parameter.KEYWORD_ONLY, default=None),
+        )
+    )
+    monkeypatch.setattr(BaseSettings, "_settings_init_sources", classmethod(upstream))
+
+    class Parent(BaseConfig):
+        value: str = "default"
+
+    class Child(Parent):
+        pass
+
+    assert _build_config(Child, _future_option=17).value == "default"
+    assert received == [(Child, 17), (Parent, 17)]
+    with pytest.raises(ValidationError, match="_unknown_option"):
+        _build_config(Child, _unknown_option=17)
+
+
+def test_base_config_accepts_subclass_source_options() -> None:
+    """Explicit options on a subclass source-builder override are retained."""
+    received: list[int | None] = []
+
+    class Config(BaseConfig):
+        @classmethod
+        def _settings_init_sources(
+            cls, _custom_option: int | None = None, **kwargs: Any
+        ) -> Any:
+            received.append(_custom_option)
+            return super()._settings_init_sources(**kwargs)
+
+    _build_config(Config, _custom_option=7)
+    assert received == [7]
 
 
 def test_base_config_accepts_custom_class_and_instance_options(
@@ -1366,6 +1420,49 @@ def test_dotenv_discovery_is_opt_in() -> None:
             raise AssertionError("dotenv discovery should be disabled")
 
     assert _build_config(Config, _env_file=None).value == "from-default"
+
+
+@pytest.mark.skipif(
+    "_env_file_depth" not in signature(BaseSettings._settings_init_sources).parameters,
+    reason="requires Pydantic Settings with dotenv depth support",
+)
+def test_dotenv_depth_override_searches_parents_across_mro(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Per-instance dotenv depth reaches each configuration class's sources."""
+    (tmp_path / ".env").write_text(
+        "PARENT_VALUE=parent\nCHILD_CHILD_VALUE=child\n", encoding="utf-8"
+    )
+    nested = tmp_path / "one" / "two"
+    nested.mkdir(parents=True)
+    monkeypatch.chdir(nested)
+    monkeypatch.delenv("PARENT_VALUE", raising=False)
+    monkeypatch.delenv("CHILD_CHILD_VALUE", raising=False)
+
+    class Parent(BaseConfig):
+        model_config = cast(
+            ConfigModelDict,
+            {"env_file": ".env", "env_prefix": "PARENT_", "env_file_depth": 2},
+        )
+        value: str = "default"
+
+    class Child(Parent):
+        model_config = ConfigModelDict(env_prefix="CHILD_")
+        child_value: str = "default"
+
+    assert _build_config(Child, _env_file_depth=1).model_dump() == {
+        "value": "default",
+        "child_value": "default",
+    }
+    assert Child().model_dump() == {
+        "value": "parent",
+        "child_value": "child",
+    }
+    assert _build_config(Child, _env_file_depth=2).model_dump() == {
+        "value": "parent",
+        "child_value": "child",
+    }
 
 
 @pytest.mark.parametrize("options", ({}, {"_env_file": None}))

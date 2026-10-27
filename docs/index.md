@@ -78,30 +78,6 @@ Confidantic reads attribute docstrings into field descriptions by default.
 Extraction is disabled automatically in Jupyter-like runtimes, including VS Code
 Interactive, where source inspection can fail.
 
-Set `CONFIDANTIC_USE_ATTRIBUTE_DOCSTRINGS` before importing Confidantic to
-explicitly enable or disable extraction for the package:
-
-```console
-CONFIDANTIC_USE_ATTRIBUTE_DOCSTRINGS=false python app.py
-```
-
-Values use Pydantic's boolean parsing: for example, `true`, `yes`, `on`, and `1`
-enable extraction; `false`, `no`, `off`, and `0` disable it, regardless of case.
-An empty or invalid value raises `ValueError` during import. An explicit value
-overrides notebook detection. If unset, extraction remains enabled outside
-Jupyter-like runtimes.
-
-The variable is read once when the package is imported, directly from the
-process environment. Settings prefixes and dotenv files do not affect it;
-changing the environment afterward does not update the default.
-
-For worker reconstruction affected by
-[Pydantic #13870](https://github.com/pydantic/pydantic/issues/13870), disable
-extraction before importing Confidantic and creating the producer classes, and
-propagate the setting to workers. Setting it only in the worker cannot change
-extraction settings already serialized with a class. This workaround disables
-automatic attribute descriptions while preserving explicit field descriptions;
-it does not fix every dynamic-class serialization problem.
 An explicit `model_config = ConfigModelDict(use_attribute_docstrings=...)` on a
 configuration class takes precedence over the package default.
 

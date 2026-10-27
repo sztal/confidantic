@@ -1,6 +1,5 @@
 """Base configuration model."""
 
-import os
 import tomllib
 from collections.abc import Callable, Collection, Mapping
 from contextvars import ContextVar
@@ -38,7 +37,6 @@ from pydantic import (
     PydanticUserError,
     SerializationInfo,
     TypeAdapter,
-    ValidationError,
     ValidationInfo,
     field_validator,
     model_serializer,
@@ -101,21 +99,6 @@ _DISABLE_CLI_PARSE_ARGS: ContextVar[bool] = ContextVar(
     "_DISABLE_CLI_PARSE_ARGS",
     default=False,
 )
-
-
-def _default_use_attribute_docstrings() -> bool:
-    """Resolve the package default before configuration classes are created."""
-    # Worker flows may opt out before creating producer classes to work around
-    # https://github.com/pydantic/pydantic/issues/13870; this does not patch Pydantic.
-    value = os.getenv("CONFIDANTIC_USE_ATTRIBUTE_DOCSTRINGS")
-    if value is None:
-        return not is_runtime_jupyterlike()
-    try:
-        return TypeAdapter(bool).validate_python(value)
-    except ValidationError as error:
-        raise ValueError(
-            "CONFIDANTIC_USE_ATTRIBUTE_DOCSTRINGS must be a valid boolean"
-        ) from error
 
 
 class _FactoryCliSettingsSource(CliSettingsSource[Any]):
@@ -400,13 +383,9 @@ class ConfigModelDict(PydanticSettingsConfigDict, total=False):
     use_attribute_docstrings
         Whether field descriptions are read from attribute docstrings. This is
         enabled by default except in Jupyter-like runtimes, where source
-        mapping may be unavailable. Set the process environment variable
-        ``CONFIDANTIC_USE_ATTRIBUTE_DOCSTRINGS`` to a Pydantic boolean string
-        before importing Confidantic to override this default. An explicit
-        per-class setting takes precedence. Empty or invalid environment values
-        raise ``ValueError`` during import. Explicit field descriptions remain
-        available when extraction is disabled and take precedence over attribute
-        docstrings when extraction is enabled.
+        mapping may be unavailable. An explicit per-class setting takes
+        precedence. Explicit field descriptions remain available when extraction
+        is disabled and take precedence over attribute docstrings when enabled.
     docstring_set_attributes_section
         Whether model fields replace an ``@attrs`` marker in the class
         docstring's ``Attributes`` section when a configuration subclass is
@@ -495,14 +474,15 @@ class ClassDefaultsSource(PydanticBaseSettingsSource):
                     if settings_cls.model_config.get("arbitrary_types_allowed")
                     else None
                 )
+                annotation = cast(Any, field.annotation)
                 try:
                     adapter: TypeAdapter[Any] = TypeAdapter(
-                        field.annotation, config=adapter_config
+                        annotation, config=adapter_config
                     )
                 except PydanticUserError as error:
                     if error.code != "type-adapter-config-unused":
                         raise
-                    adapter = TypeAdapter(field.annotation)
+                    adapter = TypeAdapter(annotation)
                 self.defaults[key] = adapter.dump_python(default)
 
     def __call__(self) -> dict[str, Any]:
@@ -581,7 +561,7 @@ class BaseConfig(BaseSettings):
         cli_use_class_docs_for_groups=True,
         cli_ignore_unknown_args=True,
         cli_help=True,
-        use_attribute_docstrings=_default_use_attribute_docstrings(),
+        use_attribute_docstrings=not is_runtime_jupyterlike(),
         docstring_set_attributes_section=None,
         docstring_style=None,
         dotenv_filtering="only_existing",
@@ -593,7 +573,7 @@ class BaseConfig(BaseSettings):
 
     # Retain Pydantic's native initialization path, so model_validate and
     # TypeAdapter keep their active strict/extra/context options.
-    __init__ = BaseModel.__init__  # type: ignore[assignment]
+    __init__ = cast(Any, BaseModel.__init__)
 
     @classmethod
     def __get_pydantic_core_schema__(

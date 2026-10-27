@@ -1,6 +1,5 @@
 """Regression tests for dynamically defined configuration serialization."""
 
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -9,35 +8,10 @@ from textwrap import dedent
 import pytest
 
 
-@pytest.fixture
-def worker_environment() -> dict[str, str]:
-    """Disable source inspection before either interpreter imports Confidantic."""
-    # Work around https://github.com/pydantic/pydantic/issues/13870.
-    # Cloudpickle reconstructs local classes by value in workers where the
-    # defining module may be unavailable. Pydantic's metaclass extracts attribute
-    # docstrings while constructing the skeleton class, before cloudpickle has
-    # restored its state. inspect.getsourcelines() can raise TypeError here,
-    # whereas the affected Pydantic implementation catches only OSError.
-    #
-    # Set this in the producer BEFORE importing Confidantic and creating classes,
-    # and propagate it to workers. Disabling extraction only in the consumer
-    # cannot change settings already embedded in serialized producer classes.
-    # This suppresses automatic attribute descriptions, not validation or explicit
-    # Field(description=...) metadata. It is neither a dependency fix nor a cure
-    # for every dynamic-class serialization failure.
-    #
-    # Remove this workaround only after verifying a released upstream fix,
-    # raising our dependency floor to exclude affected versions, and passing the
-    # unavailable-module regressions with extraction enabled. Issue closure alone
-    # is not sufficient evidence that all supported installations are fixed.
-    return {**os.environ, "CONFIDANTIC_USE_ATTRIBUTE_DOCSTRINGS": "false"}
-
-
-def _run(script: str, directory: Path, environment: dict[str, str]) -> None:
+def _run(script: str, directory: Path) -> None:
     result = subprocess.run(
         [sys.executable, "-c", dedent(script)],
         cwd=directory,
-        env=environment,
         capture_output=True,
         text=True,
         timeout=60,
@@ -46,12 +20,8 @@ def _run(script: str, directory: Path, environment: dict[str, str]) -> None:
     assert result.returncode == 0, result.stderr
 
 
-@pytest.mark.parametrize("docstrings", ["true", "false"])
-def test_dynamic_configs_round_trip_in_fresh_interpreter(
-    tmp_path: Path, worker_environment: dict[str, str], docstrings: str
-) -> None:
+def test_dynamic_configs_round_trip_in_fresh_interpreter(tmp_path: Path) -> None:
     """Data and validators survive transfer without copying ambient activation."""
-    worker_environment["CONFIDANTIC_USE_ATTRIBUTE_DOCSTRINGS"] = docstrings
     _run(
         """
         from pathlib import Path
@@ -67,6 +37,8 @@ def test_dynamic_configs_round_trip_in_fresh_interpreter(
         class Config(BaseConfig):
             seed: int = 7
             nested: Nested = Field(default_factory=lambda data: Nested(y=data["seed"]))
+
+        assert Config.model_config["use_attribute_docstrings"] is True
 
         class Active(BaseContext):
             value: int = 1
@@ -88,7 +60,6 @@ def test_dynamic_configs_round_trip_in_fresh_interpreter(
         Path("payload.pkl").write_bytes(blob)
         """,
         tmp_path,
-        worker_environment,
     )
     _run(
         """
@@ -105,14 +76,11 @@ def test_dynamic_configs_round_trip_in_fresh_interpreter(
         assert config.model_field_sources["nested"][1] is type(config)
         """,
         tmp_path,
-        worker_environment,
     )
 
 
-def test_local_context_transfers_through_loky(
-    tmp_path: Path, worker_environment: dict[str, str]
-) -> None:
-    """Local context classes work when source inspection is disabled at import."""
+def test_local_context_transfers_through_loky(tmp_path: Path) -> None:
+    """Local context classes work across worker processes."""
     _run(
         """
         from joblib import Parallel, delayed
@@ -136,14 +104,11 @@ def test_local_context_transfers_through_loky(
         run()
         """,
         tmp_path,
-        worker_environment,
     )
 
 
 @pytest.mark.parametrize("from_instance", [False, True])
-def test_generated_factories_round_trip(
-    tmp_path: Path, worker_environment: dict[str, str], from_instance: bool
-) -> None:
+def test_generated_factories_round_trip(tmp_path: Path, from_instance: bool) -> None:
     """Factory classes, defaults, and typed fields survive fresh-process loading."""
     producer = """
         from pathlib import Path
@@ -165,6 +130,7 @@ def test_generated_factories_round_trip(
 
         source = Target(value=6, items=[2], payload=Payload(8)) if FROM_INSTANCE else Target
         Config = Factory.model_from(source)
+        assert Config.model_config["use_attribute_docstrings"] is True
         class Container(BaseConfig):
             target: Factory[Target]
 
@@ -181,7 +147,7 @@ def test_generated_factories_round_trip(
         assert restored[2].model_resolve().target.value == 8
         Path("factory.pkl").write_bytes(blob)
     """.replace("FROM_INSTANCE", repr(from_instance))
-    _run(producer, tmp_path, worker_environment)
+    _run(producer, tmp_path)
     consumer = """
         from pathlib import Path
         import cloudpickle
@@ -202,12 +168,10 @@ def test_generated_factories_round_trip(
         assert second.items == ([2] if FROM_INSTANCE else [1])
         assert second.payload.value == (8 if FROM_INSTANCE else 5)
     """.replace("FROM_INSTANCE", repr(from_instance))
-    _run(consumer, tmp_path, worker_environment)
+    _run(consumer, tmp_path)
 
 
-def test_recursive_factory_serialization_and_loky_transfer(
-    tmp_path: Path, worker_environment: dict[str, str]
-) -> None:
+def test_recursive_factory_serialization_and_loky_transfer(tmp_path: Path) -> None:
     """Recursive factory defaults remain usable and isolated across processes."""
     _run(
         """
@@ -236,7 +200,6 @@ def test_recursive_factory_serialization_and_loky_transfer(
         Path("recursive.pkl").write_bytes(blob)
         """,
         tmp_path,
-        worker_environment,
     )
     _run(
         """
@@ -250,13 +213,10 @@ def test_recursive_factory_serialization_and_loky_transfer(
         assert second.model_resolve().child.items == [1]
         """,
         tmp_path,
-        worker_environment,
     )
 
 
-def test_hashable_mutable_factory_defaults_transfer(
-    tmp_path: Path, worker_environment: dict[str, str]
-) -> None:
+def test_hashable_mutable_factory_defaults_transfer(tmp_path: Path) -> None:
     """Copy-default wrappers and templates survive fresh-process cloudpickle."""
     _run(
         """
@@ -275,7 +235,6 @@ def test_hashable_mutable_factory_defaults_transfer(
         Path("copied.pkl").write_bytes(cloudpickle.dumps(Factory.model_from(Target)))
         """,
         tmp_path,
-        worker_environment,
     )
     _run(
         """
@@ -289,26 +248,27 @@ def test_hashable_mutable_factory_defaults_transfer(
         assert model().model_resolve().items == [1]
         """,
         tmp_path,
-        worker_environment,
     )
 
 
-def test_unavailable_module_workaround_preserves_explicit_descriptions(
-    tmp_path: Path, worker_environment: dict[str, str]
+def test_unavailable_module_preserves_descriptions_with_extraction(
+    tmp_path: Path,
 ) -> None:
-    """The #13870 opt-out works before class creation without losing Field docs."""
+    """Local classes retain descriptions when their module is unavailable."""
     producer = tmp_path / "producer"
     consumer = tmp_path / "consumer"
     producer.mkdir()
     consumer.mkdir()
     (producer / "model_defs.py").write_text(
-        "from confidantic import BaseConfig\n"
+        "from confidantic import BaseConfig, ConfigModelDict\n"
         "from pydantic import Field\n"
         "def make_model():\n"
         "    class Parent(BaseConfig):\n"
-        "        pass\n"
+        "        model_config = ConfigModelDict(use_attribute_docstrings=True)\n"
         "    class Config(Parent):\n"
         "        value: int = Field(7, description='Explicit description')\n"
+        "        documented: int = 8\n"
+        '        """Extracted description."""\n'
         "    return Config\n"
     )
     _run(
@@ -317,11 +277,11 @@ def test_unavailable_module_workaround_preserves_explicit_descriptions(
         import cloudpickle
         from model_defs import make_model
         config = make_model()()
-        assert config.model_config["use_attribute_docstrings"] is False
+        assert config.model_config["use_attribute_docstrings"] is True
+        assert type(config).model_fields["documented"].description == "Extracted description."
         Path("../consumer/payload.pkl").write_bytes(cloudpickle.dumps(config))
         """,
         producer,
-        worker_environment,
     )
     _run(
         """
@@ -331,8 +291,9 @@ def test_unavailable_module_workaround_preserves_explicit_descriptions(
         assert find_spec("model_defs") is None
         config = cloudpickle.loads(Path("payload.pkl").read_bytes())
         assert config.value == 7
+        assert config.documented == 8
         assert type(config).model_fields["value"].description == "Explicit description"
+        assert type(config).model_fields["documented"].description == "Extracted description."
         """,
         consumer,
-        worker_environment,
     )

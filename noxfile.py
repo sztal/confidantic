@@ -19,6 +19,7 @@ nox.options.sessions = [
     "lint",
     "typecheck",
     "docs",
+    "optional-deps",
     "tests",
 ]
 
@@ -88,7 +89,7 @@ def typecheck(session: nox.Session) -> None:
 @nox.session(python=DEFAULT_PYTHON_VERSION, tags=["checks"])
 def docs(session: nox.Session) -> None:
     """Build the documentation."""
-    session.install("-e", ".", "--group", "docs")
+    session.install("-e", ".[all]", "--group", "docs")
     session.run(
         "zensical",
         "build",
@@ -101,13 +102,20 @@ def docs(session: nox.Session) -> None:
 @nox.session(python=DEFAULT_PYTHON_VERSION)
 def autodocs(session: nox.Session) -> None:
     """Serve the documentation locally."""
-    session.install("-e", ".", "--group", "docs")
+    session.install("-e", ".[all]", "--group", "docs")
     session.run(
         "zensical",
         "serve",
         "--open",
         *session.posargs,
     )
+
+
+@nox.session(name="optional-deps", python=DEFAULT_PYTHON_VERSION, tags=["checks"])
+def optional_dependencies(session: nox.Session) -> None:
+    """Check the built wheel with each optional dependency in an isolated install."""
+    session.install("uv>=0.8.6")
+    session.run("python", "scripts/check_optional_dependencies.py")
 
 
 if __name__ == "__main__":

@@ -74,5 +74,7 @@ values and values created only during validation have no source coordinate.
 Bare custom callables can still resolve settings, but cannot provide provenance
 because they do not expose the required source state.
 
-The implementation lives in [`confidantic/_config/base.py`](../confidantic/_config/base.py).
+The public API lives in [`confidantic/_config/base.py`](../confidantic/_config/base.py),
+with source assembly, nested updates, CLI handling, and optional integrations
+described in [configuration implementation boundaries](configuration-architecture.md).
 The package-level overview is in [`baseconfig-resolution-order.md`](baseconfig-resolution-order.md).

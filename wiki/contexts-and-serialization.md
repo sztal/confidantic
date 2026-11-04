@@ -67,6 +67,13 @@ See the [format examples](../docs/index.md#yaml-and-toml) for both formats and
 [`examples/serialization.py`](../examples/serialization.py) for JSON and Python
 mapping round trips.
 
+Rich configuration display requires `confidantic[rich]`; all `model_info()` and
+`info()` output modes use Rich. Class `@attrs` generation requires
+`confidantic[docstrings]`, while source-level attribute-docstring extraction is
+part of the core package. Each integration imports its optional dependency only
+when used and reports the applicable extra if the package is missing. Install
+`confidantic[all]` to enable every integration.
+
 Other public integrations include [`Configurable`](../confidantic/configurable.py)
 for configurable classes, [`paths.py`](../confidantic/paths.py) for path-aware
 settings, [`logging.py`](../confidantic/logging.py) for logging configuration,

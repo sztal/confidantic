@@ -49,12 +49,9 @@ from pydantic_core import (
     core_schema,
 )
 
-from confidantic._config.base import (
-    _DISABLE_CLI_PARSE_ARGS,
-    BaseConfig,
-    _CopiedDefault,
-    _settings_schema,
-)
+from confidantic._config._cli import _CliSettings
+from confidantic._config._settings import _CopiedDefault, wrap_settings_schema
+from confidantic._config.base import BaseConfig
 
 __all__ = ("Factory",)
 
@@ -124,7 +121,7 @@ class Factory(BaseConfig, Generic[T]):
         generic_arguments = getattr(cls, "__pydantic_generic_metadata__", {}).get(
             "args", ()
         )
-        schema = _settings_schema(
+        schema = wrap_settings_schema(
             cls.model_from(target)
             if target is not None and generic_arguments
             else source_type,
@@ -360,11 +357,8 @@ class Factory(BaseConfig, Generic[T]):
         annotations are supported for acyclic values. Generated model types are
         reused within the resolution call without modifying the original types.
         """
-        token = _DISABLE_CLI_PARSE_ARGS.set(True)
-        try:
+        with _CliSettings.suppress():
             return cast(T, _resolve_factory(self, set()))
-        finally:
-            _DISABLE_CLI_PARSE_ARGS.reset(token)
 
     @classmethod
     def _model_from(

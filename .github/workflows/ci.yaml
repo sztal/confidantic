@@ -24,6 +24,7 @@ jobs:
           - lint
           - typecheck
           - docs
+          - optional-deps
     steps:
       - uses: actions/checkout@v5
         with:
@@ -120,7 +121,7 @@ jobs:
           name: coverage-data
       - name: Build the documentation and coverage report
         run: |
-          uv sync --group docs --group test
+          uv sync --group docs --group test --extra all
           uv run coverage json --data-file=coverage-data -o coverage.json
           uv run zensical build --clean --strict
           uv run coverage html --data-file=coverage-data -d site/coverage

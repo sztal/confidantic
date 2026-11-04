@@ -37,13 +37,13 @@ dynamic = [
   "version",
 ]
 dependencies = [
-  "docstring-parser>=0.18",
   "pydantic>=2.14",
   "pydantic-settings>=2.15",
-  "rich>=15",
 ]
 
-optional-dependencies.all = [ "confidantic[toml,yaml]" ]
+optional-dependencies.all = [ "confidantic[docstrings,rich,toml,yaml]" ]
+optional-dependencies.docstrings = [ "docstring-parser>=0.18" ]
+optional-dependencies.rich = [ "rich>=15" ]
 optional-dependencies.toml = [ "tomli-w>=1" ]
 optional-dependencies.yaml = [ "pyyaml>=6" ]
 
@@ -63,12 +63,14 @@ dev = [
 test = [
   "cloudpickle>=3.1.2",
   "coverage[toml]>=7.11",
+  "docstring-parser>=0.18",
   "ipdb",
   "joblib>=1.5.3",
   "nox>=2025.2.9",
   "pytest>=9",
   "pytest-xdist>=3.8",
   "pyyaml>=6",
+  "rich>=15",
   "tomli-w>=1",
 ]
 type = [

@@ -24,13 +24,29 @@ pip install confidantic
 uv add confidantic
 ```
 
-Install optional YAML and TOML serialization support individually with the
-`yaml` or `toml` extra, or install both with `all`:
+The core install includes configuration validation, settings sources, CLI
+parsing, factories, and attribute-docstring extraction. Install optional
+features with the corresponding extra:
+
+| Extra        | Feature                                                       |
+| ------------ | ------------------------------------------------------------- |
+| `rich`       | `model_info()` and `info()` table, string, and printed output |
+| `docstrings` | Generate class `Attributes` sections from `@attrs` markers    |
+| `yaml`       | YAML loading and dumping                                      |
+| `toml`       | TOML dumping; TOML loading is included in the core install    |
+| `all`        | All optional features                                         |
+
+For example, install every feature with:
 
 ```console
 pip install "confidantic[all]"
 uv add "confidantic[all]"
 ```
+
+Optional packages load only when their feature is used. A missing dependency
+raises `ImportError` with the installation command for its extra. An active
+`@attrs` generation request needs `docstrings` during class creation; unmarked
+docstrings, literal marker mentions, and disabled generation work without it.
 
 Install directly from [GitHub](https://github.com/sztal/confidantic) to use an
 unreleased change, a branch, or a tag:
@@ -176,7 +192,7 @@ documentation dependencies:
 git clone https://github.com/sztal/confidantic.git
 cd confidantic
 uv python install 3.13
-uv sync --group dev --group docs
+uv sync --group dev --group docs --extra all
 ```
 
 Run the checks used by CI:
@@ -186,4 +202,10 @@ uv run noxfile.py -s lint
 uv run pytest
 uv run noxfile.py -s typecheck
 uv run noxfile.py -s docs
+uv run noxfile.py -s optional-deps
 ```
+
+The `optional-deps` check builds a wheel once and verifies core, each individual
+extra, and `all` in fresh environments using the default interpreter. It runs
+outside the checkout so editable installs and development dependencies cannot
+mask missing runtime dependencies.

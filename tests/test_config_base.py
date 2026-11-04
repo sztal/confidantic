@@ -448,10 +448,10 @@ def test_format_methods_require_optional_dependencies(
 ) -> None:
     """Format methods provide install guidance when their dependencies are absent."""
 
-    def missing_module(_: str) -> Any:
-        raise ImportError
+    def missing_module(name: str) -> Any:
+        raise ModuleNotFoundError(f"No module named {name!r}", name=name)
 
-    monkeypatch.setattr("confidantic._config.base.import_module", missing_module)
+    monkeypatch.setattr("confidantic._config._formats.import_module", missing_module)
     target: Any = (
         FormatConfig if method_name.startswith("model_validate") else FormatConfig()
     )

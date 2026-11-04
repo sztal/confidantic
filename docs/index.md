@@ -19,6 +19,24 @@ Install `confidantic` using [pip](https://pip.pypa.io/) or [uv](https://docs.ast
 pip install confidantic
 ```
 
+The core install provides settings, CLI parsing, factories, and attribute-docstring
+extraction. Optional features are available separately:
+
+| Extra | Feature |
+| --- | --- |
+| `rich` | `model_info()` and `info()` display methods |
+| `docstrings` | `@attrs` class-docstring generation |
+| `yaml` | YAML loading and dumping |
+| `toml` | TOML dumping; loading uses the standard library |
+| `all` | Every optional feature |
+
+```console
+pip install "confidantic[all]"
+```
+
+Each optional package is imported only when its feature is used. Missing packages
+raise `ImportError` with guidance naming the extra to install.
+
 ## Frozen configuration
 
 `BaseConfig` instances are frozen by default, so model fields cannot be
@@ -75,6 +93,7 @@ class MutableAppConfig(BaseConfig):
 ## Field documentation
 
 Confidantic reads attribute docstrings into field descriptions by default.
+This extraction uses Pydantic and does not require the `docstrings` extra.
 Extraction is disabled automatically in Jupyter-like runtimes, including VS Code
 Interactive, where source inspection can fail.
 
@@ -84,7 +103,8 @@ configuration class takes precedence over the package default.
 Disabling extraction does not remove explicit `Field(description=...)`
 descriptions or disable the `@attrs` replacement below.
 
-Add an `@attrs` marker to a `BaseConfig` subclass's NumPy or Google `Attributes`
+Install `confidantic[docstrings]` and add an `@attrs` marker to a `BaseConfig`
+subclass's NumPy or Google `Attributes`
 section to replace the entire section with effective model field names and descriptions.
 The format is detected automatically, and text outside the section is preserved:
 
@@ -135,6 +155,11 @@ also raises because the parser requires an attribute entry; an empty NumPy
 section is accepted. Unmarked docstrings and marker mentions in prose, examples,
 or nested literal content are unchanged.
 
+Without `docstring-parser`, a valid active generation request raises `ImportError`
+during class creation, naming `confidantic[docstrings]`. Structural marker errors
+still raise `ValueError` before importing the parser. Unmarked docstrings,
+ignored markers, and explicitly disabled generation do not import the parser.
+
 Set `docstring_set_attributes_section=False` to retain an `@attrs` marker
 without replacing it:
 
@@ -154,6 +179,18 @@ class AppConfig(BaseConfig):
 		docstring_set_attributes_section=False,
 	)
 ```
+
+## Configuration display
+
+Install `confidantic[rich]` to use `Config.model_info()` or `config.info()`.
+All three output modes require Rich: `"table"` returns a Rich table, `"string"`
+returns its rendering, and `"print"` prints it. The methods raise `ImportError`
+with the installation command when Rich is unavailable.
+
+Return annotations retain the Rich table type for static type checking without
+importing Rich during model creation. Runtime `typing.get_type_hints()` on these
+methods requires an explicit namespace supplying `Table`; ordinary
+`inspect.signature()` remains available without Rich.
 
 ## Make directives
 

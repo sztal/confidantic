@@ -1,497 +1,50 @@
-"""Base configuration model."""
+"""Public configuration model and Pydantic integration hooks.
+
+Settings assembly, nested updates, CLI control, and optional features have
+separate owners. This module keeps the documented interface and dispatches
+through subclass hooks so extraction does not change configuration semantics.
+"""
 
 import tomllib
-from collections.abc import Callable, Collection, Mapping
-from contextvars import ContextVar
+from collections.abc import Callable, Mapping
 from copy import copy as shallow_copy
 from copy import deepcopy as deep_copy
-from dataclasses import dataclass
-from functools import wraps
-from importlib import import_module
-from inspect import Parameter, get_annotations, signature
-from io import StringIO
-from types import GenericAlias, MappingProxyType, UnionType
-from typing import (
-    Annotated,
-    Any,
-    ClassVar,
-    Literal,
-    Protocol,
-    Self,
-    Union,
-    cast,
-    get_args,
-    get_origin,
-    overload,
-)
+from inspect import signature
+from types import MappingProxyType
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, Self, cast, overload
 
 from dotenv import find_dotenv
 from pydantic import (
     AliasChoices,
     AliasPath,
     BaseModel,
-    ConfigDict,
-    Discriminator,
     GetCoreSchemaHandler,
     PrivateAttr,
-    PydanticUserError,
     SerializationInfo,
-    TypeAdapter,
     ValidationInfo,
     field_validator,
     model_serializer,
 )
-from pydantic._internal._config import config_keys
-from pydantic.fields import FieldInfo
-from pydantic_core import CoreSchema, PydanticUndefined, core_schema
-from pydantic_settings import (
-    BaseSettings,
-    CliSettingsSource,
-    EnvSettingsSource,
-    InitSettingsSource,
-    PydanticBaseSettingsSource,
-)
-from pydantic_settings import (
-    SettingsConfigDict as PydanticSettingsConfigDict,
-)
-from pydantic_settings.sources import DefaultSettingsSource
-from pydantic_settings.sources.types import ENV_FILE_SENTINEL
-from pydantic_settings.sources.utils import InitState, _get_alias_names
-from rich.console import Console
-from rich.highlighter import NullHighlighter
-from rich.pretty import Pretty
-from rich.style import Style
-from rich.table import Table
-from rich.text import Text
+from pydantic_core import CoreSchema, PydanticUndefined
+from pydantic_settings import BaseSettings, PydanticBaseSettingsSource
 
+from confidantic._config import _formats
+from confidantic._config._cli import _CliSettings
 from confidantic._config._docstrings import replace_attributes
-from confidantic.utils import (
-    get_import_string,
-    is_runtime_jupyterlike,
+from confidantic._config._nested import _NestedModelUpdates
+from confidantic._config._options import ConfigModelDict
+from confidantic._config._settings import (
+    _FieldSource,
+    _SettingsSources,
+    validate_settings,
+    wrap_settings_schema,
 )
+from confidantic.utils import get_import_string, is_runtime_jupyterlike
 
-__all__ = ("BaseConfig", "ClassDefaultsSource", "ConfigModelDict")
+if TYPE_CHECKING:
+    from rich.table import Table
 
-_FieldSource = tuple[
-    type[PydanticBaseSettingsSource],
-    type[BaseSettings],
-]
-_NestedModelBaselines = dict[str, BaseModel | object]
-
-
-class _YamlModule(Protocol):
-    def safe_dump(self, data: Any, **kwargs: Any) -> str: ...
-
-    def safe_load(self, stream: str | bytes) -> Any: ...
-
-
-class _TomlModule(Protocol):
-    def dumps(self, data: Any) -> str: ...
-
-
-_FACTORY_DEFAULT = object()
-_DEFERRED_MODEL_DEFAULT = object()
-_NESTED_MODEL_BASELINES: ContextVar[_NestedModelBaselines | None] = ContextVar(
-    "_NESTED_MODEL_BASELINES",
-    default=None,
-)
-_DISABLE_CLI_PARSE_ARGS: ContextVar[bool] = ContextVar(
-    "_DISABLE_CLI_PARSE_ARGS",
-    default=False,
-)
-
-
-class _FactoryCliSettingsSource(CliSettingsSource[Any]):
-    @staticmethod
-    def supports(model: type[BaseModel]) -> bool:
-        from confidantic._config.factory import Factory
-
-        return any(
-            isinstance(field.annotation, type)
-            and issubclass(field.annotation, Factory)
-            and isinstance(field.default, Factory)
-            for field in model.model_fields.values()
-        )
-
-    @staticmethod
-    def _import_annotation(target: type[Any]) -> Any:
-        from confidantic.annotations import Import
-
-        return Import[GenericAlias(type, target)]  # type: ignore[misc]
-
-    def _sort_arg_fields(self, model: type[BaseModel]) -> list[tuple[str, FieldInfo]]:
-        from confidantic._config.factory import Factory
-
-        fields = super()._sort_arg_fields(model)
-        normalized: list[tuple[str, FieldInfo]] = []
-        for field_name, field_info in fields:
-            if (
-                isinstance(field_info.annotation, type)
-                and issubclass(field_info.annotation, Factory)
-                and isinstance(field_info.default, Factory)
-            ):
-                field_info = shallow_copy(field_info)
-                field_info.annotation = type(field_info.default)
-            normalized.append((field_name, field_info))
-        return normalized
-
-
-class _FactoryCliHelpDisabledSettingsSource(_FactoryCliSettingsSource):
-    def _add_default_help(self) -> None:
-        pass
-
-
-class _CliHelpDisabledSettingsSource(CliSettingsSource[Any]):
-    def _add_default_help(self) -> None:
-        pass
-
-
-def _validate_settings(
-    cls: type["BaseConfig"], value: Any, handler: Callable[[Any], Any]
-) -> Any:
-    """Keep context-local source assembly behind an importable callback."""
-    if not isinstance(value, Mapping):
-        return handler(value)
-    kwargs = dict(value)
-    if _DISABLE_CLI_PARSE_ARGS.get() or is_runtime_jupyterlike():
-        kwargs["_cli_parse_args"] = False
-
-    config_options = {
-        name: kwargs.pop(f"_{name}")
-        for name in _CUSTOM_CONFIG_KEYS
-        if f"_{name}" in kwargs
-    }
-
-    build_sources = kwargs.pop("_build_sources", None)
-    if build_sources is None:
-        option_names = {
-            name
-            for method in (
-                BaseSettings._settings_init_sources,
-                cls._settings_init_sources,
-            )
-            for name, parameter in signature(method).parameters.items()
-            if parameter.kind
-            in (Parameter.POSITIONAL_OR_KEYWORD, Parameter.KEYWORD_ONLY)
-        }
-        source_options = {
-            key: kwargs.pop(key)
-            for key in tuple(kwargs)
-            if key in option_names and key != "_init_kwargs"
-        }
-        build_sources = cls._settings_init_sources(
-            **source_options,
-            _init_kwargs={
-                **kwargs,
-                "__confidantic_config_options": config_options,
-            },
-        )
-
-    token = _NESTED_MODEL_BASELINES.set({})
-    try:
-        result = handler(cls._settings_build_values(*build_sources))
-    finally:
-        _NESTED_MODEL_BASELINES.reset(token)
-
-    sources, _ = build_sources
-    resolved_source = next(
-        (
-            source
-            for source in reversed(sources)
-            if isinstance(source, _ResolvedSettingsSource)
-        ),
-        None,
-    )
-    if resolved_source is not None:
-        result._model_field_sources = resolved_source.field_sources.copy()
-        result._model_init_fields = resolved_source.init_fields.copy()
-    return result
-
-
-def _settings_schema(source: Any, handler: GetCoreSchemaHandler) -> CoreSchema:
-    schema = handler(source)
-    if schema["type"] == "definition-ref":
-        return schema
-    model_schema = dict(schema)
-    # Recursive references must include source assembly, not just the inner model.
-    reference = model_schema.pop("ref", None)
-    return core_schema.no_info_wrap_validator_function(
-        source._validate_settings, cast(CoreSchema, model_schema), ref=reference
-    )
-
-
-def _track_init_settings(method: Callable[..., Any]) -> Callable[..., Any]:
-    @wraps(method)
-    def tracked(*args: Any, **kwargs: Any) -> Any:
-        # Mark the actual source supplied to the customization hook, rather
-        # than treating every user-created InitSettingsSource as carried input.
-        init_settings = kwargs["init_settings"]
-        inputs = dict(init_settings.init_kwargs)
-        sources = method(*args, **kwargs)
-        init_settings._confidantic_init_input = {
-            key
-            for key, value in inputs.items()
-            if key in init_settings.init_kwargs
-            and init_settings.init_kwargs[key] is value
-        }
-        return sources
-
-    cast(Any, tracked)._confidantic_tracks_init = True
-    return tracked
-
-
-def _updated_fields(cls: type[BaseSettings], updates: Mapping[str, Any]) -> set[str]:
-    case_sensitive = cls.model_config.get("case_sensitive", False)
-    normalized = {
-        key if case_sensitive else key.lower(): value for key, value in updates.items()
-    }
-    updated = set()
-    for name, field in cls.model_fields.items():
-        alias = field.validation_alias
-        aliases = alias.choices if isinstance(alias, AliasChoices) else [alias]
-        for candidate in [name, *aliases]:
-            path = candidate.path if isinstance(candidate, AliasPath) else [candidate]
-            if not isinstance(path[0], str):
-                continue
-            root = path[0] if case_sensitive else path[0].lower()
-            if (
-                AliasPath(root, *path[1:]).search_dict_for_path(normalized)
-                is not PydanticUndefined
-            ):
-                updated.add(name)
-                break
-    return updated
-
-
-class _InitSettingsSource(InitSettingsSource):
-    def __call__(self) -> dict[str, Any]:
-        try:
-            return super().__call__()
-        except TypeError as error:
-            if "unhashable type: 'dict'" not in str(error):
-                raise
-            return self.init_kwargs
-
-
-class ConfigModelDict(PydanticSettingsConfigDict, total=False):
-    """Configuration options for :class:`BaseConfig`.
-
-    Attributes
-    ----------
-    case_sensitive
-        Whether environment-variable and command-line names are case-sensitive.
-    nested_model_default_partial_update
-        Whether source values may partially update default nested models.
-    env_prefix
-        Prefix applied to environment variable names at this class's MRO level.
-        ``None`` disables process environment parsing at that level; an empty
-        string enables it without a prefix. Parent levels retain their own
-        settings. Dotenv and secret-file loading are not disabled by ``None``.
-    env_prefix_target
-        Names to which ``env_prefix`` applies: ``"variable"``, ``"alias"``,
-        or ``"all"``.
-    env_file
-        Dotenv file or files to load. ``None`` disables dotenv loading unless
-        ``env_file_discovery`` is enabled. Later files override earlier files.
-    env_file_discovery
-        Whether to call :meth:`BaseConfig.find_dotenv` when no dotenv file is
-        configured or supplied per instance. An explicit ``_env_file=None``
-        also requests discovery when enabled; disable discovery to suppress it.
-    env_file_encoding
-        Text encoding used to read ``env_file``.
-    env_file_depth
-        Number of parent directories to search for a relative ``env_file``.
-        Requires Pydantic Settings 2.16 or later.
-    dotenv_filtering
-        Policy for filtering dotenv variables before validation. The default
-        ``"only_existing"`` keeps variables matching declared fields;
-        ``"match_prefix"`` also includes otherwise unused prefixed variables.
-        ``None`` includes unused variables regardless of prefix, subject to
-        the model's extra-field policy during validation.
-    env_ignore_empty
-        Whether empty environment and dotenv values are ignored.
-    env_nested_delimiter
-        Delimiter used to map environment and dotenv variables to nested values.
-    env_nested_max_split
-        Maximum number of ``env_nested_delimiter`` splits for one variable.
-    env_parse_none_str
-        Environment and dotenv string value interpreted as ``None``.
-    env_parse_enums
-        Whether environment and dotenv enum member names are parsed as values.
-    cli_help
-        Whether Confidantic's generated CLI parser provides its standard help
-        option. Defaults to ``True``; does not change a supplied custom parser.
-    cli_prog_name
-        Program name displayed in command-line help.
-    cli_parse_args
-        ``True`` parses process arguments; a list or tuple supplies explicit
-        arguments. ``None`` and ``False`` disable automatic parsing. Only the
-        most-derived class parses CLI arguments, and notebook-like runtimes
-        suppress automatic parsing even for an explicit argument sequence.
-    cli_parse_none_str
-        Command-line string value interpreted as ``None``. When
-        ``env_parse_none_str`` is set, the settings CLI uses that value instead.
-    cli_hide_none_type
-        Whether command-line help hides ``None`` in field types.
-    cli_avoid_json
-        Whether command-line help avoids JSON syntax for complex values.
-    cli_enforce_required
-        Whether required fields are enforced by the command-line parser.
-    cli_use_class_docs_for_groups
-        Whether command-line argument groups use class docstrings.
-    cli_show_env_vars
-        Whether command-line help displays resolved environment variable names.
-    cli_exit_on_error
-        Whether command-line parsing exits when it encounters an error.
-    cli_prefix
-        Prefix for root command-line arguments.
-    cli_flag_prefix_char
-        Prefix character for command-line option flags.
-    cli_implicit_flags
-        Whether boolean fields use implicit flags, and their ``"dual"`` or
-        ``"toggle"`` mode.
-    cli_ignore_unknown_args
-        Whether command-line parsing ignores unknown arguments.
-    cli_kebab_case
-        Whether command-line option names use kebab case, including its
-        ``"all"`` and ``"no_enums"`` modes.
-    cli_shortcuts
-        Mapping from field names to command-line shortcut names.
-    secrets_dir
-        Directory, or ordered directories, containing secret files.
-    json_file, json_file_encoding
-        JSON configuration file or files and their text encoding. Add a
-        :class:`pydantic_settings.JsonConfigSettingsSource` through
-        :meth:`BaseConfig.settings_customise_sources` to use them.
-    yaml_file, yaml_file_encoding, yaml_config_section
-        YAML configuration file or files, their text encoding, and an optional
-        dotted section. Add a :class:`pydantic_settings.YamlConfigSettingsSource`
-        through :meth:`BaseConfig.settings_customise_sources` to use them.
-    toml_file, toml_table_header
-        TOML configuration file or files and an optional table header. Add a
-        :class:`pydantic_settings.TomlConfigSettingsSource` through
-        :meth:`BaseConfig.settings_customise_sources` to use them.
-    pyproject_toml_depth, pyproject_toml_table_header
-        Number of parent directories to search for ``pyproject.toml`` and the
-        table header to load. Add a
-        :class:`pydantic_settings.PyprojectTomlConfigSettingsSource` through
-        :meth:`BaseConfig.settings_customise_sources` to use them.
-    enable_decoding
-        Whether settings sources decode complex values by default. Field-level
-        ``pydantic_settings.NoDecode`` and ``pydantic_settings.ForceDecode``
-        annotations override this setting.
-    use_attribute_docstrings
-        Whether field descriptions are read from attribute docstrings. This is
-        enabled by default except in Jupyter-like runtimes, where source
-        mapping may be unavailable. An explicit per-class setting takes
-        precedence. Explicit field descriptions remain available when extraction
-        is disabled and take precedence over attribute docstrings when enabled.
-    docstring_set_attributes_section
-        Whether model fields replace an ``@attrs`` marker in the class
-        docstring's ``Attributes`` section when a configuration subclass is
-        created. ``None`` enables marker replacement by default.
-    docstring_style
-        Expected format for marked class docstrings: ``"numpy"`` or
-        ``"google"``. ``None`` detects the format from the Attributes section.
-        Invalid marked docstrings raise ``ValueError`` during class creation.
-    """
-
-    docstring_set_attributes_section: bool | None
-    docstring_style: Literal["numpy", "google"] | None
-    env_file_discovery: bool
-    cli_help: bool
-
-
-_CUSTOM_CONFIG_KEYS = set(ConfigModelDict.__annotations__) - set(
-    PydanticSettingsConfigDict.__annotations__
-)
-config_keys.update(_CUSTOM_CONFIG_KEYS)
-
-
-@dataclass(frozen=True)
-class _CopiedDefault:
-    """Copy a generated default while retaining its settings-merge template."""
-
-    template: Any
-
-    def __call__(self) -> Any:
-        return deep_copy(self.template)
-
-
-class ClassDefaultsSource(PydanticBaseSettingsSource):
-    """Load defaults declared directly on one settings class.
-
-    Static defaults become source values so they participate in BaseConfig's
-    per-MRO priority and nested merging. Default factories and discriminated
-    defaults act as whole-field barriers until Pydantic evaluates them during
-    validation. Generated copy-default wrappers contribute independently copied
-    templates instead, preserving static-default merging without sharing state.
-
-    Parameters
-    ----------
-    settings_cls
-        Settings class whose defaults are loaded.
-    field_names
-        Field names to consider. By default, use fields declared directly on
-        ``settings_cls``.
-    _init_state
-        Optional source state shared with other Pydantic Settings sources.
-    """
-
-    def __init__(
-        self,
-        settings_cls: type[BaseSettings],
-        field_names: Collection[str] | None = None,
-        _init_state: InitState | None = None,
-    ) -> None:
-        super().__init__(settings_cls, _init_state)
-        self.defaults: dict[str, Any] = {}
-        field_names = (
-            get_annotations(settings_cls) if field_names is None else field_names
-        )
-        for field_name in field_names:
-            if field_name not in settings_cls.model_fields:
-                continue
-            field = settings_cls.model_fields[field_name]
-            if field.is_required():
-                continue
-
-            aliases, _ = _get_alias_names(field_name, field)
-            key = aliases[0] if aliases else field_name
-            if (
-                field.default_factory is not None
-                and not isinstance(field.default_factory, _CopiedDefault)
-            ) or _field_has_discriminator(field):
-                self.defaults[key] = _FACTORY_DEFAULT
-            else:
-                default = (
-                    field.default_factory()
-                    if isinstance(field.default_factory, _CopiedDefault)
-                    else field.get_default(call_default_factory=False)
-                )
-                adapter_config = (
-                    ConfigDict(arbitrary_types_allowed=True)
-                    if settings_cls.model_config.get("arbitrary_types_allowed")
-                    else None
-                )
-                annotation = cast(Any, field.annotation)
-                try:
-                    adapter: TypeAdapter[Any] = TypeAdapter(
-                        annotation, config=adapter_config
-                    )
-                except PydanticUserError as error:
-                    if error.code != "type-adapter-config-unused":
-                        raise
-                    adapter = TypeAdapter(annotation)
-                self.defaults[key] = adapter.dump_python(default)
-
-    def __call__(self) -> dict[str, Any]:
-        return self.defaults
-
-    def get_field_value(
-        self, field: FieldInfo, field_name: str
-    ) -> tuple[Any, str, bool]:
-        return None, "", False  # pragma: no cover
+__all__ = ("BaseConfig",)
 
 
 class BaseConfig(BaseSettings):
@@ -540,7 +93,8 @@ class BaseConfig(BaseSettings):
     Google sections also accept ``@attrs:``. The format is detected unless
     ``docstring_style`` specifies ``"numpy"`` or ``"google"``. Set
     ``docstring_set_attributes_section=False`` in ``model_config`` to disable
-    the replacement.
+    the replacement. Generation requires ``confidantic[docstrings]``;
+    ordinary field-description extraction does not require that extra.
     """
 
     model_config: ClassVar[ConfigModelDict] = ConfigModelDict(
@@ -579,11 +133,11 @@ class BaseConfig(BaseSettings):
     def __get_pydantic_core_schema__(
         cls, source_type: Any, handler: GetCoreSchemaHandler
     ) -> CoreSchema:
-        return _settings_schema(source_type, handler)
+        return wrap_settings_schema(source_type, handler)
 
     @classmethod
     def _validate_settings(cls, value: Any, handler: Callable[[Any], Any]) -> Any:
-        return _validate_settings(cls, value, handler)
+        return validate_settings(cls, value, handler)
 
     def __copy__(self) -> Self:
         """Return a shallow structural copy of this configuration."""
@@ -613,6 +167,7 @@ class BaseConfig(BaseSettings):
 
     @classmethod
     def __pydantic_init_subclass__(cls, **kwargs: Any) -> None:
+        """Track source customizations and expand explicitly marked docstrings."""
         super().__pydantic_init_subclass__(**kwargs)
         descriptor = next(
             base.__dict__["settings_customise_sources"]
@@ -625,7 +180,7 @@ class BaseConfig(BaseSettings):
             else descriptor
         )
         if not getattr(method, "_confidantic_tracks_init", False):
-            tracked: Any = _track_init_settings(method)
+            tracked: Any = _SettingsSources.track_customization(method)
             if isinstance(descriptor, (classmethod, staticmethod)):
                 tracked = type(descriptor)(tracked)
             cast(Any, cls).settings_customise_sources = tracked
@@ -696,38 +251,22 @@ class BaseConfig(BaseSettings):
         ImportError
             If PyYAML is not installed.
         """
-        try:
-            yaml = cast(_YamlModule, import_module("yaml"))
-        except ImportError as error:
-            raise ImportError(
-                "model_dump_yaml() requires PyYAML; install confidantic[yaml]"
-            ) from error
-
-        dump_options = {
-            "include": include,
-            "exclude": exclude,
-            "context": context,
-            "by_alias": by_alias,
-            "exclude_unset": exclude_unset,
-            "exclude_defaults": exclude_defaults,
-            "exclude_none": exclude_none,
-            "exclude_computed_fields": exclude_computed_fields,
-            "round_trip": round_trip,
-            "warnings": warnings,
-            "fallback": fallback,
-            "serialize_as_any": serialize_as_any,
-            "polymorphic_serialization": polymorphic_serialization,
-        }
-        yaml_options: dict[str, Any] = {
-            "allow_unicode": True,
-            "default_flow_style": False,
-            "sort_keys": False,
-        }
-        if indent is not None:
-            yaml_options["indent"] = indent
-        return yaml.safe_dump(
-            self.model_dump(mode="json", **dump_options),
-            **yaml_options,
+        return _formats.dump_yaml(
+            self,
+            indent=indent,
+            include=include,
+            exclude=exclude,
+            context=context,
+            by_alias=by_alias,
+            exclude_unset=exclude_unset,
+            exclude_defaults=exclude_defaults,
+            exclude_none=exclude_none,
+            exclude_computed_fields=exclude_computed_fields,
+            round_trip=round_trip,
+            warnings=warnings,
+            fallback=fallback,
+            serialize_as_any=serialize_as_any,
+            polymorphic_serialization=polymorphic_serialization,
         )
 
     def model_dump_toml(
@@ -784,30 +323,21 @@ class BaseConfig(BaseSettings):
         TypeError
             If dumped values cannot be represented in TOML, including ``None``.
         """
-        try:
-            tomli_w = cast(_TomlModule, import_module("tomli_w"))
-        except ImportError as error:
-            raise ImportError(
-                "model_dump_toml() requires tomli-w; install confidantic[toml]"
-            ) from error
-
-        return tomli_w.dumps(
-            self.model_dump(
-                mode="json",
-                include=include,
-                exclude=exclude,
-                context=context,
-                by_alias=by_alias,
-                exclude_unset=exclude_unset,
-                exclude_defaults=exclude_defaults,
-                exclude_none=exclude_none,
-                exclude_computed_fields=exclude_computed_fields,
-                round_trip=round_trip,
-                warnings=warnings,
-                fallback=fallback,
-                serialize_as_any=serialize_as_any,
-                polymorphic_serialization=polymorphic_serialization,
-            )
+        return _formats.dump_toml(
+            self,
+            include=include,
+            exclude=exclude,
+            context=context,
+            by_alias=by_alias,
+            exclude_unset=exclude_unset,
+            exclude_defaults=exclude_defaults,
+            exclude_none=exclude_none,
+            exclude_computed_fields=exclude_computed_fields,
+            round_trip=round_trip,
+            warnings=warnings,
+            fallback=fallback,
+            serialize_as_any=serialize_as_any,
+            polymorphic_serialization=polymorphic_serialization,
         )
 
     @classmethod
@@ -857,15 +387,8 @@ class BaseConfig(BaseSettings):
         separately without forwarding these options; disable
         ``nested_model_default_partial_update`` when this distinction matters.
         """
-        try:
-            yaml = cast(_YamlModule, import_module("yaml"))
-        except ImportError as error:
-            raise ImportError(
-                "model_validate_yaml() requires PyYAML; install confidantic[yaml]"
-            ) from error
-
         return cls.model_validate(
-            yaml.safe_load(yaml_data),
+            _formats.load_yaml(yaml_data),
             strict=strict,
             extra=extra,
             from_attributes=from_attributes,
@@ -1094,8 +617,7 @@ class BaseConfig(BaseSettings):
 
         if not _contains_factory(self):
             return shallow_copy(self)
-        token = _DISABLE_CLI_PARSE_ARGS.set(True)
-        try:
+        with _CliSettings.suppress():
             return cast(
                 Self,
                 _resolve_model_instance(
@@ -1104,8 +626,6 @@ class BaseConfig(BaseSettings):
                     name=name,
                 ),
             )
-        finally:
-            _DISABLE_CLI_PARSE_ARGS.reset(token)
 
     @property
     def model_field_sources(self) -> Mapping[str, _FieldSource]:
@@ -1149,7 +669,7 @@ class BaseConfig(BaseSettings):
         header: bool = True,
         describe: bool = True,
         colors: bool = False,
-    ) -> Table: ...
+    ) -> "Table": ...
 
     @classmethod
     @overload
@@ -1168,7 +688,7 @@ class BaseConfig(BaseSettings):
         header: bool = True,
         describe: bool = True,
         colors: bool = False,
-    ) -> Table | str | None:
+    ) -> "Table | str | None":
         """Present the configuration options as a Rich table.
 
         Options use canonical model field names and retain Pydantic's field
@@ -1199,17 +719,28 @@ class BaseConfig(BaseSettings):
 
         Raises
         ------
+        ImportError
+            If Rich is not installed; install ``confidantic[rich]``.
         ValueError
             If ``output`` is not a supported mode.
+
+        Notes
+        -----
+        Rich return types are imported only for static type checking. Runtime
+        evaluation of these annotations requires a namespace containing Table.
         """
-        table = cls._build_info_table(
-            types=True,
-            defaults=True,
-            header=header,
-            describe=describe,
-            colors=colors,
-        )
-        return cls._render_info(table, output=output, colors=colors)
+        try:
+            from confidantic._config._info import _InfoRenderer
+        except ModuleNotFoundError as error:
+            if error.name != "rich":
+                raise
+            raise ImportError(
+                "model_info() requires Rich; install confidantic[rich]"
+            ) from error
+
+        renderer = _InfoRenderer(cls, header=header, describe=describe, colors=colors)
+        table = renderer.build_table(types=True, defaults=True)
+        return renderer.render(table, output=output)
 
     @overload
     def info(
@@ -1229,7 +760,7 @@ class BaseConfig(BaseSettings):
         describe: bool = True,
         colors: bool = False,
         types: bool = False,
-    ) -> Table: ...
+    ) -> "Table": ...
 
     @overload
     def info(
@@ -1248,7 +779,7 @@ class BaseConfig(BaseSettings):
         describe: bool = True,
         colors: bool = False,
         types: bool = False,
-    ) -> Table | str | None:
+    ) -> "Table | str | None":
         """Present the configuration fields and current values as a Rich table.
 
         The ``Value`` column contains each validated Python value as stored on
@@ -1282,121 +813,30 @@ class BaseConfig(BaseSettings):
 
         Raises
         ------
+        ImportError
+            If Rich is not installed; install ``confidantic[rich]``.
         ValueError
             If ``output`` is not a supported mode.
+
+        Notes
+        -----
+        Rich return types are imported only for static type checking. Runtime
+        evaluation of these annotations requires a namespace containing Table.
         """
+        try:
+            from confidantic._config._info import _InfoRenderer
+        except ModuleNotFoundError as error:
+            if error.name != "rich":
+                raise
+            raise ImportError(
+                "info() requires Rich; install confidantic[rich]"
+            ) from error
+
         cls = type(self)
-        values = {
-            field_name: getattr(self, field_name) for field_name in cls.model_fields
-        }
-        table = cls._build_info_table(
-            values=values,
-            types=types,
-            defaults=False,
-            header=header,
-            describe=describe,
-            colors=colors,
-        )
-        return cls._render_info(table, output=output, colors=colors)
-
-    @classmethod
-    def _build_info_table(
-        cls,
-        *,
-        values: Mapping[str, Any] | None = None,
-        types: bool,
-        defaults: bool,
-        header: bool,
-        describe: bool,
-        colors: bool,
-    ) -> Table:
-        null_style = None if colors else Style()
-        highlighter = None if colors else NullHighlighter()
-        table = Table(
-            title=cls.__name__ if header else None,
-            header_style="table.header" if colors else null_style,
-            border_style=null_style,
-            title_style=null_style,
-        )
-        table.add_column("Option", style="cyan" if colors else None, no_wrap=True)
-        if types:
-            table.add_column("Type", style="magenta" if colors else None)
-        if values is not None:
-            table.add_column("Value")
-        if defaults:
-            table.add_column("Default")
-        if describe:
-            table.add_column("Description")
-
-        for field_name, field in cls.model_fields.items():
-            cells: list[Any] = [Text(field_name)]
-            if types:
-                annotation = field.annotation
-                if annotation is type(None):
-                    annotation_name = "None"
-                elif get_origin(annotation) is None and isinstance(annotation, type):
-                    annotation_name = annotation.__name__
-                else:
-                    annotation_name = str(annotation).removeprefix("typing.")
-                cells.append(Text(annotation_name))
-            if values is not None:
-                cells.append(
-                    Pretty(
-                        values[field_name],
-                        highlighter=highlighter,
-                    )
-                )
-            if defaults:
-                default: Text | Pretty
-                if field.is_required():
-                    default = Text("required", style="bold red" if colors else "")
-                elif field.default_factory is not None:
-                    factory_name = getattr(
-                        field.default_factory,
-                        "__name__",
-                        type(field.default_factory).__name__,
-                    )
-                    default = Text(
-                        f"<factory: {factory_name}>",
-                        style="dim" if colors else "",
-                    )
-                else:
-                    default = Pretty(
-                        field.get_default(call_default_factory=False),
-                        highlighter=highlighter,
-                    )
-                cells.append(default)
-            if describe:
-                cells.append(Text(field.description or ""))
-            table.add_row(*cells)
-
-        return table
-
-    @staticmethod
-    def _render_info(
-        table: Table,
-        *,
-        output: Literal["table", "string", "print"],
-        colors: bool,
-    ) -> Table | str | None:
-        if output not in {"table", "string", "print"}:
-            raise ValueError(f"Invalid output mode: {output!r}")
-        if output == "table":
-            return table
-        if output == "string":
-            buffer = StringIO()
-            Console(
-                file=buffer,
-                color_system="auto" if colors else None,
-                force_terminal=colors,
-            ).print(table)
-            return buffer.getvalue()
-
-        Console(
-            color_system="auto" if colors else None,
-            force_terminal=colors,
-        ).print(table)
-        return None
+        renderer = _InfoRenderer(cls, header=header, describe=describe, colors=colors)
+        values = {name: getattr(self, name) for name in cls.model_fields}
+        table = renderer.build_table(values=values, types=types, defaults=False)
+        return renderer.render(table, output=output)
 
     @classmethod
     def _settings_init_sources(
@@ -1408,151 +848,17 @@ class BaseConfig(BaseSettings):
             *args, **upstream_options
         )
         bound_options.apply_defaults()
-        local_options = dict(bound_options.arguments)
-        source_options = local_options.copy()
-        init_kwargs = local_options["_init_kwargs"]
-        if init_kwargs is None:
-            init_kwargs = {}
-        env_file = local_options["_env_file"]
-        config_options = init_kwargs.pop("__confidantic_config_options", {})
-        model_config: dict[str, Any] = {**cls.model_config, **config_options}
-        if model_config.get("env_file_discovery") and (
-            env_file is None
-            or (env_file is ENV_FILE_SENTINEL and model_config.get("env_file") is None)
-        ):
-            source_options["_env_file"] = cls.find_dotenv()
-        levels = [
-            cast(type[BaseConfig], level)
+        levels = tuple(
+            level
             for level in cls.__mro__
             if issubclass(level, BaseConfig) and level is not BaseConfig
-        ]
-        if not levels:
-            if source_options.get("_env_prefix") is None:
-                source_options["_env_prefix"] = ""
-            return super()._settings_init_sources(**source_options)
-
-        resolved_sources: list[PydanticBaseSettingsSource] = []
-        init_state = InitState()
-        partial_update = False
-
-        for index, level in enumerate(levels):
-            source_builder = BaseSettings.__dict__["_settings_init_sources"].__get__(
-                None, level
-            )
-            level_config: dict[str, Any] = {
-                **level.model_config,
-                **config_options,
-            }
-            cli_source_options = {
-                name: local_options[f"_{name}"]
-                for name in signature(CliSettingsSource).parameters
-                if f"_{name}" in local_options
-            }
-            env_source_options = {
-                name: local_options[f"_{name}"]
-                for name in signature(EnvSettingsSource).parameters
-                if f"_{name}" in local_options
-            }
-            cli_source_options = {
-                name: value if value is not None else level_config.get(name)
-                for name, value in cli_source_options.items()
-            }
-            env_source_options = {
-                name: value if value is not None else level_config.get(name)
-                for name, value in env_source_options.items()
-            }
-            env_prefix = env_source_options["env_prefix"]
-            env_source_options["env_prefix"] = env_prefix or ""
-            if env_source_options["env_parse_none_str"] is not None:
-                cli_source_options["cli_parse_none_str"] = env_source_options[
-                    "env_parse_none_str"
-                ]
-            cli_settings_source = (
-                local_options["_cli_settings_source"] if index == 0 else None
-            )
-            if (
-                index == 0
-                and cli_source_options["cli_parse_args"] is not None
-                and cli_source_options["cli_parse_args"] is not False
-                and cli_settings_source is None
-            ):
-                has_factory_fields = _FactoryCliSettingsSource.supports(level)
-                if has_factory_fields or not level_config.get("cli_help", True):
-                    source_type = (
-                        _FactoryCliSettingsSource
-                        if level_config.get("cli_help", True)
-                        else (
-                            _FactoryCliHelpDisabledSettingsSource
-                            if has_factory_fields
-                            else _CliHelpDisabledSettingsSource
-                        )
-                    )
-                    cli_settings_source = source_type(
-                        level,
-                        **cli_source_options,
-                        _env_settings_source=EnvSettingsSource(
-                            level,
-                            **env_source_options,
-                        ),
-                    )
-            level_options = source_options | {
-                "_env_prefix": env_prefix or "",
-                "_cli_parse_args": local_options["_cli_parse_args"]
-                if index == 0
-                else False,
-                "_cli_settings_source": cli_settings_source,
-                "_init_kwargs": init_kwargs,
-            }
-            level_sources, _ = source_builder(**level_options)
-            normalized_sources = []
-            for source in level_sources:
-                if env_prefix is None and type(source) is EnvSettingsSource:
-                    continue
-                if type(source) is InitSettingsSource:
-                    replacement = _InitSettingsSource(
-                        source.settings_cls,
-                        source.init_kwargs,
-                        source.nested_model_default_partial_update,
-                        source._init_state,
-                    )
-                    cast(Any, replacement)._confidantic_init_input = getattr(
-                        source, "_confidantic_init_input", ()
-                    )
-                    source = replacement
-                normalized_sources.append(source)
-            level_sources = tuple(normalized_sources)
-            default_source = next(
-                source
-                for source in reversed(level_sources)
-                if isinstance(source, DefaultSettingsSource)
-            )
-            if index == 0:
-                partial_update = bool(
-                    default_source.nested_model_default_partial_update
-                )
-            init_state = default_source._init_state
-            resolved_sources.extend(
-                source
-                for source in level_sources
-                if not isinstance(source, DefaultSettingsSource)
-                and (index == 0 or not isinstance(source, CliSettingsSource))
-            )
-
-            defaults = ClassDefaultsSource(
-                level,
-                _init_state=default_source._init_state,
-            )
-            if defaults.defaults:
-                resolved_sources.append(defaults)
-
-        sources = tuple(resolved_sources)
-        resolved_source = _ResolvedSettingsSource(
-            cls,
-            sources,
-            _init_state=init_state,
-            nested_model_default_partial_update=partial_update,
         )
-        return (*sources, resolved_source), init_kwargs
+        return _SettingsSources(
+            cls,
+            levels=levels,
+            options=bound_options.arguments,
+            find_dotenv=cls.find_dotenv,
+        ).build(super()._settings_init_sources)
 
     @classmethod
     def _settings_build_values(
@@ -1561,88 +867,32 @@ class BaseConfig(BaseSettings):
         init_kwargs: dict[str, Any],
     ) -> dict[str, Any]:
         values = super()._settings_build_values(sources, init_kwargs)
-        defaults: dict[str, Any] = {}
-        seen_defaults: set[str] = set()
-
-        for source in sources:
-            if isinstance(source, ClassDefaultsSource):
-                for key, value in source.defaults.items():
-                    if key in seen_defaults:
-                        continue
-                    seen_defaults.add(key)
-                    if key not in source.current_state:
-                        defaults[key] = value
-
-        values = {
-            key: value
-            for key, value in values.items()
-            if key not in defaults or defaults[key] != value
-        }
-
-        resolved_source = next(
-            (
-                source
-                for source in reversed(sources)
-                if isinstance(source, _ResolvedSettingsSource)
-            ),
-            None,
-        )
-        baselines = _NESTED_MODEL_BASELINES.get()
-        if (
-            resolved_source is None
-            or not resolved_source.nested_model_default_partial_update
-            or baselines is None
-        ):
-            return values
-
-        for field_name, field in cls.model_fields.items():
-            if _field_has_discriminator(field):
-                continue
-            aliases, _ = _get_alias_names(field_name, field)
-            keys = aliases or (field_name,)
-            selected_key = next(
-                (candidate for candidate in keys if candidate in values),
-                None,
-            )
-            if selected_key is None or not isinstance(values[selected_key], Mapping):
-                continue
-
-            for source in sources:
-                if not isinstance(source, InitSettingsSource):
-                    continue
-                source_key = next(
-                    (
-                        candidate
-                        for candidate in keys
-                        if candidate in source.init_kwargs
-                    ),
-                    None,
-                )
-                if source_key is None:
-                    continue
-                baseline = source.init_kwargs[source_key]
-                if not isinstance(baseline, BaseModel):
-                    continue
-                if not any(candidate in source.current_state for candidate in keys):
-                    values[selected_key] = baseline
-                else:
-                    baselines[field_name] = baseline
-                break
-            else:
-                if not field.is_required():
-                    if field.default_factory is not None:
-                        if _annotation_has_model(field.annotation):
-                            baselines[field_name] = _DEFERRED_MODEL_DEFAULT
-                    else:
-                        baseline = field.get_default(call_default_factory=False)
-                        if isinstance(baseline, BaseModel):
-                            baselines[field_name] = baseline
-
-        return values
+        return _SettingsSources.finalize_values(cls, sources, values)
 
     def _copy_with_updates(self, updates: Mapping[str, Any]) -> Self:
         cls = type(self)
-        updated_fields = _updated_fields(cls, updates)
+        case_sensitive = cls.model_config.get("case_sensitive", False)
+        normalized = {
+            key if case_sensitive else key.lower(): value
+            for key, value in updates.items()
+        }
+        updated_fields = set()
+        for name, field in cls.model_fields.items():
+            alias = field.validation_alias
+            aliases = alias.choices if isinstance(alias, AliasChoices) else [alias]
+            for candidate in [name, *aliases]:
+                path = (
+                    candidate.path if isinstance(candidate, AliasPath) else [candidate]
+                )
+                if not isinstance(path[0], str):
+                    continue
+                root = path[0] if case_sensitive else path[0].lower()
+                if (
+                    AliasPath(root, *path[1:]).search_dict_for_path(normalized)
+                    is not PydanticUndefined
+                ):
+                    updated_fields.add(name)
+                    break
         values = {
             name: getattr(self, name)
             for name in cls.model_fields
@@ -1719,148 +969,5 @@ class BaseConfig(BaseSettings):
         value: Any,
         info: ValidationInfo,
     ) -> Any:
-        return _apply_nested_model_partial_update(cls, value, info)
-
-
-def _apply_nested_model_partial_update(
-    cls: type[BaseConfig], value: Any, info: ValidationInfo
-) -> Any:
-    """Keep context-local validation state behind an importable function."""
-    baselines = _NESTED_MODEL_BASELINES.get()
-    if baselines is None or info.field_name not in baselines:
-        return value
-
-    baseline = baselines[info.field_name]
-    if baseline is _DEFERRED_MODEL_DEFAULT:
-        baseline = cls.model_fields[info.field_name].get_default(
-            call_default_factory=True,
-            validated_data=info.data,
-        )
-    if isinstance(baseline, BaseModel) and isinstance(value, Mapping):
-        return _update_nested_model(baseline, value)
-    return value
-
-
-class _ResolvedSettingsSource(PydanticBaseSettingsSource):
-    def __init__(
-        self,
-        settings_cls: type[BaseSettings],
-        sources: tuple[PydanticBaseSettingsSource, ...],
-        _init_state: InitState,
-        nested_model_default_partial_update: bool,
-    ) -> None:
-        super().__init__(settings_cls, _init_state)
-        self.sources = sources
-        self.nested_model_default_partial_update = nested_model_default_partial_update
-        self.field_sources: dict[str, _FieldSource] = {}
-        self.init_fields: set[str] = set()
-
-    def __call__(self) -> dict[str, Any]:
-        self.field_sources.clear()
-        self.init_fields.clear()
-        if not all(
-            isinstance(source, PydanticBaseSettingsSource) for source in self.sources
-        ):
-            return {}
-
-        field_keys = {
-            name: (*_get_alias_names(name, field)[0], name)
-            for name, field in self.settings_cls.model_fields.items()
-        }
-        known_keys = {key for keys in field_keys.values() for key in keys}
-        extra_keys = self.current_state.keys() - known_keys
-        for field_name, keys in (
-            field_keys | {key: (key,) for key in extra_keys}
-        ).items():
-            for index, source in enumerate(self.sources):
-                next_state = (
-                    self.sources[index + 1].current_state
-                    if index + 1 < len(self.sources)
-                    else self.current_state
-                )
-                if any(
-                    key not in source.current_state and key in next_state
-                    for key in keys
-                ):
-                    if field_name in field_keys:
-                        self.field_sources[field_name] = (
-                            InitSettingsSource
-                            if isinstance(source, _InitSettingsSource)
-                            else type(source),
-                            source.settings_cls,
-                        )
-                    if any(
-                        key in getattr(source, "_confidantic_init_input", ())
-                        for key in keys
-                    ):
-                        self.init_fields.add(field_name)
-                    break
-
-        return {}
-
-    def get_field_value(
-        self, field: FieldInfo, field_name: str
-    ) -> tuple[Any, str, bool]:
-        return None, "", False  # pragma: no cover
-
-
-def _field_has_discriminator(field: FieldInfo) -> bool:
-    return field.discriminator is not None or any(
-        isinstance(metadata, Discriminator) for metadata in field.metadata
-    )
-
-
-def _annotation_has_model(annotation: Any) -> bool:
-    if isinstance(annotation, type):
-        return issubclass(annotation, BaseModel)
-    origin = get_origin(annotation)
-    if origin is Annotated:
-        return _annotation_has_model(get_args(annotation)[0])
-    if origin in (Union, UnionType):
-        return any(_annotation_has_model(item) for item in get_args(annotation))
-    return False
-
-
-def _update_nested_model(
-    model: BaseModel,
-    update: Mapping[str, Any],
-) -> BaseModel:
-    model_type = type(model)
-    values = {
-        field_name: getattr(model, field_name) for field_name in model_type.model_fields
-    }
-    remaining = dict(update)
-    updated_fields: set[str] = set()
-
-    for field_name, field in model_type.model_fields.items():
-        aliases, _ = _get_alias_names(
-            field_name,
-            field,
-            populate_by_name=True,
-        )
-        key = next((alias for alias in aliases if alias in update), None)
-        if key is None:
-            continue
-
-        value = update[key]
-        current = values[field_name]
-        if (
-            isinstance(current, BaseModel)
-            and isinstance(value, Mapping)
-            and not _field_has_discriminator(field)
-        ):
-            value = _update_nested_model(current, value)
-        values[field_name] = value
-        updated_fields.add(field_name)
-        for alias in aliases:
-            remaining.pop(alias, None)
-
-    values.update(model.model_extra or {})
-    values.update(remaining)
-    updated = model_type.model_validate(values, by_alias=True, by_name=True)
-    object.__setattr__(
-        updated,
-        "__pydantic_fields_set__",
-        model.model_fields_set | updated_fields,
-    )
-    return updated
+        updates = _NestedModelUpdates.current()
+        return value if updates is None else updates.apply(cls, value, info)

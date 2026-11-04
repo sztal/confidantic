@@ -7,7 +7,7 @@ from docstring_parser import DocstringStyle, parse
 from pydantic import Field
 
 from confidantic import BaseConfig, ConfigModelDict
-from confidantic._config import _docstrings
+from confidantic._config._docstring_backend import _AttributeDocstringBackend
 
 
 @pytest.fixture(params=["numpy", "google"])
@@ -293,7 +293,9 @@ def test_candidate_validation(
     monkeypatch: pytest.MonkeyPatch, fragment: str, message: str
 ) -> None:
     """The candidate is checked independently of composer success."""
-    monkeypatch.setattr(_docstrings, "compose", lambda *args, **kwargs: fragment)
+    monkeypatch.setattr(
+        _AttributeDocstringBackend, "compose", lambda *args, **kwargs: fragment
+    )
     with pytest.raises(ValueError, match=message):
 
         class Config(BaseConfig):

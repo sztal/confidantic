@@ -5,22 +5,10 @@ original line indices. Only the replacement section is composed; the complete
 result is then parsed to validate its meaning independently of the layout scan.
 """
 
-import re
 from dataclasses import dataclass
 from typing import Literal
 
-from docstring_parser import (
-    Docstring,
-    DocstringParam,
-    DocstringStyle,
-    ParseError,
-    compose,
-    parse,
-)
-from docstring_parser.numpydoc import NumpydocParser, Section
-
 _Style = Literal["numpy", "google"]
-_STYLES = {"numpy": DocstringStyle.NUMPYDOC, "google": DocstringStyle.GOOGLE}
 
 
 @dataclass(frozen=True)
@@ -32,15 +20,6 @@ class _SectionSpan:
     header_start: int
     body_start: int
     end: int
-
-
-class _LiteralNumpySection(Section):
-    """Treat a custom NumPy section as text rather than additional attributes."""
-
-    @property
-    def title_pattern(self) -> str:
-        # Custom titles may contain regex syntax, such as parentheses.
-        return rf"^({re.escape(self.title)})[ \t]*\n{'-' * len(self.title)}[ \t]*$"
 
 
 def _scan_docstring(text: str) -> tuple[list[str], list[_SectionSpan], list[int]]:
@@ -192,6 +171,8 @@ def replace_attributes(
 
     Raises
     ------
+    ImportError
+        If an active insertion request requires the missing ``docstrings`` extra.
     ValueError
         If the marked section is invalid, its style conflicts with the expected
         format, or the completed docstring fails structural or parser validation.
@@ -223,27 +204,20 @@ def replace_attributes(
     if style is not None and style != section.style:
         raise fail(f"Attributes section does not match docstring_style={style!r}")
 
+    # Unmarked text and malformed requests need no optional parser dependency.
+    try:
+        from confidantic._config._docstring_backend import _AttributeDocstringBackend
+    except ModuleNotFoundError as error:
+        if error.name != "docstring_parser":
+            raise
+        raise ImportError(
+            f"{class_name}: @attrs generation requires docstring-parser; "
+            "install confidantic[docstrings]"
+        ) from error
+
     # Compose only the Attributes section so other sections keep their layout.
-    parser_style = _STYLES[section.style]
-    generated = Docstring(style=parser_style)
-    generated.meta = [
-        DocstringParam(
-            args=["attribute", name],
-            description=description,
-            arg_name=name,
-            type_name=None,
-            is_optional=None,
-            default=None,
-        )
-        for name, description in fields.items()
-    ]
-    fragment = compose(generated, style=parser_style, indent="    ").strip("\n")
-    # Composers omit empty sections; retain the header and let validation
-    # determine whether the parser accepts an empty Attributes section.
-    if not fragment:
-        fragment = (
-            "Attributes\n----------" if section.style == "numpy" else "Attributes:"
-        )
+    backend = _AttributeDocstringBackend(section.style, class_name=class_name)
+    fragment = backend.compose(fields)
 
     # Splice original lines, leaving trailing blank lines outside the replaced
     # span so their whitespace survives exactly.
@@ -274,29 +248,14 @@ def replace_attributes(
         raise fail("generated docstring must contain exactly one Attributes section")
     if result_markers:
         raise fail("generated docstring still contains an @attrs marker")
-    try:
-        # Normalize line endings for the parser only; the stored string keeps
-        # its original layout.
-        normalized = candidate.replace("\r\n", "\n").replace("\r", "\n")
-        if section.style == "numpy":
-            # Register custom headings so their text cannot be misread as
-            # additional attributes by the default parser.
-            parser = NumpydocParser()
-            for other in result_sections:
-                if other.style == "numpy" and other.title not in parser.sections:
-                    parser.add_section(_LiteralNumpySection(other.title, "custom"))
-            parsed = parser.parse(normalized)
-        else:
-            parsed = parse(normalized, style=parser_style)
-    except ParseError as exc:
-        raise fail(f"invalid generated {section.style} docstring: {exc}") from exc
     # Compare descriptions by content, ignoring wrapping and indentation
     # introduced by composition and parsing. Keep field order significant.
-    actual = [
-        (item.arg_name, " ".join((item.description or "").split()))
-        for item in parsed.params
-        if item.args[0] == "attribute"
-    ]
+    actual = backend.attributes(
+        candidate,
+        custom_numpy_titles=(
+            section.title for section in result_sections if section.style == "numpy"
+        ),
+    )
     expected = [
         (name, " ".join((description or "").split()))
         for name, description in fields.items()

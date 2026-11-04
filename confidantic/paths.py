@@ -7,7 +7,8 @@ from typing import TYPE_CHECKING, Any, Self
 from pydantic import Field, GetCoreSchemaHandler, model_validator
 from pydantic_core import CoreSchema, core_schema
 
-from confidantic._config.base import BaseConfig, ConfigModelDict
+from confidantic._config._options import ConfigModelDict
+from confidantic._config.base import BaseConfig
 
 __all__ = ("BasePaths", "ExtensiblePath")
 

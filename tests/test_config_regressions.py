@@ -505,7 +505,7 @@ def test_settings_factory_options_and_instance_revalidation() -> None:
 
 
 def test_settings_custom_constructor_and_context_cleanup() -> None:
-    from confidantic._config.base import _NESTED_MODEL_BASELINES
+    from confidantic._config._nested import _NestedModelUpdates
 
     calls: list[int] = []
 
@@ -521,7 +521,7 @@ def test_settings_custom_constructor_and_context_cleanup() -> None:
     assert calls == [2, 4]
     with pytest.raises(ValidationError):
         AuditOptions.model_validate({"count": "invalid"}, context={"offset": 10})
-    assert _NESTED_MODEL_BASELINES.get() is None
+    assert _NestedModelUpdates.current() is None
     assert AuditOptions(count=2).count == 2
 
 
@@ -538,6 +538,73 @@ def test_settings_nested_recursive_schema_keeps_options() -> None:
         ).child.value
         == 2
     )
+
+
+@pytest.mark.parametrize("inner_fails", [False, True])
+def test_reentrant_validation_restores_outer_baselines(inner_fails: bool) -> None:
+    """Nested validation restores the outer model's partial-update baselines."""
+
+    class Nested(BaseModel):
+        value: int = 1
+        retained: int = 2
+
+    class Inner(BaseConfig):
+        nested: Nested = Nested(retained=99)
+
+    class Outer(BaseConfig):
+        trigger: int = 0
+        nested: Nested = Nested(retained=20)
+
+        @field_validator("trigger")
+        @classmethod
+        def validate_inner(cls, value: int) -> int:
+            if inner_fails:
+                with pytest.raises(ValidationError):
+                    Inner(nested={"value": "invalid"})
+            else:
+                assert Inner(nested={"value": 7}).nested.retained == 99
+            return value
+
+    result = Outer(nested={"value": 4})
+    assert result.nested == Nested(value=4, retained=20)
+    assert Inner(nested={"value": 9}).nested == Nested(value=9, retained=99)
+
+
+@pytest.mark.parametrize("entry", ["base", "factory"])
+@pytest.mark.parametrize("target_fails", [False, True])
+def test_factory_resolution_restores_cli_after_nested_construction(
+    entry: str, target_fails: bool
+) -> None:
+    """CLI suppression nests across constructors and resets after exceptions."""
+    observed: list[int] = []
+
+    class CliConfig(BaseConfig, cli_parse_args=["--value", "9"]):
+        value: int = 1
+
+    class InnerTarget:
+        def __init__(self) -> None:
+            observed.append(CliConfig().value)
+
+    class Target:
+        def __init__(self) -> None:
+            Factory.instance_from(InnerTarget).model_resolve()
+            observed.append(CliConfig().value)
+            if target_fails:
+                raise RuntimeError("Target failed")
+
+    class Container(BaseConfig):
+        target: Factory[Target]
+
+    factory = Factory.instance_from(Target)
+    config = Container(target=factory) if entry == "base" else factory
+    if target_fails:
+        with pytest.raises(RuntimeError, match="Target failed"):
+            config.model_resolve()
+    else:
+        config.model_resolve()
+
+    assert observed == [1, 1]
+    assert CliConfig().value == 9
 
 
 def test_copy_detects_customization_of_the_supplied_init_source() -> None:

@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.11"
 resolution-markers = [
     "python_full_version >= '3.15'",
@@ -161,16 +161,22 @@ wheels = [
 name = "confidantic"
 source = { editable = "." }
 dependencies = [
-    { name = "docstring-parser" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
-    { name = "rich" },
 ]
 
 [package.optional-dependencies]
 all = [
+    { name = "docstring-parser" },
     { name = "pyyaml" },
+    { name = "rich" },
     { name = "tomli-w" },
+]
+docstrings = [
+    { name = "docstring-parser" },
+]
+rich = [
+    { name = "rich" },
 ]
 toml = [
     { name = "tomli-w" },
@@ -183,6 +189,7 @@ yaml = [
 dev = [
     { name = "cloudpickle" },
     { name = "coverage", extra = ["toml"] },
+    { name = "docstring-parser" },
     { name = "ipdb" },
     { name = "joblib" },
     { name = "mypy" },
@@ -191,6 +198,7 @@ dev = [
     { name = "pytest" },
     { name = "pytest-xdist" },
     { name = "pyyaml" },
+    { name = "rich" },
     { name = "tomli-w" },
     { name = "towncrier" },
 ]
@@ -207,17 +215,20 @@ release = [
 test = [
     { name = "cloudpickle" },
     { name = "coverage", extra = ["toml"] },
+    { name = "docstring-parser" },
     { name = "ipdb" },
     { name = "joblib" },
     { name = "nox" },
     { name = "pytest" },
     { name = "pytest-xdist" },
     { name = "pyyaml" },
+    { name = "rich" },
     { name = "tomli-w" },
 ]
 type = [
     { name = "cloudpickle" },
     { name = "coverage", extra = ["toml"] },
+    { name = "docstring-parser" },
     { name = "ipdb" },
     { name = "joblib" },
     { name = "mypy" },
@@ -225,26 +236,30 @@ type = [
     { name = "pytest" },
     { name = "pytest-xdist" },
     { name = "pyyaml" },
+    { name = "rich" },
     { name = "tomli-w" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "docstring-parser", specifier = ">=0.18" },
+    { name = "docstring-parser", marker = "extra == 'all'", specifier = ">=0.18" },
+    { name = "docstring-parser", marker = "extra == 'docstrings'", specifier = ">=0.18" },
     { name = "pydantic", specifier = ">=2.14" },
     { name = "pydantic-settings", specifier = ">=2.15" },
     { name = "pyyaml", marker = "extra == 'all'", specifier = ">=6" },
     { name = "pyyaml", marker = "extra == 'yaml'", specifier = ">=6" },
-    { name = "rich", specifier = ">=15" },
+    { name = "rich", marker = "extra == 'all'", specifier = ">=15" },
+    { name = "rich", marker = "extra == 'rich'", specifier = ">=15" },
     { name = "tomli-w", marker = "extra == 'all'", specifier = ">=1" },
     { name = "tomli-w", marker = "extra == 'toml'", specifier = ">=1" },
 ]
-provides-extras = ["all", "toml", "yaml"]
+provides-extras = ["all", "docstrings", "rich", "toml", "yaml"]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "cloudpickle", specifier = ">=3.1.2" },
     { name = "coverage", extras = ["toml"], specifier = ">=7.11" },
+    { name = "docstring-parser", specifier = ">=0.18" },
     { name = "ipdb" },
     { name = "joblib", specifier = ">=1.5.3" },
     { name = "mypy", specifier = ">=1.15" },
@@ -253,6 +268,7 @@ dev = [
     { name = "pytest", specifier = ">=9" },
     { name = "pytest-xdist", specifier = ">=3.8" },
     { name = "pyyaml", specifier = ">=6" },
+    { name = "rich", specifier = ">=15" },
     { name = "tomli-w", specifier = ">=1" },
     { name = "towncrier", specifier = ">=25.8" },
 ]
@@ -265,17 +281,20 @@ release = [{ name = "towncrier", specifier = ">=25.8" }]
 test = [
     { name = "cloudpickle", specifier = ">=3.1.2" },
     { name = "coverage", extras = ["toml"], specifier = ">=7.11" },
+    { name = "docstring-parser", specifier = ">=0.18" },
     { name = "ipdb" },
     { name = "joblib", specifier = ">=1.5.3" },
     { name = "nox", specifier = ">=2025.2.9" },
     { name = "pytest", specifier = ">=9" },
     { name = "pytest-xdist", specifier = ">=3.8" },
     { name = "pyyaml", specifier = ">=6" },
+    { name = "rich", specifier = ">=15" },
     { name = "tomli-w", specifier = ">=1" },
 ]
 type = [
     { name = "cloudpickle", specifier = ">=3.1.2" },
     { name = "coverage", extras = ["toml"], specifier = ">=7.11" },
+    { name = "docstring-parser", specifier = ">=0.18" },
     { name = "ipdb" },
     { name = "joblib", specifier = ">=1.5.3" },
     { name = "mypy", specifier = ">=1.15" },
@@ -283,6 +302,7 @@ type = [
     { name = "pytest", specifier = ">=9" },
     { name = "pytest-xdist", specifier = ">=3.8" },
     { name = "pyyaml", specifier = ">=6" },
+    { name = "rich", specifier = ">=15" },
     { name = "tomli-w", specifier = ">=1" },
 ]
 

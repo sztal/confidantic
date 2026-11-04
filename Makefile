@@ -1,4 +1,4 @@
-.PHONY: help clean build wheel install test coverage coverage-html lint format init nox check check-dist merge-check merge release-notes release publish
+.PHONY: help clean build wheel install test coverage coverage-html lint format docs docs-serve init nox check check-dist merge-check merge release-notes release publish
 
 # Export user input as data, never interpolate it into shell source.
 export BRANCH NOTES NO_NOTES_REASON VERSION TAG
@@ -18,6 +18,8 @@ help:
 	@echo "  coverage-html  Run tests with an HTML coverage report"
 	@echo "  lint           Run pre-commit checks"
 	@echo "  format         Format Python files with Ruff"
+	@echo "  docs           Build documentation into site/ (clean and strict)"
+	@echo "  docs-serve     Preview documentation with automatic reload"
 	@echo "  check          Lint, test, typecheck, docs, build, and check distributions"
 	@echo "  check-dist     Check dist/; optionally require TAG=vX.Y.Z"
 	@echo "  merge-check    Rehearse BRANCH with NOTES or NO_NOTES_REASON"
@@ -65,6 +67,12 @@ lint:
 
 format:
 	uv run ruff format .
+
+docs:
+	uv run noxfile.py -s docs
+
+docs-serve:
+	uv run noxfile.py -s autodocs
 
 check:
 	uv run python -m scripts.check

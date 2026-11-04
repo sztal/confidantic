@@ -211,6 +211,9 @@ uv run noxfile.py -s docs
 uv run noxfile.py -s optional-deps
 ```
 
+Build the documentation into `site/` with `make docs`. Use `make docs-serve`
+to open a local preview that reloads as you edit the Markdown sources.
+
 The `optional-deps` check builds a wheel once and verifies core, each individual
 extra, and `all` in fresh environments using the default interpreter. It runs
 outside the checkout so editable installs and development dependencies cannot

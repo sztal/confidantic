@@ -117,3 +117,68 @@ def test_workflow_publication_requires_dispatch_and_validation() -> None:
         "needs.publish-pypi.result == 'success'"
         in release["jobs"]["github-release"]["if"]
     )
+
+
+def test_pages_deployment_requires_validated_master_or_pypi_publication() -> None:
+    """PRs, tag pushes, failed uploads, and TestPyPI cannot deploy release docs."""
+    root = Path(__file__).resolve().parents[2]
+    ci = yaml.safe_load((root / ".github/workflows/ci.yaml").read_text())
+    release = yaml.safe_load((root / ".github/workflows/release.yaml").read_text())
+    master_pages = ci["jobs"]["pages"]
+    release_pages = release["jobs"]["pages"]
+
+    assert master_pages["needs"] == "checks"
+    assert master_pages["if"] == (
+        "github.event_name == 'push' && github.ref == 'refs/heads/master'"
+    )
+    assert master_pages["with"]["ref"] == "${{ github.sha }}"
+    assert set(release_pages["needs"]) == {"resolve", "validation", "publish-pypi"}
+    assert release_pages["if"] == (
+        "github.event_name == 'workflow_dispatch' && needs.publish-pypi.result == 'success'"
+    )
+    assert release_pages["with"]["ref"] == "${{ needs.resolve.outputs.commit }}"
+    for job in (master_pages, release_pages):
+        assert job["uses"] == "./.github/workflows/pages.yaml"
+        assert job["permissions"] == {
+            "contents": "read",
+            "pages": "write",
+            "id-token": "write",
+        }
+
+
+def test_pages_build_keeps_coverage_from_the_validated_commit() -> None:
+    """Strict builds and coverage artifacts share a checkout and deploy together."""
+    root = Path(__file__).resolve().parents[2]
+    workflow = yaml.safe_load((root / ".github/workflows/pages.yaml").read_text())
+    pages = workflow["jobs"]["pages"]
+    steps = pages["steps"]
+    checkout = next(
+        step for step in steps if step.get("uses", "").startswith("actions/checkout@")
+    )
+    download = next(
+        step
+        for step in steps
+        if step.get("uses", "").startswith("actions/download-artifact@")
+    )
+    upload = next(
+        step
+        for step in steps
+        if step.get("uses", "").startswith("actions/upload-pages-artifact@")
+    )
+    build = next(step["run"] for step in steps if "run" in step)
+
+    assert checkout["with"]["ref"] == "${{ inputs.ref }}"
+    assert checkout["with"]["fetch-depth"] == 0
+    assert download["with"]["name"] == "coverage-data"
+    assert "run-id" not in download["with"]
+    assert "uv sync --locked --group docs --group test --extra all" in build
+    assert "zensical build --clean --strict" in build
+    assert build.index("zensical build") < build.index("coverage html")
+    assert "coverage html --data-file=coverage-data -d site/coverage" in build
+    assert "generate_coverage_badge.py coverage.json site/coverage.svg" in build
+    assert upload["with"]["path"] == "site"
+    assert pages["concurrency"] == {
+        "group": "github-pages",
+        "cancel-in-progress": False,
+    }
+    assert pages["environment"]["name"] == "github-pages"

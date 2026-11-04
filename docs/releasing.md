@@ -55,6 +55,36 @@ Development versions are allowed only when no release tag is requested.
 and distribution checks. It never invokes the local multi-Python Nox matrix.
 Checks that rewrite files fail preparation so the changes can be reviewed.
 
+## Build and publish documentation
+
+```console
+make docs
+make docs-serve
+```
+
+`docs` runs the clean, strict Nox documentation build and writes `site/`.
+`docs-serve` opens the local preview with automatic reload. Neither command
+publishes the site.
+
+CI validates documentation on pull requests, master pushes, and release runs.
+After successful checks on a master push, it deploys that commit's documentation
+to GitHub Pages. Successful final PyPI publication also deploys documentation,
+using the exact commit resolved from the published tag. TestPyPI candidates and
+tag pushes still validate documentation but do not trigger a release deployment.
+Later master pushes can update the site again; this is a single current site,
+not a versioned documentation archive.
+
+Both deployment paths use the shared Pages workflow. It installs locked
+documentation dependencies and all package extras, builds strictly, then adds
+the coverage report and badge from the same run's validation artifact. Deployments
+share a concurrency group so they do not run simultaneously.
+
+In the repository's **Settings → Pages**, select **GitHub Actions** as the
+publishing source. The `github-pages` environment must allow deployments from
+`master`, including release workflows dispatched there. The workflow supplies
+the required `pages: write` and `id-token: write` permissions. See
+[GitHub's custom Pages workflow documentation](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages).
+
 ## Prepare a release locally
 
 Use canonical `X.Y.Z` versions, optionally followed by `aN`, `bN`, or `rcN`.
@@ -132,3 +162,7 @@ files under an already published version. If package upload succeeded but GitHub
 release creation failed, rerun only the failed job. Never delete or move a release
 tag to conceal a partial publication. Check publisher registration after an
 `invalid-publisher` error.
+
+If documentation deployment fails after a successful package upload, rerun the
+failed Pages job in that release workflow while its coverage artifact is retained.
+The package is already published; do not repeat the package upload to repair the site.

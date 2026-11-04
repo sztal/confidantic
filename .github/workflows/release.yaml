@@ -94,6 +94,17 @@ jobs:
           path: dist
       - uses: pypa/gh-action-pypi-publish@release/v1
 
+  pages:
+    if: github.event_name == 'workflow_dispatch' && needs.publish-pypi.result == 'success'
+    needs: [resolve, validation, publish-pypi]
+    uses: ./.github/workflows/pages.yaml
+    with:
+      ref: ${{ needs.resolve.outputs.commit }}
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+
   github-release:
     if: always() && github.event_name == 'workflow_dispatch' && needs.validation.result == 'success' && (needs.publish-pypi.result == 'success' || needs.publish-testpypi.result == 'success')
     needs: [resolve, validation, publish-pypi, publish-testpypi]

@@ -74,6 +74,9 @@ class ConfigModelDict(PydanticSettingsConfigDict, total=False):
         Whether command-line argument groups use class docstrings.
     cli_show_env_vars
         Whether command-line help displays resolved environment variable names.
+        Defaults to ``False``. When constructing a Pydantic Settings
+        ``CliSettingsSource`` directly, enable this only with an explicit string
+        ``env_prefix`` (including ``""`` for unprefixed variables).
     cli_exit_on_error
         Whether command-line parsing exits when it encounters an error.
     cli_prefix

@@ -111,7 +111,7 @@ class BaseConfig(BaseSettings):
         cli_implicit_flags=False,
         cli_kebab_case=True,
         cli_hide_none_type=True,
-        cli_show_env_vars=True,
+        cli_show_env_vars=False,
         cli_use_class_docs_for_groups=True,
         cli_ignore_unknown_args=True,
         cli_help=True,

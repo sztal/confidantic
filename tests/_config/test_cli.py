@@ -161,29 +161,69 @@ def test_factory_cli_imports_constrained_class_arguments() -> None:
 @pytest.mark.parametrize(
     "source_options",
     [
-        pytest.param(
-            {},
-            marks=pytest.mark.xfail(
-                strict=True,
-                raises=TypeError,
-                reason="BUGS.md: default environment prefix breaks supplied CLI source construction",
-            ),
-            id="default-env-help",
-        ),
+        pytest.param({}, id="default-env-help"),
         pytest.param({"cli_show_env_vars": False}, id="without-env-help"),
     ],
 )
 def test_supplied_cli_source_keeps_its_parser_and_values(
     source_options: dict[str, bool],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A caller's custom CLI source is retained despite automatic-parser options."""
 
     class Config(BaseConfig, cli_help=False):
         value: int = 1
 
+    monkeypatch.setenv("VALUE", "19")
+    assert Config().value == 1
+
     supplied = CliSettingsSource(
         Config, cli_parse_args=["--value", "7"], **source_options
     )
+    help_text = supplied.root_parser.format_help()
+    assert "--help" in help_text
+    assert "[env:" not in help_text
     config = Config(_cli_settings_source=supplied, _cli_parse_args=False)
     assert config.value == 7
     assert config.model_field_sources["value"] == (CliSettingsSource, Config)
+
+
+def test_default_cli_help_omits_environment_names(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Automatic CLI help does not advertise disabled environment input."""
+
+    class Config(BaseConfig):
+        value: int = 1
+
+    with pytest.raises(SystemExit) as error:
+        Config(_cli_parse_args=["--help"])
+    assert error.value.code == 0
+    help_text = capsys.readouterr().out
+    assert "--value" in help_text
+    assert "[env:" not in help_text
+
+
+@pytest.mark.parametrize("env_prefix", ["", "APP_"])
+@pytest.mark.parametrize("supplied_source", [False, True])
+def test_cli_environment_help_can_be_enabled(
+    env_prefix: str,
+    supplied_source: bool,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Both parser entry points honor explicit environment-name help."""
+
+    class Config(BaseConfig, env_prefix=env_prefix, cli_show_env_vars=True):
+        value: int = 1
+
+    monkeypatch.setenv(f"{env_prefix}VALUE", "19")
+    assert Config().value == 19
+
+    with pytest.raises(SystemExit) as error:
+        if supplied_source:
+            CliSettingsSource(Config, cli_parse_args=["--help"])
+        else:
+            Config(_cli_parse_args=["--help"])
+    assert error.value.code == 0
+    assert f"[env: {env_prefix}VALUE]" in capsys.readouterr().out

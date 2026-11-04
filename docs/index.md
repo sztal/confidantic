@@ -11,286 +11,71 @@ icon: lucide/house
 [![Coverage](https://sztal.github.io/confidantic/coverage.svg)](coverage/)
 [![License](https://img.shields.io/github/license/sztal/confidantic)](https://github.com/sztal/confidantic/blob/master/LICENSE)
 
-## Installation
-
-Install `confidantic` using [pip](https://pip.pypa.io/) or [uv](https://docs.astral.sh/uv/):
-
-```
-pip install confidantic
-```
-
-The core install provides settings, CLI parsing, factories, and attribute-docstring
-extraction. Optional features are available separately:
-
-| Extra        | Feature                                         |
-| ------------ | ----------------------------------------------- |
-| `rich`       | `model_info()` and `info()` display methods     |
-| `docstrings` | `@attrs` class-docstring generation             |
-| `yaml`       | YAML loading and dumping                        |
-| `toml`       | TOML dumping; loading uses the standard library |
-| `all`        | Every optional feature                          |
-
-```console
-pip install "confidantic[all]"
-```
-
-Each optional package is imported only when its feature is used. Missing packages
-raise `ImportError` with guidance naming the extra to install.
-
-## Frozen configuration
-
-`BaseConfig` instances are frozen by default, so model fields cannot be
-reassigned after validation. Create a modified copy with `copy`; supplied
-updates are validated as normal model input:
+Confidantic helps you give a Python application clear, validated settings. Define
+fields once, supply values from Python, environment variables, or a command line,
+and get useful errors when an input is wrong.
 
 ```python
 from confidantic import BaseConfig
 
 
 class AppConfig(BaseConfig):
-	retries: int = 3
-
-
-config = AppConfig()
-updated = config.copy(retries=5)
-```
-
-`copy()` is shallow and `deepcopy()` recursively copies field values. Both
-methods accept validated keyword updates. The standard-library `copy.copy()`
-and `copy.deepcopy()` functions are also supported. With keyword updates, all
-current fields and extras are validated again through settings construction;
-validators can change untouched fields, CLI input can override updates, and
-private attributes are initialized afresh. Deep copying happens before the
-updates are applied, so supplied update objects are not themselves deep-copied.
-Without updates, both methods preserve private state with the requested copy
-depth. `mutate()` retains existing private state.
-
-Use `mutate()` to apply validated updates to the same instance, including a
-frozen configuration:
-
-```python
-config.mutate(retries=5)
-```
-
-Take care when mutating a frozen configuration: changing its fields may
-invalidate its hash. Do not continue to use a mutated configuration as a
-dictionary key or set member.
-
-Pydantic's frozen behavior is shallow: mutable values stored in fields are not
-recursively frozen. A subclass that intentionally requires field reassignment
-can opt out:
-
-```python
-from confidantic import BaseConfig, ConfigModelDict
-
-
-class MutableAppConfig(BaseConfig):
-	model_config = ConfigModelDict(frozen=False)
-
-	retries: int = 3
-```
-
-## Field documentation
-
-Confidantic reads attribute docstrings into field descriptions by default.
-This extraction uses Pydantic and does not require the `docstrings` extra.
-Extraction is disabled automatically in Jupyter-like runtimes, including VS Code
-Interactive, where source inspection can fail.
-
-An explicit `model_config = ConfigModelDict(use_attribute_docstrings=...)` on a
-configuration class takes precedence over the package default.
-
-Disabling extraction does not remove explicit `Field(description=...)`
-descriptions or disable the `@attrs` replacement below.
-
-Install `confidantic[docstrings]` and add an `@attrs` marker to a `BaseConfig`
-subclass's NumPy or Google `Attributes`
-section to replace the entire section with effective model field names and descriptions.
-The format is detected automatically, and text outside the section is preserved:
-
-```python
-from confidantic import BaseConfig
-from pydantic import Field
-
-
-class AppConfig(BaseConfig):
-	"""Application configuration.
-
-	Attributes
-	----------
-	@attrs
-	"""
-
-	retries: int = Field(3, description="Number of retry attempts.")
-```
-
-Google sections accept either `@attrs` or `@attrs:`:
-
-```python
-from confidantic import BaseConfig, ConfigModelDict
-from pydantic import Field
-
-
-class AppConfig(BaseConfig):
-    """Application configuration.
-
-    Attributes:
-        @attrs
-    """
-
-    model_config = ConfigModelDict(docstring_style="google")
-    retries: int = Field(3, description="Number of retry attempts.")
-```
-
-`docstring_style` accepts `"numpy"`, `"google"`, or `None` (the default, for
-automatic detection). The setting is inherited; set it to `None` on a subclass
-to restore detection. An explicit style specifies the expected input format
-and does not convert docstrings.
-
-Generation validates the completed docstring using the selected parser and
-requires exactly one Attributes section with the generated fields. Invalid
-marked sections, conflicting styles, duplicate sections, and invalid generated
-output raise `ValueError` during class creation. An empty marked Google section
-also raises because the parser requires an attribute entry; an empty NumPy
-section is accepted. Unmarked docstrings and marker mentions in prose, examples,
-or nested literal content are unchanged.
-
-Without `docstring-parser`, a valid active generation request raises `ImportError`
-during class creation, naming `confidantic[docstrings]`. Structural marker errors
-still raise `ValueError` before importing the parser. Unmarked docstrings,
-ignored markers, and explicitly disabled generation do not import the parser.
-
-Set `docstring_set_attributes_section=False` to retain an `@attrs` marker
-without replacing it:
-
-```python
-from confidantic import BaseConfig, ConfigModelDict
-
-
-class AppConfig(BaseConfig):
-	"""Application configuration.
-
-	Attributes
-	----------
-	@attrs
-	"""
-
-	model_config = ConfigModelDict(
-		docstring_set_attributes_section=False,
-	)
-```
-
-## Configuration display
-
-Install `confidantic[rich]` to use `Config.model_info()` or `config.info()`.
-All three output modes require Rich: `"table"` returns a Rich table, `"string"`
-returns its rendering, and `"print"` prints it. The methods raise `ImportError`
-with the installation command when Rich is unavailable.
-
-Return annotations retain the Rich table type for static type checking without
-importing Rich during model creation. Runtime `typing.get_type_hints()` on these
-methods requires an explicit namespace supplying `Table`; ordinary
-`inspect.signature()` remains available without Rich.
-
-## Make directives
-
-Pass `context={"make": True}` to `model_dump()` or `model_dump_json()` to add
-a `Make` directive for each serialized `BaseConfig`:
-
-```python
-from confidantic import BaseConfig
-
-
-class AppConfig(BaseConfig):
+    name: str = "orders"
     retries: int = 3
 
 
-config = AppConfig()
-data = config.model_dump(context={"make": True})
-# {"@call": "package.module:AppConfig", "retries": 3}
+config = AppConfig(retries=5)
+print(config.model_dump())
 ```
 
-Nested `BaseConfig` instances receive their own directive; ordinary Pydantic
-models do not. A `Factory` writes its target class's identifier, so loading
-its directive calls the target constructor. Factory directives contain only
-`factory_fields`, using canonical constructor keyword names even when
-`by_alias=True` or `serialize_by_alias` is configured. Field serializers and
-include/exclude filters still apply. Ambiguous serialized constructor keys and
-serializer failures raise errors instead of producing unusable directives.
-Identifiers must resolve to
-importable objects; local and unregistered generated classes are not portable.
-Use `serialize_as_any=True` when fields annotated with base classes must retain
-subclass-only data.
-
-Deserialize the result with the `Make` annotation:
-
-```python
-from confidantic.annotations import Make
-from pydantic import BaseModel
-
-
-class Container(BaseModel):
-	config: Make[AppConfig]
-
-
-config = Container.model_validate({"config": data}).config
+```text
+{'name': 'orders', 'retries': 5}
 ```
 
-This feature is intended for trusted serialized data: the directive controls an
-import and invokes the selected class constructor.
+It builds on [Pydantic models][pydantic.BaseModel] and
+[Pydantic Settings][pydantic_settings.BaseSettings]. Confidantic adds rules for
+configuration inheritance, validated updates, and ways to construct application
+objects from settings. You can start with a few fields and add those capabilities
+when your application needs them.
+
+## Start here
+
+- **New to Confidantic?** [Install it](getting-started/installation.md), then
+    [configure your first application](getting-started/first-application.md).
+- **Working on an application?** Learn about [input sources](guide/sources.md),
+    [command-line options](guide/cli.md), and [nested settings](guide/nested-settings.md).
+- **Building objects from configuration?** Start with [factories](guide/factories.md)
+    or [objects that own their configuration](recipes/configurable-objects.md).
+- **Want to understand the design?** Read the [concepts](concepts/values-and-inheritance.md)
+    and [architecture overview](architecture/overview.md).
+- **Looking up a name or option?** Use the [reference](reference/index.md).
+
+## Installation
+
+The core package requires Python 3.11 or later. See
+[installation and optional extras](getting-started/installation.md).
+
+## Frozen configuration
+
+Fields are frozen by default. Learn how to [create validated copies and choose an
+update operation](guide/settings.md#frozen-configuration).
+
+## Field documentation
+
+Add field descriptions for people reading help or inspecting settings. See
+[field documentation](guide/descriptions-and-display.md#field-documentation).
+
+## Configuration display
+
+Use the optional Rich integration to inspect settings. See
+[configuration display](guide/descriptions-and-display.md#configuration-display).
+
+## Make directives
+
+For trusted documents that construct Python objects, see
+[Make directives](advanced/object-directives-and-portability.md#make-directives).
 
 ## YAML and TOML
 
-Install an optional writer to serialize configurations as YAML or TOML:
-
-```console
-pip install "confidantic[yaml]"
-pip install "confidantic[toml]"
-```
-
-Both methods accept model-dump filtering, context, and serialization options
-and return a string. Ordinary documents can be loaded directly:
-
-```python
-yaml_text = config.model_dump_yaml()
-toml_text = config.model_dump_toml(exclude_none=True)
-
-loaded_yaml = AppConfig.model_validate_yaml(yaml_text)
-loaded_toml = AppConfig.model_validate_toml(toml_text)
-```
-
-YAML uses block formatting and preserves model field order, including a leading
-Make directive. TOML has no null representation, so use `exclude_none=True` when
-model fields can contain `None`. This does not remove `None` entries inside
-lists or mappings; those require preprocessing. The YAML loader requires the
-YAML extra; TOML loading uses Python's standard library. Both loaders parse into
-Python values and forward their validation options to `model_validate()`.
-Configured settings sources can still participate in construction, so loading
-a document can use values from sources in addition to the document itself.
-Per-call `strict`, `extra`, and field-validation `context` apply to validation of
-the merged settings. Source assembly precedes user model validators.
-
-Subclasses defining their own `__init__` retain Pydantic's custom-constructor
-limitations on per-call validation options. The validation wrapper also retains
-the upstream strict-JSON limitation for representations such as date strings
-and tuple arrays: these can be rejected under `model_validate_json(strict=True)`.
-YAML and TOML use Python-mode validation.
-
-Partial updates to existing nested model instances still perform a separate
-validation pass without forwarding per-call options. Disable
-`nested_model_default_partial_update` when those options must apply throughout
-nested validation; this also uses the annotated model type instead of retaining
-a baseline instance's concrete subclass.
-
-The loaders do not evaluate a root `@call` directive. For output produced with
-`context={"make": True}`, parse the document and validate it through `Make`:
-
-```python
-import yaml
-from pydantic import TypeAdapter
-from confidantic.annotations import Make
-
-
-yaml_text = config.model_dump_yaml(context={"make": True})
-loaded_yaml = TypeAdapter(Make[AppConfig]).validate_python(yaml.safe_load(yaml_text))
-```
+Learn to [read and write configuration documents](guide/files.md#yaml-and-toml)
+and register files as settings sources.

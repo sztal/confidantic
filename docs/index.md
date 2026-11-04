@@ -6,10 +6,10 @@ icon: lucide/house
 
 [![PyPI](https://img.shields.io/pypi/v/confidantic)](https://pypi.org/project/confidantic/)
 [![Supported Python versions](https://img.shields.io/pypi/pyversions/confidantic?logo=python)](https://pypi.org/project/confidantic/)
-[![CI](https://img.shields.io/github/actions/workflow/status/sztal/confidantic/ci.yaml?branch=main&logo=github&label=CI)](https://github.com/sztal/confidantic/actions/workflows/ci.yaml)
-[![Package build](https://img.shields.io/github/actions/workflow/status/sztal/confidantic/release.yaml?branch=main&logo=github&label=package%20build)](https://github.com/sztal/confidantic/actions/workflows/release.yaml)
+[![CI](https://img.shields.io/github/actions/workflow/status/sztal/confidantic/ci.yaml?branch=master&logo=github&label=CI)](https://github.com/sztal/confidantic/actions/workflows/ci.yaml)
+[![Package build](https://img.shields.io/github/actions/workflow/status/sztal/confidantic/release.yaml?branch=master&logo=github&label=package%20build)](https://github.com/sztal/confidantic/actions/workflows/release.yaml)
 [![Coverage](https://sztal.github.io/confidantic/coverage.svg)](coverage/)
-[![License](https://img.shields.io/github/license/sztal/confidantic)](https://github.com/sztal/confidantic/blob/main/LICENSE)
+[![License](https://img.shields.io/github/license/sztal/confidantic)](https://github.com/sztal/confidantic/blob/master/LICENSE)
 
 ## Installation
 

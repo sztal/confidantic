@@ -6,11 +6,12 @@ site_url = "https://sztal.github.io/confidantic/"
 copyright = "Copyright &copy; 2026 Szymon Talaga"
 repo_url =  "https://github.com/sztal/confidantic"
 repo_name = "sztal/confidantic"
-edit_uri = "edit/main/docs/"
+edit_uri = "edit/master/docs/"
 nav = [
   { "Home" = [
     "index.md",
     { "Release notes" = "changelog.md" },
+    { "Merging and releasing" = "releasing.md" },
     { "License" = "license.md" },
   ] },
   { "Reference" = [

@@ -121,7 +121,7 @@ def autodocs(session: nox.Session) -> None:
 def optional_dependencies(session: nox.Session) -> None:
     """Check the built wheel with each optional dependency in an isolated install."""
     session.install("uv>=0.8.6")
-    session.run("python", "scripts/check_optional_dependencies.py")
+    session.run("python", "scripts/check_optional_dependencies.py", *session.posargs)
 
 
 if __name__ == "__main__":

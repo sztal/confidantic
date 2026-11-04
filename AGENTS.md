@@ -50,10 +50,13 @@ file when adding or changing a guide.
 Keep changes focused, preserve public behavior unless the task intentionally
 changes it, and add or update tests for behavior changes.
 
-Add a Towncrier fragment under `changelog.d/` for every user-visible behavior
-change, bug fix, or public API change. Do this as part of the same change, not
-as a later release step. Documentation-only and strictly internal changes do
-not need a fragment.
+Write release notes only when merging a feature/development branch into `master`.
+Ordinary development and bug-fixing tasks do not add Towncrier fragments. Use the
+`merge-to-master` skill to summarize the final integrated behavior once per merge;
+documentation-only and internal merges record a no-notes reason. The
+`release-package` skill assembles these notes when preparing a final release.
+Package versions come from annotated Git tags, never a static version field.
+See `docs/releasing.md` for commands, setup, and recovery.
 
 ## Project records
 

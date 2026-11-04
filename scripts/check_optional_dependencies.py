@@ -1,5 +1,6 @@
 """Check wheel installs without development dependencies or checkout imports."""
 
+import argparse
 import subprocess
 import sys
 from pathlib import Path
@@ -7,6 +8,7 @@ from tempfile import TemporaryDirectory
 
 SMOKE = r"""
 import importlib
+import importlib.metadata
 import importlib.util
 import io
 import os
@@ -29,6 +31,7 @@ for extra, module in modules.items():
 import confidantic
 from confidantic import BaseConfig, ConfigModelDict, Factory
 
+assert confidantic.__version__ == importlib.metadata.version("confidantic")
 installed_path = Path(confidantic.__file__).resolve()
 assert installed_path.is_relative_to(Path(sys.prefix).resolve()), installed_path
 assert not installed_path.is_relative_to(Path(checkout).resolve()), installed_path
@@ -115,30 +118,24 @@ print(f"{profile}: wheel import, core behavior, and optional features passed")
 """
 
 
-def main() -> int:
-    """Build one wheel and test six fresh installs using this Python interpreter.
+def check_wheel(
+    wheel: Path,
+    profiles: tuple[str, ...] = ("core", "rich", "docstrings", "yaml", "toml", "all"),
+) -> None:
+    """Install an existing wheel in fresh environments and exercise its features.
 
-    Each environment contains only the wheel's declared runtime dependencies
-    and the selected extra. Smoke checks run outside the checkout with isolated
-    Python import paths. The temporary build and environments are removed on exit.
-
-    Returns
-    -------
-    int
-        Zero after all install profiles pass. Build, installation, and smoke-test
-        failures raise subprocess errors rather than returning a failure code.
+    Parameters
+    ----------
+    wheel
+        Wheel to install without rebuilding or importing the source checkout.
+    profiles
+        Dependency profiles to check; defaults to core, each extra, and all extras.
     """
     project = Path(__file__).resolve().parent.parent
+    wheel = wheel.resolve(strict=True)
     with TemporaryDirectory(prefix="confidantic-optional-") as temporary:
         directory = Path(temporary)
-        wheels = directory / "wheels"
-        subprocess.run(
-            ["uv", "build", "--wheel", "--out-dir", str(wheels), str(project)],
-            check=True,
-            cwd=directory,
-        )
-        (wheel,) = wheels.glob("*.whl")
-        for profile in ("core", "rich", "docstrings", "yaml", "toml", "all"):
+        for profile in profiles:
             environment = directory / profile
             subprocess.run(
                 ["uv", "venv", "--python", sys.executable, str(environment)],
@@ -166,6 +163,29 @@ def main() -> int:
                 check=True,
                 cwd=directory,
             )
+
+
+def main() -> int:
+    """Check a supplied wheel, or build a temporary wheel when none is supplied.
+
+    Returns
+    -------
+    int
+        Zero after all six install profiles pass.
+    """
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--wheel", type=Path)
+    args = parser.parse_args()
+    if args.wheel:
+        check_wheel(args.wheel)
+    else:
+        with TemporaryDirectory(prefix="confidantic-wheel-") as temporary:
+            subprocess.run(
+                ["uv", "build", "--no-sources", "--wheel", "--out-dir", temporary],
+                check=True,
+            )
+            (wheel,) = Path(temporary).glob("*.whl")
+            check_wheel(wheel)
     return 0
 
 

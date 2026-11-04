@@ -2,10 +2,10 @@
 
 [![PyPI](https://img.shields.io/pypi/v/confidantic)](https://pypi.org/project/confidantic/)
 [![Supported Python versions](https://img.shields.io/pypi/pyversions/confidantic?logo=python)](https://pypi.org/project/confidantic/)
-[![CI](https://img.shields.io/github/actions/workflow/status/sztal/confidantic/ci.yaml?branch=main&logo=github&label=CI)](https://github.com/sztal/confidantic/actions/workflows/ci.yaml)
-[![Package build](https://img.shields.io/github/actions/workflow/status/sztal/confidantic/release.yaml?branch=main&logo=github&label=package%20build)](https://github.com/sztal/confidantic/actions/workflows/release.yaml)
+[![CI](https://img.shields.io/github/actions/workflow/status/sztal/confidantic/ci.yaml?branch=master&logo=github&label=CI)](https://github.com/sztal/confidantic/actions/workflows/ci.yaml)
+[![Package build](https://img.shields.io/github/actions/workflow/status/sztal/confidantic/release.yaml?branch=master&logo=github&label=package%20build)](https://github.com/sztal/confidantic/actions/workflows/release.yaml)
 [![Coverage](https://sztal.github.io/confidantic/coverage.svg)](https://sztal.github.io/confidantic/coverage/)
-[![License](https://img.shields.io/github/license/sztal/confidantic)](https://github.com/sztal/confidantic/blob/main/LICENSE)
+[![License](https://img.shields.io/github/license/sztal/confidantic)](https://github.com/sztal/confidantic/blob/master/LICENSE)
 
 Configuration and CLIs for Python projects based on Pydantic and Pydantic
 Settings. Confidantic requires Python 3.11 or later.
@@ -56,7 +56,7 @@ pip install "confidantic @ git+https://github.com/sztal/confidantic.git@<tag-or-
 uv add "confidantic @ git+https://github.com/sztal/confidantic.git@<tag-or-branch>"
 ```
 
-Replace `<tag-or-branch>` with a reference such as `v1.2.3` or `main`. Omit the
+Replace `<tag-or-branch>` with a reference such as `v1.2.3` or `master`. Omit the
 `@<tag-or-branch>` suffix to install the repository's default branch.
 
 ## Quick start
@@ -209,3 +209,8 @@ The `optional-deps` check builds a wheel once and verifies core, each individual
 extra, and `all` in fresh environments using the default interpreter. It runs
 outside the checkout so editable installs and development dependencies cannot
 mask missing runtime dependencies.
+
+## Development and releases
+
+See [Merging and releasing](docs/releasing.md) for merge-time release notes,
+Git-tag-based versions, local release preparation, and explicit publishing.

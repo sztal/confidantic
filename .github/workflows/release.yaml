@@ -1,56 +1,68 @@
 ---
-name: CD
+name: Release
+run-name: ${{ github.event_name == 'workflow_dispatch' && format('Publish {0} [{1}]', inputs.tag, inputs.request_id) || format('Validate {0}', github.ref_name) }}
 
 on:
   push:
-    branches: [main]
-    tags: ['*']
-  workflow_dispatch: null
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing annotated release tag on master history
+        required: true
+        type: string
+      request_id:
+        description: Unique request identifier (make publish supplies this)
+        required: true
+        type: string
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
 
 jobs:
-  build:
-    name: Build Python package distributions
+  resolve:
     runs-on: ubuntu-latest
+    outputs:
+      commit: ${{ steps.tag.outputs.commit }}
+      tag: ${{ steps.tag.outputs.tag }}
+      index: ${{ steps.tag.outputs.index }}
+      prerelease: ${{ steps.tag.outputs.prerelease }}
     steps:
       - uses: actions/checkout@v5
         with:
+          ref: master
           fetch-depth: 0
-      - name: Install the latest version of uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: true
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build Python package distributions
-        run: uv build
-      - name: Store Python package distributions
-        uses: actions/upload-artifact@v4
-        with:
-          name: python-package-distributions
-          path: dist
+      - uses: astral-sh/setup-uv@v7
+      - run: uv sync --locked --only-group release --no-install-project
+      - name: Resolve and validate the annotated tag
+        id: tag
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          if [ "$EVENT" = workflow_dispatch ]; then
+            test "$REF" = refs/heads/master
+            tag="$INPUT_TAG"
+          else
+            tag="${REF#refs/tags/}"
+          fi
+          uv run --no-sync python -m scripts.publish "$tag" --verify --output "$GITHUB_OUTPUT"
 
-  release-pypi:
-    name: Publish to PyPI
-    if: startsWith(github.ref, 'refs/tags/')
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: pypi
-      url: https://pypi.org/p/confidantic
-    permissions:
-      id-token: write
-    steps:
-      - name: Download Python package distributions
-        uses: actions/download-artifact@v5
-        with:
-          name: python-package-distributions
-          path: dist
-      - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+  validation:
+    needs: resolve
+    uses: ./.github/workflows/checks.yaml
+    with:
+      ref: ${{ needs.resolve.outputs.commit }}
+      tag: ${{ needs.resolve.outputs.tag }}
 
-  release-testpypi:
-    name: Publish to TestPyPI
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: build
+  publish-testpypi:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' && needs.resolve.outputs.index == 'testpypi'
+    needs: [resolve, validation]
     runs-on: ubuntu-latest
     environment:
       name: testpypi
@@ -58,12 +70,50 @@ jobs:
     permissions:
       id-token: write
     steps:
-      - name: Download Python package distributions
-        uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v5
         with:
           name: python-package-distributions
           path: dist
-      - name: Publish to TestPyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+      - uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
+
+  publish-pypi:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' && needs.resolve.outputs.index == 'pypi'
+    needs: [resolve, validation]
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/confidantic
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          name: python-package-distributions
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  github-release:
+    if: always() && github.event_name == 'workflow_dispatch' && needs.validation.result == 'success' && (needs.publish-pypi.result == 'success' || needs.publish-testpypi.result == 'success')
+    needs: [resolve, validation, publish-pypi, publish-testpypi]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.resolve.outputs.commit }}
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v7
+      - run: uv sync --locked --only-group release --no-install-project
+      - name: Create the GitHub release after package publication
+        env:
+          TAG: ${{ needs.resolve.outputs.tag }}
+          PRERELEASE: ${{ needs.resolve.outputs.prerelease }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          uv run --no-sync python -m scripts.publish "$TAG" --notes-file "$RUNNER_TEMP/release-notes.md"
+          args=()
+          if [ "$PRERELEASE" = true ]; then args+=(--prerelease); fi
+          gh release create "$TAG" --verify-tag --notes-file "$RUNNER_TEMP/release-notes.md" "${args[@]}"

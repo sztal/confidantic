@@ -85,7 +85,9 @@ lint = [
   "pre-commit>=4.5",
 ]
 release = [
+  "packaging>=24.2",
   "towncrier>=25.8",
+  "twine>=6.1",
 ]
 
 [tool.hatch.version]

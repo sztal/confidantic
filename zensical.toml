@@ -62,14 +62,35 @@ icon = "fontawesome/brands/github"
 link = "https://github.com/sztal/confidantic"
 
 [project.markdown_extensions]
+admonition = {}
+attr_list = {}
+def_list = {}
+footnotes = {}
+md_in_html = {}
+toc = { permalink = true }
+pymdownx.details = {}
 pymdownx.highlight = { anchor_linenums = true, pygments_lang_class = true }
+pymdownx.inlinehilite = {}
 pymdownx.snippets = {}
-pymdownx.superfences = {}
+pymdownx.superfences.custom_fences = [
+  { name = "mermaid", class = "mermaid", format = "pymdownx.superfences.fence_code_format" },
+]
 pymdownx.tabbed = { alternate_style = true }
 
+[project.validation]
+invalid_links = true
+invalid_link_anchors = true
+
+[project.plugins.mkdocstrings]
+enable_inventory = true
+
 [project.plugins.mkdocstrings.handlers.python]
+paths = ["."]
 inventories = [
   "https://docs.python.org/3/objects.inv",
+  # Pydantic's inventory also includes Pydantic Settings.
+  "https://pydantic.dev/docs/validation/latest/objects.inv",
+  "https://rich.readthedocs.io/en/stable/objects.inv",
 ]
 
 [project.plugins.mkdocstrings.handlers.python.options]

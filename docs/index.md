@@ -22,13 +22,13 @@ pip install confidantic
 The core install provides settings, CLI parsing, factories, and attribute-docstring
 extraction. Optional features are available separately:
 
-| Extra | Feature |
-| --- | --- |
-| `rich` | `model_info()` and `info()` display methods |
-| `docstrings` | `@attrs` class-docstring generation |
-| `yaml` | YAML loading and dumping |
-| `toml` | TOML dumping; loading uses the standard library |
-| `all` | Every optional feature |
+| Extra        | Feature                                         |
+| ------------ | ----------------------------------------------- |
+| `rich`       | `model_info()` and `info()` display methods     |
+| `docstrings` | `@attrs` class-docstring generation             |
+| `yaml`       | YAML loading and dumping                        |
+| `toml`       | TOML dumping; loading uses the standard library |
+| `all`        | Every optional feature                          |
 
 ```console
 pip install "confidantic[all]"

@@ -119,6 +119,26 @@ def test_original_layout(
     )
 
 
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+@pytest.mark.parametrize("terminal_newline", [False, True])
+def test_leading_blank_lines_and_terminal_newline(
+    style: Literal["numpy", "google"], newline: str, terminal_newline: bool
+) -> None:
+    """Leading blank lines and the final line ending survive replacement."""
+    section = "\n".join("    " + line for line in _section(style).splitlines())
+    original = "\n\n    Summary.\n\n" + section
+    if terminal_newline:
+        original += "\n"
+    original = original.replace("\n", newline)
+
+    class Config(BaseConfig):
+        __doc__ = original
+        value: int
+
+    expected = original.replace("@attrs", "value" if style == "numpy" else "value:")
+    assert Config.__doc__ == expected
+
+
 @pytest.mark.parametrize("disabled", [False, True])
 def test_inherited_configuration(
     style: Literal["numpy", "google"], disabled: bool
@@ -171,6 +191,32 @@ def test_non_insertion_markers_are_unchanged(original: str) -> None:
         value: int
 
     assert Config.__doc__ == original
+
+
+@pytest.mark.parametrize(
+    "prefix",
+    [
+        pytest.param("```python\n@attrs\n```", id="backtick-fence"),
+        pytest.param("~~~python\n@attrs\n~~~", id="tilde-fence"),
+        pytest.param("Example::\n\n    @attrs", id="literal-block"),
+        pytest.param('>>> print("@attrs")\n@attrs', id="doctest"),
+        pytest.param("Examples:\n    @attrs", id="examples"),
+    ],
+)
+def test_active_marker_after_ignored_content(
+    style: Literal["numpy", "google"], prefix: str
+) -> None:
+    """Scanning resumes after ignored content and preserves its literal markers."""
+    if style == "numpy" and prefix.startswith("Examples:"):
+        prefix = "Examples\n--------\n@attrs"
+    prefix = "Summary.\n\n" + prefix + "\n\n"
+
+    class Config(BaseConfig):
+        __doc__ = prefix + _section(style)
+        value: int
+
+    generated = _section(style, "value" if style == "numpy" else "value:")
+    assert Config.__doc__ == prefix + generated
 
 
 @pytest.mark.parametrize(

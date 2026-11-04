@@ -423,20 +423,28 @@ def test_copy_extras_retain_only_explicit_metadata() -> None:
 
 
 def test_factory_selector_predicate_and_parameterized_types() -> None:
-    from confidantic._config.factory import _matches_factory_selector
+    from confidantic._config._factory_build import _FactoryModelBuilder
 
-    assert _matches_factory_selector([1, 2], list[int])
-    assert not _matches_factory_selector(["1"], list[int])
+    typed = _FactoryModelBuilder(
+        Factory, AuditTarget, instance=None, recursive_selector=list[int]
+    )
+    assert typed.matches_selector([1, 2])
+    assert not typed.matches_selector(["1"])
     calls: list[Any] = []
 
     def predicate(value: Any) -> bool:
         calls.append(value)
         return True
 
-    assert _matches_factory_selector(1, predicate)
-    assert not _matches_factory_selector(None, int)
-    assert not _matches_factory_selector(Factory.model_from(AuditTarget), predicate)
-    assert not _matches_factory_selector(Factory.instance_from(AuditTarget), predicate)
+    selected = _FactoryModelBuilder(
+        Factory, AuditTarget, instance=None, recursive_selector=predicate
+    )
+    assert selected.matches_selector(1)
+    assert not _FactoryModelBuilder(
+        Factory, AuditTarget, instance=None, recursive_selector=int
+    ).matches_selector(None)
+    assert not selected.matches_selector(Factory.model_from(AuditTarget))
+    assert not selected.matches_selector(Factory.instance_from(AuditTarget))
     assert calls == [1]
 
 
@@ -460,7 +468,7 @@ def test_make_alias_default_and_nested_factories() -> None:
 def test_recursive_resolution_keeps_distinct_same_named_types_and_metadata() -> None:
     from pydantic import ConfigDict, create_model
 
-    from confidantic._config.factory import _resolved_annotation
+    from confidantic._config._factory_resolution import _ResolvedModelTypes
 
     first_type = create_model(
         "Node",
@@ -483,7 +491,7 @@ def test_recursive_resolution_keeps_distinct_same_named_types_and_metadata() -> 
     assert isinstance(result.second.target, AuditOther)
     annotation = Annotated[list[Factory[AuditTarget]], Factory[AuditOther]]
     assert (
-        _resolved_annotation(annotation)
+        _ResolvedModelTypes().resolve_annotation(annotation)
         == Annotated[list[AuditTarget], Factory[AuditOther]]
     )
 

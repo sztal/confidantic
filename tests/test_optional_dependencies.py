@@ -68,10 +68,23 @@ def test_core_does_not_import_optional_packages(tmp_path: Path) -> None:
         assert Config().model_field_sources
 
         class Target:
-            def __init__(self, value: int = 5) -> None:
+            def __init__(self, value: int = 5, label: str = "retained") -> None:
                 self.value = value
+                self.label = label
 
         assert Factory.model_from(Target)().model_resolve().value == 5
+
+        class Holder:
+            def __init__(self, target: Target = Target()) -> None:
+                self.target = target
+
+        template = Factory.model_from(Holder, __recursive__=Target)
+        configured = template(_cli_parse_args=["--target.value", "9"])
+        assert isinstance(configured.target, Factory)
+        resolved = configured.model_resolve()
+        assert isinstance(resolved.target, Target)
+        assert (resolved.target.value, resolved.target.label) == (9, "retained")
+        assert template().model_resolve().target.value == 5
         assert not {"rich", "docstring_parser", "yaml", "tomli_w"}.intersection(sys.modules)
         ''',
         ("rich", "docstring_parser", "yaml", "tomli_w"),

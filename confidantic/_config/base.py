@@ -610,21 +610,16 @@ class BaseConfig(BaseSettings):
         are supported for acyclic values. Generated types are shared within one
         resolution call; original model types are not modified.
         """
-        from confidantic._config.factory import (
-            _contains_factory,
-            _resolve_model_instance,
+        from confidantic._config._factory_resolution import (
+            _FactoryResolver,
+            contains_factory,
         )
 
-        if not _contains_factory(self):
+        if not contains_factory(self):
             return shallow_copy(self)
         with _CliSettings.suppress():
             return cast(
-                Self,
-                _resolve_model_instance(
-                    self,
-                    set(),
-                    name=name,
-                ),
+                Self, _FactoryResolver().resolve(self, name=name, as_model=True)
             )
 
     @property

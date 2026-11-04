@@ -216,6 +216,65 @@ def test_recursive_factory_serialization_and_loky_transfer(tmp_path: Path) -> No
     )
 
 
+def test_resolved_recursive_models_round_trip_in_fresh_interpreter(
+    tmp_path: Path,
+) -> None:
+    """Already-resolved model types retain recursive schemas after transfer."""
+    _run(
+        """
+        from pathlib import Path
+        import cloudpickle
+        from pydantic import BaseModel
+        from confidantic import BaseConfig, Factory
+
+        class Target:
+            def __init__(self, value: int = 1) -> None:
+                self.value = value
+
+        class Node(BaseModel, arbitrary_types_allowed=True):
+            child: "Node | None" = None
+            target: Factory[Target] = Factory.model_from(Target)
+
+        class Config(BaseConfig):
+            node: Node
+
+        original = Config(
+            node=Node(child=Node(), target=Factory.instance_from(Target, value=7))
+        )
+        resolved = original.model_resolve(name="ResolvedConfig")
+        Path("resolved.pkl").write_bytes(cloudpickle.dumps((type(resolved), resolved)))
+        """,
+        tmp_path,
+    )
+    _run(
+        """
+        from pathlib import Path
+        import cloudpickle
+
+        Config, instance = cloudpickle.loads(Path("resolved.pkl").read_bytes())
+        assert type(instance) is Config
+        assert Config.__name__ == "ResolvedConfig"
+        node_type = type(instance.node)
+        assert type(instance.node.child) is node_type
+        assert Config.model_fields["node"].annotation is node_type
+        assert node_type.model_fields["target"].annotation is type(instance.node.target)
+        assert instance.node.target.value == 7
+        assert instance.node.child.target.value == 1
+        updated = Config.model_validate({
+            "node": {
+                "target": instance.node.target,
+                "child": {"target": instance.node.child.target},
+            }
+        })
+        assert type(updated.node.child) is node_type
+        assert updated.node.target.value == 7
+        assert updated.node.child.target.value == 1
+        assert type(instance.model_resolve()) is Config
+        """,
+        tmp_path,
+    )
+
+
 def test_hashable_mutable_factory_defaults_transfer(tmp_path: Path) -> None:
     """Copy-default wrappers and templates survive fresh-process cloudpickle."""
     _run(

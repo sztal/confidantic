@@ -10,11 +10,11 @@ from pydantic.errors import PydanticUserError
 from typing_extensions import TypedDict
 
 from confidantic import BaseConfig, Factory
-from confidantic._config.factory import (
-    _contains_factory,
-    _matches_factory_type_hint,
-    _resolve_value,
-    _resolved_annotation,
+from confidantic._config._factory_build import _FactoryModelBuilder
+from confidantic._config._factory_resolution import (
+    _FactoryResolver,
+    _ResolvedModelTypes,
+    contains_factory,
 )
 
 _UNTYPED_DEFAULT = object()
@@ -452,8 +452,8 @@ def test_factory_selector_supports_type_adapter_fallback() -> None:
     class Payload(TypedDict):
         value: int
 
-    assert _matches_factory_type_hint({"value": 1}, Payload)
-    assert not _matches_factory_type_hint({"value": "invalid"}, Payload)
+    assert _FactoryModelBuilder.matches_type_hint({"value": 1}, Payload)
+    assert not _FactoryModelBuilder.matches_type_hint({"value": "invalid"}, Payload)
 
 
 def test_factory_selector_propagates_invalid_type_hints() -> None:
@@ -465,7 +465,7 @@ def test_factory_selector_propagates_invalid_type_hints() -> None:
             raise PydanticUserError("invalid schema", code="invalid-schema")
 
     with pytest.raises(PydanticUserError):
-        _matches_factory_type_hint(1, InvalidSchema)
+        _FactoryModelBuilder.matches_type_hint(1, InvalidSchema)
 
 
 def test_model_resolve_resolves_nested_base_models() -> None:
@@ -492,14 +492,15 @@ def test_resolved_annotation_rebuilds_container_annotations() -> None:
     """Nested concrete factory annotations are replaced inside containers."""
     child_type = Factory.model_from(Child)
 
-    assert _resolved_annotation(list[child_type]) == list[Child]
+    assert _ResolvedModelTypes().resolve_annotation(list[child_type]) == list[Child]
 
 
 def test_resolved_annotation_preserves_unchanged_and_union_annotations() -> None:
     """Annotation resolution preserves plain types and rebuilds unions."""
-    assert _resolved_annotation(Any) is Any
-    assert _resolved_annotation(list[int]) == list[int]
-    assert _resolved_annotation(Factory[Child] | str) == Child | str
+    types = _ResolvedModelTypes()
+    assert types.resolve_annotation(Any) is Any
+    assert types.resolve_annotation(list[int]) == list[int]
+    assert types.resolve_annotation(Factory[Child] | str) == Child | str
 
 
 def test_resolved_annotation_keeps_unmodified_model_type() -> None:
@@ -508,44 +509,26 @@ def test_resolved_annotation_keeps_unmodified_model_type() -> None:
     class Payload(BaseModel):
         value: int
 
-    assert _resolved_annotation(Payload) is Payload
-
-
-def test_resolve_value_leaves_factory_class_when_not_recursive() -> None:
-    """Non-recursive value resolution preserves concrete factory classes."""
-    child_type = Factory.model_from(Child)
-
-    assert _resolve_value(child_type, set(), recursive=False) is child_type
+    assert _ResolvedModelTypes().resolve_annotation(Payload) is Payload
 
 
 def test_resolve_value_resolves_factory_class() -> None:
     """Recursive value resolution materializes concrete factory classes."""
     child_type = Factory.model_from(Child)
 
-    resolved = _resolve_value(child_type, set())
+    resolved = _FactoryResolver().resolve(child_type)
 
     assert isinstance(resolved, Child)
-
-
-def test_resolve_value_leaves_base_model_when_not_recursive() -> None:
-    """Non-recursive value resolution preserves nested BaseModel instances."""
-
-    class Payload(BaseModel):
-        value: int
-
-    payload = Payload(value=3)
-
-    assert _resolve_value(payload, set(), recursive=False) is payload
 
 
 def test_contains_factory_handles_cycles_and_mapping_keys() -> None:
     """Factory detection handles cyclic containers and mapping keys."""
     cyclic: list[Any] = []
     cyclic.append(cyclic)
-    assert not _contains_factory(cyclic)
+    assert not contains_factory(cyclic)
 
     child_type = Factory.model_from(Child)
-    assert _contains_factory({child_type: "factory key"})
+    assert contains_factory({child_type: "factory key"})
 
 
 def test_model_from_type_accepts_custom_name() -> None:
@@ -705,6 +688,27 @@ def test_base_config_model_resolve_generates_resolved_model() -> None:
     assert isinstance(resolved.child, Child)
     assert resolved.child.value == 3
     assert config.child.value == 3
+
+
+@pytest.mark.parametrize("name", [None, "ResolvedFactory"])
+def test_base_config_resolution_rebuilds_a_factory_root(name: str | None) -> None:
+    """An explicit base-method call keeps the root model and resolves its fields."""
+
+    class Parent:
+        def __init__(self, child: Factory[Child]) -> None:
+            self.child = child
+
+    config = Factory.model_from(Parent)(child=Factory.instance_from(Child, value=3))
+
+    # Pydantic already warns when this path overrides the inherited field.
+    with pytest.warns(UserWarning, match='Field name "child".*shadows an attribute'):
+        result = BaseConfig.model_resolve(config, name=name)
+
+    assert isinstance(result, Factory)
+    assert result.factory_target is Parent
+    assert type(result).__name__ == (name or "ParentConfigResolved")
+    assert isinstance(result.child, Child)
+    assert result.child.value == 3
 
 
 def test_base_config_model_resolve_resolves_factory_values() -> None:
@@ -868,6 +872,139 @@ def test_model_resolve_rejects_cyclic_values() -> None:
 
     with pytest.raises(ValueError, match="cyclic values cannot be resolved"):
         config.model_resolve()
+
+
+def test_resolution_constructs_repeated_factory_references_independently() -> None:
+    """Shared factory inputs invoke their constructor at each occurrence."""
+    calls: list[int] = []
+
+    class Target:
+        def __init__(self, value: int = 3) -> None:
+            calls.append(value)
+            self.value = value
+
+    class Parent:
+        def __init__(self, children: Any) -> None:
+            self.children = children
+
+    child = Factory.instance_from(Target)
+    config = Factory.model_from(Parent).model_construct(children=[child, child])
+
+    result = config.model_resolve()
+
+    assert calls == [3, 3]
+    assert result.children[0] is not result.children[1]
+
+
+def test_resolution_reuses_model_types_only_within_each_call() -> None:
+    """Repeated typed models share generated types, but not resolved values."""
+
+    class Payload(BaseModel):
+        model_config = ConfigDict(arbitrary_types_allowed=True)
+        child: Factory[Child]
+
+    class Config(BaseConfig):
+        payloads: list[Payload]
+
+    payload = Payload(child=Factory.instance_from(Child, value=3))
+    config = Config.model_construct(payloads=[payload, payload])
+
+    first = config.model_resolve()
+    second = config.model_resolve()
+
+    assert first.payloads[0] is not first.payloads[1]
+    assert type(first.payloads[0]) is type(first.payloads[1])
+    assert type(first.payloads[0]) is not type(second.payloads[0])
+    assert first.payloads[0].child.value == second.payloads[1].child.value == 3
+
+
+@pytest.mark.parametrize("container", [dict, list, tuple, set, frozenset])
+def test_resolution_normalizes_container_subclasses(container: type[Any]) -> None:
+    """Traversal rebuilds builtin containers and resolves mapping keys as well."""
+
+    class Parent:
+        def __init__(self, payload: Any) -> None:
+            self.payload = payload
+
+    child_type = Factory.model_from(Child)
+    subtype = type("Container", (container,), {})
+    payload = subtype([(child_type, child_type)] if container is dict else [child_type])
+    config = Factory.model_from(Parent).model_construct(payload=payload)
+
+    result = config.model_resolve().payload
+
+    assert type(result) is container
+    assert all(isinstance(item, Child) for item in result)
+    if container is dict:
+        assert all(isinstance(item, Child) for item in result.values())
+
+
+def test_resolution_without_factories_preserves_cyclic_values() -> None:
+    """The shallow-copy path accepts cycles and ignores the generated name."""
+
+    class Config(BaseConfig):
+        payload: Any
+
+    cycle: list[Any] = []
+    cycle.append(cycle)
+    config = Config.model_construct(payload=cycle)
+
+    result = config.model_resolve(name="Unused")
+
+    assert type(result) is Config
+    assert result is not config
+    assert result.payload is cycle
+
+
+def test_resolution_preserves_field_details_without_mutating_source() -> None:
+    """Annotation replacement retains field defaults, aliases, and metadata."""
+    child_type = Factory.model_from(Child)
+
+    class Config(BaseConfig):
+        child: Annotated[Factory[Child], "tag"] = Field(
+            default=child_type, alias="nested", description="Nested child."
+        )
+
+    original = Config.model_fields["child"]
+    annotation = original.annotation
+    config = Config(nested=child_type(value=3))
+
+    result = config.model_resolve()
+    resolved = type(result).model_fields["child"]
+
+    assert result.child.value == 3
+    assert resolved.annotation is Child
+    assert resolved.alias == original.alias == "nested"
+    assert resolved.description == original.description == "Nested child."
+    assert resolved.metadata == original.metadata == ["tag"]
+    assert resolved.default is original.default is child_type
+    assert Config.model_fields["child"] is original
+    assert original.annotation is annotation
+
+
+@pytest.mark.parametrize("unchecked", ["construct", "copy"])
+def test_resolution_preserves_arbitrary_objects_and_unchecked_scalars(
+    unchecked: str,
+) -> None:
+    """Resolution forwards scalar values without another factory validation."""
+
+    class Target:
+        def __init__(self, value: int, token: Any) -> None:
+            self.value = value
+            self.token = token
+
+    token = object()
+    model = Factory.model_from(Target)
+    config = (
+        model.model_construct(value="unchecked", token=token)
+        if unchecked == "construct"
+        else model(value=1, token=token).model_copy(update={"value": "unchecked"})
+    )
+
+    result = config.model_resolve()
+
+    assert result.value == "unchecked"
+    assert result.token is token
 
 
 def test_factory_default_target_class_is_converted() -> None:

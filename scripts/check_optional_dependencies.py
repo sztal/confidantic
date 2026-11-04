@@ -50,10 +50,23 @@ assert config.copy(value=8).value == 8
 assert config.model_field_sources
 
 class Target:
-    def __init__(self, value: int = 2) -> None:
+    def __init__(self, value: int = 2, label: str = "retained") -> None:
         self.value = value
+        self.label = label
 
 assert Factory.model_from(Target)().model_resolve().value == 2
+
+class Holder:
+    def __init__(self, target: Target = Target()) -> None:
+        self.target = target
+
+template = Factory.model_from(Holder, __recursive__=Target)
+configured = template(target={"value": 9})
+assert isinstance(configured.target, Factory)
+resolved = configured.model_resolve()
+assert isinstance(resolved.target, Target)
+assert (resolved.target.value, resolved.target.label) == (9, "retained")
+assert template().model_resolve().target.value == 2
 assert not set(modules.values()).intersection(sys.modules)
 
 def feature(extra: str, action: Callable[[], object]) -> object:

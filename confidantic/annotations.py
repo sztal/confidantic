@@ -136,6 +136,20 @@ def Delimited(sep: str | None = None) -> Any:
     """
 
     def _validate_delimited(value: Any, handler: Callable[[Any], Any]) -> Any:
+        """Try normal, JSON, then split-string validation with the captured separator.
+
+        Parameters
+        ----------
+        value
+            Input to the annotated field. Only strings receive fallback parsing.
+        handler
+            Remaining Pydantic validation chain, called for each candidate.
+
+        Notes
+        -----
+        Failed fallbacks preserve the first validation error, chaining the final
+        failure as its cause. Successful validation returns immediately.
+        """
         try:
             return handler(value)
         except Exception as e1:
@@ -170,6 +184,22 @@ TabDelimited = Delimited("\t")
 
 
 def _dict_like(value: Any, handler: Callable[[Any], Any]) -> Any:
+    """Validate a mapping input, falling back to JSON and key/value string pairs.
+
+    Parameters
+    ----------
+    value
+        Input to validate. String pairs split at commas or whitespace before a
+        new key; only the first equals sign separates each key from its value.
+    handler
+        Remaining Pydantic validation chain, including key and value coercion.
+
+    Notes
+    -----
+    The pair syntax strips surrounding whitespace and trailing commas and keeps
+    the last occurrence of each key. Failed fallbacks re-raise the original
+    validation error with the final failure chained as its cause.
+    """
     try:
         return handler(value)
     except Exception as e1:
@@ -227,6 +257,16 @@ Import: TypeAlias = Annotated[
 
 
 def _call(value: Any, handler: Callable[[Any], Any]) -> Any:
+    """Evaluate one top-level call directive before validating its result.
+
+    Parameters
+    ----------
+    value
+        Callable, import string, call mapping, or ordinary input. Arguments in
+        call mappings pass through unchanged; nested directives are not visited.
+    handler
+        Remaining validation chain, called once with the result or ordinary input.
+    """
     if isinstance(value, Mapping):
         return handler(_call_mapping(value) if "@call" in value else value)
     if isinstance(value, str):

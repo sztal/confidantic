@@ -24,6 +24,7 @@ class _LiteralNumpySection(Section):
 
     @property
     def title_pattern(self) -> str:
+        """Match a literal heading and its underline without interpreting title regexes."""
         # Custom titles may contain regex syntax, such as parentheses.
         return rf"^({re.escape(self.title)})[ \t]*\n{'-' * len(self.title)}[ \t]*$"
 
@@ -34,6 +35,13 @@ class _AttributeDocstringBackend:
     Composition preserves field order and descriptions. Parsing returns field
     names and whitespace-normalized descriptions for independent comparison by
     the caller, validating the complete document rather than just its new section.
+
+    Parameters
+    ----------
+    style
+        Detected or explicitly selected convention used for both operations.
+    class_name
+        Configuration class name included in parser-error diagnostics.
     """
 
     def __init__(self, style: Literal["numpy", "google"], *, class_name: str) -> None:
@@ -44,7 +52,20 @@ class _AttributeDocstringBackend:
         )
 
     def compose(self, fields: Mapping[str, str | None]) -> str:
-        """Compose an Attributes section, retaining its heading when empty."""
+        """Compose an Attributes section, retaining its heading when empty.
+
+        Parameters
+        ----------
+        fields
+            Field names and optional descriptions in output order. Types and
+            defaults are not added to the generated entries.
+
+        Returns
+        -------
+        str
+            Section text without leading or trailing newlines. Empty headings
+            are emitted here; the subsequent parse decides whether they are valid.
+        """
         generated = Docstring(style=self._parser_style)
         generated.meta = [
             DocstringParam(
@@ -68,7 +89,27 @@ class _AttributeDocstringBackend:
     def attributes(
         self, text: str, *, custom_numpy_titles: Iterable[str]
     ) -> list[tuple[str, str]]:
-        """Parse a complete docstring and return its normalized attribute entries."""
+        """Parse a complete docstring and return its normalized attribute entries.
+
+        Parameters
+        ----------
+        text
+            Completed docstring. Newlines are normalized only in the parser's view.
+        custom_numpy_titles
+            Detected NumPy headings to register as literal sections if unknown
+            to the parser, preventing their content from becoming attributes.
+            Ignored for Google-style parsing.
+
+        Returns
+        -------
+        list[tuple[str, str]]
+            Attribute names and whitespace-normalized descriptions in parse order.
+
+        Raises
+        ------
+        ValueError
+            If parsing fails, with the configuration class and style in the message.
+        """
         try:
             # Normalize only the parser's view, leaving the stored string intact.
             normalized = text.replace("\r\n", "\n").replace("\r", "\n")

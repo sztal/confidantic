@@ -41,7 +41,15 @@ _FACTORY_DEFAULT = object()
 
 @dataclass(frozen=True)
 class _CopiedDefault:
-    """Copy a generated default while retaining its settings-merge template."""
+    """Copy a generated default while retaining its settings-merge template.
+
+    Attributes
+    ----------
+    template
+        Original default retained by reference. Each call deep-copies it, so
+        generated fields and settings sources receive independent values. Copy
+        errors propagate to the caller.
+    """
 
     template: Any
 
@@ -67,6 +75,13 @@ class ClassDefaultsSource(PydanticBaseSettingsSource):
         ``settings_cls``.
     _init_state
         Optional source state shared with other Pydantic Settings sources.
+
+    Attributes
+    ----------
+    defaults
+        Collected source values, keyed by the first validation alias or field
+        name. Deferred defaults use an internal barrier sentinel until settings
+        assembly removes it and Pydantic evaluates the field's actual default.
     """
 
     def __init__(
@@ -117,16 +132,22 @@ class ClassDefaultsSource(PydanticBaseSettingsSource):
                 self.defaults[key] = adapter.dump_python(default)
 
     def __call__(self) -> dict[str, Any]:
+        """Return the collected defaults mapping without making another copy."""
         return self.defaults
 
     def get_field_value(
         self, field: FieldInfo, field_name: str
     ) -> tuple[Any, str, bool]:
+        """Satisfy the source interface; defaults are collected in bulk instead."""
         return None, "", False  # pragma: no cover
 
 
 class _InitSettingsSource(InitSettingsSource):
-    """Keep mapping values intact when upstream hashing cannot normalize them."""
+    """Keep mapping values intact when upstream hashing cannot normalize them.
+
+    Only the unhashable-dictionary TypeError falls back to the stored init
+    mapping. Other upstream failures propagate without changing their meaning.
+    """
 
     def __call__(self) -> dict[str, Any]:
         try:
@@ -144,6 +165,26 @@ class _ProvenanceSource(PydanticBaseSettingsSource):
     each field. init_fields tracks unchanged inputs from the actual init source
     supplied to the customization hook, so copying can retain prior provenance.
     Bare callables provide no source state and therefore disable provenance.
+
+    Parameters
+    ----------
+    settings_cls
+        Concrete model whose field names and aliases identify source winners.
+    sources
+        Sources in descending priority, excluding this terminal observer.
+    _init_state
+        Shared upstream source state used to inspect the final merged values.
+    nested_model_default_partial_update
+        Effective policy retained for the nested-update preparation step.
+
+    Attributes
+    ----------
+    field_sources
+        Canonical declared field names mapped to source and settings classes.
+        Recomputed on each call; extra fields are not included.
+    init_fields
+        Declared fields and extras supplied by unchanged entries in the marked
+        initialization source. Validated copies use these to retain metadata.
     """
 
     def __init__(
@@ -160,6 +201,7 @@ class _ProvenanceSource(PydanticBaseSettingsSource):
         self.init_fields: set[str] = set()
 
     def __call__(self) -> dict[str, Any]:
+        """Refresh winner metadata from successive source states and return no values."""
         self.field_sources.clear()
         self.init_fields.clear()
         if not all(
@@ -252,7 +294,25 @@ class _SettingsSources:
         self.find_dotenv = find_dotenv
 
     def build(self, fallback: Callable[..., _SourceResult]) -> _SourceResult:
-        """Assemble MRO sources, or use the bound super hook for bare BaseConfig."""
+        """Assemble MRO sources, or use the bound super hook for bare BaseConfig.
+
+        Parameters
+        ----------
+        fallback
+            Bound upstream source builder, used when no subclass levels exist.
+
+        Returns
+        -------
+        tuple
+            Source tuple and initialization mapping for upstream value assembly.
+            Subclass chains retain CLI sources only at the concrete level,
+            append each level's declared defaults, and finish with provenance.
+
+        Notes
+        -----
+        Dotenv discovery runs at most once per build. Sources are constructed
+        here but their values are merged later by the upstream settings hook.
+        """
         model_config = {**self.model_type.model_config, **self.config_options}
         env_file = self.options["_env_file"]
         if model_config.get("env_file_discovery") and (
@@ -301,7 +361,27 @@ class _SettingsSources:
     def _sources_for_level(
         self, level: type[BaseSettings], *, concrete: bool
     ) -> tuple[tuple[PydanticBaseSettingsSource, ...], DefaultSettingsSource]:
-        """Let upstream build one class's sources, then normalize built-in sources."""
+        """Let upstream build one class's sources, then normalize built-in sources.
+
+        Parameters
+        ----------
+        level
+            Settings class at the current position in the concrete-to-parent MRO.
+        concrete
+            Whether this is the most-derived level, where CLI parsing is enabled.
+
+        Returns
+        -------
+        tuple
+            Normalized sources and their upstream default source. The latter
+            supplies shared init state and the effective partial-update policy.
+
+        Notes
+        -----
+        Only exact built-in environment and init sources are removed or
+        replaced; user subclasses retain their behavior. A disabled environment
+        prefix leaves dotenv and secrets sources available.
+        """
         source_builder = BaseSettings.__dict__["_settings_init_sources"].__get__(
             None, level
         )
@@ -348,7 +428,25 @@ class _SettingsSources:
         sources: tuple[PydanticBaseSettingsSource, ...],
         values: dict[str, Any],
     ) -> dict[str, Any]:
-        """Remove untouched defaults and prepare the active nested-update scope."""
+        """Remove untouched defaults and prepare the active nested-update scope.
+
+        Parameters
+        ----------
+        model_type
+            Concrete model that will validate the assembled values.
+        sources
+            Evaluated source chain, including class defaults and provenance.
+        values
+            Merged settings mapping. A new top-level mapping is returned.
+
+        Returns
+        -------
+        dict[str, Any]
+            Input for model validation with untouched defaults omitted, allowing
+            Pydantic to apply them. When partial updates are enabled, nested
+            model baselines are also recorded in the active scope and unpatched
+            initialization instances are restored in the returned mapping.
+        """
         defaults: dict[str, Any] = {}
         seen_defaults: set[str] = set()
         for source in sources:
@@ -384,7 +482,22 @@ class _SettingsSources:
 
     @staticmethod
     def track_customization(method: Callable[..., Any]) -> Callable[..., Any]:
-        """Track unchanged keys in the init source supplied to a customization hook."""
+        """Wrap a customization hook to mark unchanged initialization inputs.
+
+        Parameters
+        ----------
+        method
+            Unbound ``settings_customise_sources`` implementation. Its caller
+            supplies ``init_settings`` as a keyword argument.
+
+        Returns
+        -------
+        Callable
+            Wrapper preserving the method's metadata and return value. After
+            customization it marks keys still referring to their original
+            objects on the supplied init source. A wrapper marker lets subclass
+            initialization avoid wrapping the same implementation repeatedly.
+        """
 
         @wraps(method)
         def tracked(*args: Any, **kwargs: Any) -> Any:
@@ -406,7 +519,22 @@ class _SettingsSources:
 
 
 def wrap_settings_schema(source: Any, handler: GetCoreSchemaHandler) -> CoreSchema:
-    """Wrap model validation while retaining recursive schema references."""
+    """Wrap model validation while retaining recursive schema references.
+
+    Parameters
+    ----------
+    source
+        Model type with a ``_validate_settings`` hook.
+    handler
+        Pydantic schema generator for the underlying model.
+
+    Returns
+    -------
+    CoreSchema
+        Schema calling the settings hook around normal validation. A definition
+        reference is returned unchanged; otherwise the reference belongs to the
+        wrapper so recursive validation also assembles settings sources.
+    """
     schema = handler(source)
     if schema["type"] == "definition-ref":
         return schema
@@ -421,7 +549,31 @@ def wrap_settings_schema(source: Any, handler: GetCoreSchemaHandler) -> CoreSche
 def validate_settings(
     model_type: type[BaseSettings], value: Any, handler: Callable[[Any], Any]
 ) -> Any:
-    """Keep context-local source assembly behind an importable callback."""
+    """Assemble settings inside the active Pydantic validation chain.
+
+    Parameters
+    ----------
+    model_type
+        Concrete settings class whose source hooks are dispatched.
+    value
+        Model input. Mappings are copied and split into settings options and
+        field inputs; non-mapping inputs go directly to the validation handler.
+    handler
+        Remaining model validation chain, retaining its per-call options.
+
+    Returns
+    -------
+    Any
+        Validated result with provenance attached when the source chain tracks
+        it. Source and validation errors propagate.
+
+    Notes
+    -----
+    Automatic CLI parsing is suppressed in notebook and resolution contexts.
+    A fresh nested-update scope spans value assembly and validation, restoring
+    any enclosing scope on exit. Importable callbacks keep this transient state
+    out of serialized model classes.
+    """
     if not isinstance(value, Mapping):
         return handler(value)
     kwargs = dict(value)

@@ -121,6 +121,12 @@ def main() -> int:
     Each environment contains only the wheel's declared runtime dependencies
     and the selected extra. Smoke checks run outside the checkout with isolated
     Python import paths. The temporary build and environments are removed on exit.
+
+    Returns
+    -------
+    int
+        Zero after all install profiles pass. Build, installation, and smoke-test
+        failures raise subprocess errors rather than returning a failure code.
     """
     project = Path(__file__).resolve().parent.parent
     with TemporaryDirectory(prefix="confidantic-optional-") as temporary:

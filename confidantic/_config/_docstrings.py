@@ -13,7 +13,18 @@ _Style = Literal["numpy", "google"]
 
 @dataclass(frozen=True)
 class _SectionSpan:
-    """Section boundaries as zero-based line indices, with an exclusive end."""
+    """Section boundaries as zero-based line indices, with an exclusive end.
+
+    Attributes
+    ----------
+    title, style
+        Heading text without its delimiter and the detected section convention.
+    header_start, body_start
+        First heading and content lines, respectively. NumPy headings occupy
+        two lines; Google headings occupy one.
+    end
+        First line outside the section, or the total line count at end of text.
+    """
 
     title: str
     style: _Style
@@ -24,6 +35,13 @@ class _SectionSpan:
 
 def _scan_docstring(text: str) -> tuple[list[str], list[_SectionSpan], list[int]]:
     """Locate section boundaries and standalone insertion markers.
+
+    Parameters
+    ----------
+    text
+        Original docstring, including its source indentation. Scanning ignores
+        doctests, fenced blocks, and indented literal content without altering
+        the stored text or its line numbering.
 
     Returns
     -------

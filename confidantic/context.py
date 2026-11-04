@@ -118,7 +118,25 @@ _CONTEXT_VARS_LOCK = RLock()
 
 
 def _context_var(cls: type[_ContextT]) -> ContextVar[_ContextT]:
-    """Keep runtime state outside serializable classes without retaining them."""
+    """Find or create a context variable for one concrete context class.
+
+    Parameters
+    ----------
+    cls
+        Class used as a weak registry key. Subclasses have separate entries.
+
+    Returns
+    -------
+    ContextVar
+        Process-local variable with no default value. Creating it does not
+        construct or activate a configuration instance.
+
+    Notes
+    -----
+    The lock serializes registry access across threads. Keeping variables
+    outside the classes avoids serializing ambient activation with a class;
+    weak keys avoid retaining classes solely through this registry.
+    """
     with _CONTEXT_VARS_LOCK:
         variable = _CONTEXT_VARS.get(cls)
         if variable is None:

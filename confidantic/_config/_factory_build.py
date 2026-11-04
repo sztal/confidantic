@@ -165,7 +165,24 @@ class _FactoryModelBuilder:
         value: Any,
         factory_type: type[Factory[Any]],
     ) -> Any:
-        """Replace matching union branches, preserving alternatives and metadata."""
+        """Replace matching union branches, preserving alternatives and metadata.
+
+        Parameters
+        ----------
+        annotation
+            Constructor annotation to rewrite. Union branches and the underlying
+            type of Annotated are visited recursively; metadata is retained.
+        value
+            Concrete default used to select branches by strict type validation.
+        factory_type
+            Generated factory class to substitute for matching annotations.
+
+        Returns
+        -------
+        Any
+            Rewritten annotation, retaining branches that do not match. Generic
+            containers are matched as whole types rather than by their elements.
+        """
         origin = get_origin(annotation)
         arguments = get_args(annotation)
         if origin in (Union, UnionType) and arguments:
@@ -191,7 +208,13 @@ class _FactoryModelBuilder:
         return annotation
 
     def matches_selector(self, value: Any) -> bool:
-        """Select whole defaults, skipping existing factories before predicates."""
+        """Select whole defaults, skipping existing factories before predicates.
+
+        Type hints, including callable typing forms, use strict validation.
+        Other callable selectors receive the value and their result is converted
+        to bool. Predicate exceptions propagate; only type-hint matching excludes
+        None automatically.
+        """
         if isinstance(value, Factory) or _is_factory_type(value):
             return False
         selector = self.recursive_selector
@@ -203,7 +226,23 @@ class _FactoryModelBuilder:
 
     @staticmethod
     def matches_type_hint(value: Any, type_hint: Any) -> bool:
-        """Match non-None values strictly; unrelated schema errors propagate."""
+        """Test a non-None value against a type hint without accepting coercion.
+
+        Parameters
+        ----------
+        value
+            Concrete default to test; ``None`` always returns False.
+        type_hint
+            Annotation used to construct a TypeAdapter. Arbitrary types are
+            allowed unless the annotated type supplies its own configuration.
+
+        Returns
+        -------
+        bool
+            Whether strict validation succeeds. TypeError and ValueError from
+            validation count as a mismatch; adapter construction errors propagate
+            except for the retried model-owned configuration case.
+        """
         if value is None:
             return False
         try:

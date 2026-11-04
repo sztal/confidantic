@@ -111,6 +111,28 @@ def import_from_string(import_string: str, type_hint: Any = Any) -> Any:
 
 
 def _call_mapping(value: Mapping[Any, Any]) -> Any:
+    """Invoke a mapping's target without traversing its arguments or return value.
+
+    Parameters
+    ----------
+    value
+        Mapping with an ``@call`` callable or import string, optional iterable
+        ``@args``, and remaining entries passed as keyword arguments. The
+        mapping is not modified. Callers handle any recursive preprocessing.
+
+    Returns
+    -------
+    Any
+        Target's return value, without additional validation.
+
+    Raises
+    ------
+    ValueError
+        If ``@call`` is absent or ``@args`` is not iterable.
+    TypeError
+        If the target or arguments cannot be called. Import-validation and
+        target-call errors also propagate.
+    """
     if "@call" not in value:
         errmsg = "Call mappings require an '@call' key"
         raise ValueError(errmsg)
@@ -174,6 +196,12 @@ def make(value: Any, handler: Callable[[Any], Any] | None = None) -> Any:
     """
 
     def build(item: Any) -> Any:
+        """Rebuild supported containers and evaluate call mappings from the inside out.
+
+        Ordinary strings and callables remain data at this stage. Mapping keys
+        and call results are not visited, and repeated references are rebuilt
+        independently without cycle detection.
+        """
         if isinstance(item, Mapping):
             built = {key: build(nested_value) for key, nested_value in item.items()}
             return _call_mapping(built) if "@call" in built else built

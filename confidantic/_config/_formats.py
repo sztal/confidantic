@@ -25,7 +25,22 @@ class _TomlModule(Protocol):
 
 
 def dump_yaml(model: BaseModel, *, indent: int | None, **dump_options: Any) -> str:
-    """Dump JSON-mode model values as ordered, block-style YAML."""
+    """Dump JSON-mode model values as ordered, block-style YAML.
+
+    Parameters
+    ----------
+    model
+        Model serialized after the optional YAML dependency is loaded.
+    indent
+        Indentation passed to safe_dump, or None for the writer's default.
+    **dump_options
+        Options forwarded to model_dump with JSON mode fixed by this helper.
+
+    Raises
+    ------
+    ImportError
+        If PyYAML is absent. Serializer and writer errors propagate unchanged.
+    """
     try:
         yaml = cast(_YamlModule, import_module("yaml"))
     except ModuleNotFoundError as error:
@@ -46,7 +61,12 @@ def dump_yaml(model: BaseModel, *, indent: int | None, **dump_options: Any) -> s
 
 
 def load_yaml(data: str | bytes) -> Any:
-    """Parse YAML safely, leaving model validation to the caller."""
+    """Parse YAML with safe_load, leaving model validation to the caller.
+
+    The result may be a mapping, sequence, scalar, or None for an empty document.
+    Missing PyYAML raises ImportError naming the extra; YAML parse errors
+    propagate unchanged. Call directives are not evaluated here.
+    """
     try:
         yaml = cast(_YamlModule, import_module("yaml"))
     except ModuleNotFoundError as error:
@@ -59,7 +79,24 @@ def load_yaml(data: str | bytes) -> Any:
 
 
 def dump_toml(model: BaseModel, **dump_options: Any) -> str:
-    """Dump JSON-mode model values as TOML without altering unsupported values."""
+    """Dump JSON-mode model values as TOML without altering unsupported values.
+
+    Parameters
+    ----------
+    model
+        Model serialized after the optional TOML writer is loaded.
+    **dump_options
+        Options forwarded to model_dump with JSON mode fixed by this helper.
+        Filtering None-valued fields does not remove None inside containers.
+
+    Raises
+    ------
+    ImportError
+        If tomli-w is absent.
+    TypeError
+        If the writer cannot represent a dumped value, including None. Model
+        serialization errors also propagate unchanged.
+    """
     try:
         tomli_w = cast(_TomlModule, import_module("tomli_w"))
     except ModuleNotFoundError as error:

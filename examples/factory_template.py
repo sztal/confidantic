@@ -1,5 +1,13 @@
 # %% ---------------------------------------------------------------------------------
 
+"""Generate nested CLI options from a concrete application template.
+
+``__recursive__=Database`` converts the template's database into a nested factory.
+Run with ``--application.database.host localhost`` to override its host, then
+``model_resolve()`` constructs the application and database from validated values.
+Displaying the resolved configuration requires ``confidantic[rich]``.
+"""
+
 from confidantic import BaseConfig, Factory
 
 # %% ---------------------------------------------------------------------------------
@@ -40,6 +48,8 @@ ApplicationConfig = Factory.model_from(template, __recursive__=Database)
 
 
 class Config(BaseConfig, cli_parse_args=True):
+    """Application inputs with nested factory options exposed on the CLI."""
+
     application: ApplicationConfig = ApplicationConfig()
     """A configuration model for an application with a nested database."""
     log_level: str = "INFO"

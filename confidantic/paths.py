@@ -39,6 +39,7 @@ class ExtensiblePath(_ExtensiblePathBase):
         _source_type: Any,
         handler: GetCoreSchemaHandler,
     ) -> CoreSchema:
+        """Validate as a standard Path, then construct this concrete path subclass."""
         return core_schema.no_info_after_validator_function(
             cls,
             handler.generate_schema(Path),
@@ -126,6 +127,7 @@ class BasePaths(BaseConfig):
 
     @classmethod
     def __pydantic_init_subclass__(cls, **kwargs: Any) -> None:
+        """Reject non-Path field annotations after Pydantic has collected fields."""
         super().__pydantic_init_subclass__(**kwargs)
         invalid_fields = [
             name
@@ -141,6 +143,13 @@ class BasePaths(BaseConfig):
 
     @model_validator(mode="after")
     def _canonicalize_paths(self) -> Self:
+        """Replace validated paths in place, resolving root before dependent fields.
+
+        Declared fields are processed in model order, then extras in input
+        order. Each resolved path becomes an anchor for subsequent paths.
+        Updates bypass frozen-field assignment; the validator returns this
+        instance and preserves its existing field and source metadata.
+        """
         root = _canonicalize_path(self.root)
         object.__setattr__(self, "root", root)
         anchors = {"root": root}
@@ -167,6 +176,30 @@ def _canonicalize_path(
     root: ExtensiblePath | None = None,
     anchors: dict[str, ExtensiblePath] | None = None,
 ) -> ExtensiblePath:
+    """Expand and resolve one path against an optional root and earlier anchors.
+
+    Parameters
+    ----------
+    path
+        Validated path. Home expansion precedes absolute-path and anchor checks.
+    root
+        Base for relative paths. Without it, relative paths use the working
+        directory and ``@`` prefixes are treated as literal path components.
+    anchors
+        Already resolved paths keyed by field or extra name. Used only for
+        relative paths beginning with ``@name`` when ``root`` is supplied.
+
+    Returns
+    -------
+    ExtensiblePath
+        Absolute path with existing symlinks resolved; the leaf need not exist.
+
+    Raises
+    ------
+    ValueError
+        If a requested anchor is unavailable. Path expansion and filesystem
+        resolution errors also propagate.
+    """
     expanded = path.expanduser()
     if root is not None and not expanded.is_absolute():
         anchor, *segments = expanded.parts or (".",)

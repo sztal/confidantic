@@ -23,7 +23,19 @@ def format_percentage(percentage: float) -> str:
 
 
 def generate_badge(percentage: float) -> str:
-    """Return an SVG coverage badge for ``percentage``."""
+    """Return an SVG coverage badge for ``percentage``.
+
+    Parameters
+    ----------
+    percentage
+        Coverage on the 0-to-100 scale. Color thresholds use the unrounded value;
+        the displayed label rounds to one decimal place and omits a trailing .0.
+
+    Returns
+    -------
+    str
+        Complete SVG document, including an accessible title and trailing newline.
+    """
     label = "coverage"
     value = format_percentage(percentage)
     color = get_badge_color(percentage)
@@ -54,6 +66,17 @@ def get_coverage_percentage(report_path: Path) -> float:
 
     Missing files or keys, malformed JSON, and nonnumeric values raise
     ``ValueError``. No finiteness or percentage-range check is performed.
+
+    Parameters
+    ----------
+    report_path
+        JSON report containing ``totals.percent_covered``. Filesystem errors
+        other than a missing file propagate without conversion.
+
+    Returns
+    -------
+    float
+        Numeric total converted to a float, without rounding.
     """
     try:
         report = json.loads(report_path.read_text())

@@ -20,10 +20,19 @@ _CLI_SUPPRESSED: ContextVar[bool] = ContextVar(
 
 
 class _FactoryCliSettingsSource(CliSettingsSource[Any]):
-    """Expose nested CLI fields from concrete Factory instance defaults."""
+    """Expose nested CLI fields from concrete Factory instance defaults.
+
+    Parser-facing FieldInfo copies use the default's concrete factory type.
+    The original model's annotations and field metadata remain unchanged.
+    """
 
     @staticmethod
     def supports(model: type[BaseModel]) -> bool:
+        """Detect direct factory-annotated fields with concrete factory defaults.
+
+        Union members and default factories are not evaluated. This check
+        decides whether the root parser needs factory-specific field handling.
+        """
         from confidantic._config.factory import Factory
 
         return any(
@@ -35,11 +44,13 @@ class _FactoryCliSettingsSource(CliSettingsSource[Any]):
 
     @staticmethod
     def _import_annotation(target: type[Any]) -> Any:
+        """Represent CLI type choices as import strings constrained to the target."""
         from confidantic.annotations import Import
 
         return Import[GenericAlias(type, target)]  # type: ignore[misc]
 
     def _sort_arg_fields(self, model: type[BaseModel]) -> list[tuple[str, FieldInfo]]:
+        """Retain upstream field order while exposing concrete factory-default fields."""
         from confidantic._config.factory import Factory
 
         fields = super()._sort_arg_fields(model)
@@ -78,6 +89,25 @@ class _CliSettings:
     The source method preserves supplied parsers and returns None when upstream
     should construct its normal parser. Suppression is a separate context-local
     policy shared by all settings created during recursive resolution.
+
+    Parameters
+    ----------
+    model_type
+        Settings class whose parser and environment policy are being prepared.
+    options
+        Bound upstream source-builder arguments, including defaults. Non-None
+        per-call options override the corresponding model configuration values.
+    model_config
+        Effective configuration at this MRO level, including custom overrides.
+
+    Attributes
+    ----------
+    cli_options, env_options
+        Resolved keyword arguments supported by the installed source classes.
+        A configured environment null token also becomes the CLI null token.
+    env_prefix
+        Prefix before normalization; ``None`` disables the ordinary environment
+        source even though the parser-facing environment options use ``""``.
     """
 
     def __init__(
@@ -110,7 +140,21 @@ class _CliSettings:
     def source(
         self, supplied: CliSettingsSource[Any] | None
     ) -> CliSettingsSource[Any] | None:
-        """Return a supplied/custom source, or defer normal construction upstream."""
+        """Return a supplied/custom source, or defer normal construction upstream.
+
+        Parameters
+        ----------
+        supplied
+            Caller-provided source, returned unchanged without replacing its
+            parser or help policy.
+
+        Returns
+        -------
+        CliSettingsSource | None
+            Supplied source or a generated source for factory defaults or
+            disabled help. ``None`` leaves ordinary construction to upstream,
+            including when automatic parsing is disabled.
+        """
         parse_args = self.cli_options["cli_parse_args"]
         if supplied is not None or parse_args is None or parse_args is False:
             return supplied

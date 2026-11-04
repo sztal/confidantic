@@ -18,6 +18,18 @@ class _InfoRenderer:
 
     The model supplies ordered field metadata. Optional values are the caller's
     stored Python values; rendering neither serializes them nor runs factories.
+
+    Parameters
+    ----------
+    model
+        Model class supplying declared fields; extras and computed fields are omitted.
+    header
+        Whether to show the model class name as the table title.
+    describe
+        Whether to add a field-description column.
+    colors
+        Whether to style cells and request terminal output when rendering. Rich
+        still applies its environment controls to the final output.
     """
 
     def __init__(
@@ -40,7 +52,24 @@ class _InfoRenderer:
         types: bool,
         defaults: bool,
     ) -> Table:
-        """Build a table from model metadata and optional current values."""
+        """Build a table from model metadata and optional current values.
+
+        Parameters
+        ----------
+        values
+            Stored values keyed by every canonical field name, or None to omit
+            the value column. Values are displayed with their Python representations.
+        types
+            Whether to display field annotations.
+        defaults
+            Whether to display static defaults, required markers, and default
+            factory names. Default factories are never called.
+
+        Returns
+        -------
+        Table
+            Unrendered table in model field order. No console output is produced.
+        """
         colors = self._colors
         null_style = None if colors else Style()
         highlighter = None if colors else NullHighlighter()
@@ -104,7 +133,21 @@ class _InfoRenderer:
         *,
         output: Literal["table", "string", "print"],
     ) -> Table | str | None:
-        """Return a table or render it to a string or the default console."""
+        """Return a table or render it to a string or the default console.
+
+        Parameters
+        ----------
+        table
+            Prepared Rich table; returned unchanged in table mode.
+        output
+            ``"table"`` returns the object, ``"string"`` captures console output,
+            and ``"print"`` writes to the default console and returns None.
+
+        Raises
+        ------
+        ValueError
+            If the output mode is unsupported.
+        """
         if output not in {"table", "string", "print"}:
             raise ValueError(f"Invalid output mode: {output!r}")
         if output == "table":

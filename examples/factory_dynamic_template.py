@@ -1,5 +1,12 @@
 # %% ---------------------------------------------------------------------------------
 
+"""Select a dependency type before generating its nested CLI options.
+
+Run with ``--types.database __main__:ExtendedDatabase`` to select the subclass.
+The final parser accepts options such as ``--application.database.host localhost``.
+``--help.types true --help`` displays the type selector's help; ``--help`` alone
+displays the application options. Displaying values requires ``confidantic[rich]``.
+"""
 
 from confidantic import BaseConfig, Factory
 from confidantic.annotations import Import
@@ -19,7 +26,7 @@ class Database:
 
 
 class ExtendedDatabase(Database):
-    """An extended database with different class name."""
+    """Database variant with a class-level switch outside its constructor fields."""
 
     switch: bool = False
     """Extra database switch."""
@@ -97,6 +104,8 @@ ApplicationConfig = Factory.model_from(template, __recursive__=Database)
 
 
 class Config(BaseConfig, cli_parse_args=True):
+    """Application inputs generated for the previously selected dependency type."""
+
     application: ApplicationConfig = ApplicationConfig()
     """A configuration model for an application with a nested database."""
     log_level: str = "INFO"

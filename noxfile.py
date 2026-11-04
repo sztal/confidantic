@@ -31,7 +31,13 @@ DEFAULT_PYTHON_VERSION = Path(".python-version").read_text().rstrip()
 
 @nox.session(python=SUPPORTED_PYTHON_VERSIONS, tags=["tests"])
 def tests(session: nox.Session) -> None:
-    """Run the test suite."""
+    """Run tests for each supported Python version in the contributor matrix.
+
+    With positional arguments, invoke pytest directly with those arguments.
+    Otherwise run pytest under coverage with xdist, combine subprocess data,
+    and report coverage. Coverage uses a session temporary file unless the
+    caller supplies COVERAGE_FILE.
+    """
     session.install(".[all]", "--group", "dev")
 
     if session.posargs:

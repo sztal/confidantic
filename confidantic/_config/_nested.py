@@ -36,6 +36,12 @@ class _NestedModelUpdates:
     ordinary default factories. apply runs at field-validation time, when
     validated-data factories can safely receive earlier field values. Nested
     scopes allocate separate maps and restore their enclosing scope on exit.
+
+    Attributes
+    ----------
+    baselines
+        Canonical field names mapped to existing model instances or a deferred
+        default sentinel. Deferred entries are evaluated during field validation.
     """
 
     def __init__(self) -> None:
@@ -44,7 +50,14 @@ class _NestedModelUpdates:
     @classmethod
     @contextmanager
     def scope(cls) -> Generator[_NestedModelUpdates]:
-        """Activate a fresh baseline map until source assembly and validation end."""
+        """Activate a fresh baseline map until source assembly and validation end.
+
+        Yields
+        ------
+        _NestedModelUpdates
+            Isolated baseline state. The enclosing state is restored even if
+            source assembly or validation raises an exception.
+        """
         updates = cls()
         token = _ACTIVE_NESTED_UPDATES.set(updates)
         try:
@@ -63,7 +76,25 @@ class _NestedModelUpdates:
         values: dict[str, Any],
         sources: tuple[PydanticBaseSettingsSource, ...],
     ) -> None:
-        """Select baselines and restore unpatched model instances in values."""
+        """Select baselines and restore unpatched model instances in values.
+
+        Parameters
+        ----------
+        model_type
+            Concrete settings class supplying fields, aliases, and defaults.
+        values
+            Assembled input mapping, modified in place when an initialization
+            model has no higher-priority patch and can be retained directly.
+        sources
+            Evaluated sources in priority order. Initialization model instances
+            take precedence over field defaults as merge baselines.
+
+        Notes
+        -----
+        Only mapping inputs need baselines. Discriminated fields are skipped,
+        and ordinary default factories are deferred until field validation so
+        they can receive previously validated fields.
+        """
         for field_name, field in model_type.model_fields.items():
             if self.has_discriminator(field):
                 continue
@@ -113,7 +144,24 @@ class _NestedModelUpdates:
         value: Any,
         info: ValidationInfo,
     ) -> Any:
-        """Apply this field's mapping to its concrete model baseline, if present."""
+        """Apply this field's mapping to its concrete model baseline, if present.
+
+        Parameters
+        ----------
+        model_type
+            Model supplying the default factory for a deferred baseline.
+        value
+            Current field input. Non-mapping inputs pass through unchanged.
+        info
+            Validation metadata identifying the field and previously validated
+            values needed by a data-aware default factory.
+
+        Returns
+        -------
+        Any
+            Revalidated baseline model, or the original input if no applicable
+            model baseline exists. Factory and nested-validation errors propagate.
+        """
         if info.field_name not in self.baselines:
             return value
 
@@ -136,6 +184,11 @@ class _NestedModelUpdates:
 
     @classmethod
     def _annotation_has_model(cls, annotation: Any) -> bool:
+        """Detect direct model types through Annotated and union wrappers.
+
+        Container element annotations are not inspected: the baseline must be
+        a model value itself, not a collection containing models.
+        """
         if isinstance(annotation, type):
             return issubclass(annotation, BaseModel)
         origin = get_origin(annotation)
@@ -151,7 +204,29 @@ class _NestedModelUpdates:
         model: BaseModel,
         update: Mapping[str, Any],
     ) -> BaseModel:
-        """Revalidate a mapping patch while retaining the baseline's concrete type."""
+        """Revalidate a mapping patch while retaining the baseline's concrete type.
+
+        Parameters
+        ----------
+        model
+            Baseline instance supplying stored fields, extras, and explicit-field
+            metadata. Its fields are read without assigning to the baseline.
+        update
+            Patch using field names or validation aliases. Nested model values
+            are patched recursively unless their field has a discriminator.
+
+        Returns
+        -------
+        BaseModel
+            New validated instance of the baseline's concrete class. Its
+            explicit fields combine the baseline set with patched model fields.
+
+        Notes
+        -----
+        Reconstruction uses stored values instead of a serialization dump.
+        Per-call strictness, extra policy, and validation context from the outer
+        model are not forwarded to this separate validation pass.
+        """
         model_type = type(model)
         values = {
             field_name: getattr(model, field_name)

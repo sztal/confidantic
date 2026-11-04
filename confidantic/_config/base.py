@@ -133,10 +133,12 @@ class BaseConfig(BaseSettings):
     def __get_pydantic_core_schema__(
         cls, source_type: Any, handler: GetCoreSchemaHandler
     ) -> CoreSchema:
+        """Place settings assembly around the model's normal validation schema."""
         return wrap_settings_schema(source_type, handler)
 
     @classmethod
     def _validate_settings(cls, value: Any, handler: Callable[[Any], Any]) -> Any:
+        """Dispatch settings validation through an overridable, importable class hook."""
         return validate_settings(cls, value, handler)
 
     def __copy__(self) -> Self:
@@ -839,6 +841,21 @@ class BaseConfig(BaseSettings):
         *args: Any,
         **upstream_options: Any,
     ) -> tuple[tuple[PydanticBaseSettingsSource, ...], dict[str, Any]]:
+        """Build settings sources for each subclass level using upstream option defaults.
+
+        Parameters
+        ----------
+        *args, **upstream_options
+            Arguments accepted by the installed BaseSettings source builder.
+            Binding against its signature preserves support for upstream options.
+
+        Returns
+        -------
+        tuple
+            Ordered source tuple and init mapping for ``_settings_build_values``.
+            Bare BaseConfig delegates to upstream; subclasses contribute sources
+            and directly declared defaults in concrete-to-parent MRO order.
+        """
         bound_options = signature(BaseSettings._settings_init_sources).bind(
             *args, **upstream_options
         )
@@ -861,10 +878,49 @@ class BaseConfig(BaseSettings):
         sources: tuple[PydanticBaseSettingsSource, ...],
         init_kwargs: dict[str, Any],
     ) -> dict[str, Any]:
+        """Merge upstream source values, then prepare defaults and nested baselines.
+
+        Parameters
+        ----------
+        sources
+            Sources in descending priority, as returned by the source builder.
+        init_kwargs
+            Initialization mapping from the same builder call.
+
+        Returns
+        -------
+        dict[str, Any]
+            Values ready for model validation. Finalization removes untouched
+            defaults and records baselines in the active nested-update scope.
+        """
         values = super()._settings_build_values(sources, init_kwargs)
         return _SettingsSources.finalize_values(cls, sources, values)
 
     def _copy_with_updates(self, updates: Mapping[str, Any]) -> Self:
+        """Reconstruct updated values and reconcile their source and explicit-field metadata.
+
+        Parameters
+        ----------
+        updates
+            Inputs using canonical names, validation aliases, or alias paths.
+            Name matching follows the model's case-sensitivity setting. Old
+            values for matched fields are omitted before updates are validated.
+
+        Returns
+        -------
+        Self
+            Newly validated configuration. Carried initialization values retain
+            prior provenance and explicit-field status; updates and values from
+            active sources receive fresh metadata. Private state is initialized
+            by reconstruction, without assigning fields on this instance.
+
+        Notes
+        -----
+        All stored fields and extras participate, including excluded fields.
+        Normal settings sources and validators run again and may override
+        supplied values. Validation errors propagate, and validators may have
+        side effects on objects shared with the original instance.
+        """
         cls = type(self)
         case_sensitive = cls.model_config.get("case_sensitive", False)
         normalized = {
@@ -919,6 +975,32 @@ class BaseConfig(BaseSettings):
         handler: Any,
         info: SerializationInfo,
     ) -> Any:
+        """Add a Make directive to serialized data when the context requests it.
+
+        Parameters
+        ----------
+        handler
+            Pydantic serializer applied first, preserving field serializers and
+            include/exclude filters.
+        info
+            Serialization metadata. A mapping context with a truthy ``make`` key
+            enables directives; alias policy determines the serialized keys.
+
+        Returns
+        -------
+        Any
+            Ordinary serialized data, or a new mapping prefixed with ``@call``.
+            Factories identify their target and retain only constructor fields,
+            translating serialized aliases back to constructor keyword names.
+
+        Raises
+        ------
+        TypeError
+            If directive generation receives non-mapping serialized data.
+        ValueError
+            If data already contains ``@call`` or a serialized constructor key
+            has multiple field, computed-field, or extra owners.
+        """
         data = handler(self)
         context = info.context
         if not isinstance(context, Mapping) or not context.get("make"):
@@ -964,5 +1046,11 @@ class BaseConfig(BaseSettings):
         value: Any,
         info: ValidationInfo,
     ) -> Any:
+        """Patch a field's baseline in the active scope, otherwise retain its input.
+
+        The scope selects baselines during settings assembly. Applying them
+        before field validation preserves concrete model subclasses and lets
+        data-aware default factories use previously validated fields from info.
+        """
         updates = _NestedModelUpdates.current()
         return value if updates is None else updates.apply(cls, value, info)

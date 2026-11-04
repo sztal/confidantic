@@ -34,6 +34,12 @@ class InstanceConfig(BaseConfig):
     configurable class directly declares it as ``Config``. Inheriting ``Config``
     does not change that association. If several classes directly declare the
     same configuration type, the last declaration replaces its ``Parent``.
+
+    Attributes
+    ----------
+    Parent
+        Runtime class constructed by :meth:`to_parent`. It must be declared on
+        the concrete configuration class; an inherited association is not used.
     """
 
     Parent: ClassVar[type["Configurable"]]
@@ -86,6 +92,14 @@ class Configurable:
 
     Serialize and deserialize the concrete ``Config`` class instead of the runtime
     object, then use :meth:`InstanceConfig.to_parent` to materialize an instance.
+
+    Attributes
+    ----------
+    Config
+        Concrete :class:`InstanceConfig` subclass used to validate inputs.
+    config
+        Validated configuration retained by this runtime object. It can be
+        shared with other objects when supplied as an existing instance.
     """
 
     Config: ClassVar[type[InstanceConfig]]
@@ -109,6 +123,14 @@ class Configurable:
             Configuration values used to create or update ``config``, taking
             precedence over mapping input. Normal settings-source priorities
             still apply during construction.
+
+        Raises
+        ------
+        TypeError
+            If ``Config`` is missing or is not an InstanceConfig subclass, or
+            ``config`` is neither a supported model nor a mapping.
+        ValidationError
+            If configuration construction or validated updates fail.
         """
         if not isinstance(getattr(self, "Config", None), type) or not issubclass(
             self.Config, InstanceConfig
@@ -158,8 +180,8 @@ class Configurable:
         Runtime classes must be the same or related by inheritance; otherwise
         comparison returns ``NotImplemented``. Concrete configuration types must
         match. Declared fields, including serialization-excluded fields, and
-        extras participate; computed fields
-        and private provenance do not. Nested values use their own equality.
+        extras participate; computed fields and private provenance do not.
+        Nested values use their own equality.
         """
         if not isinstance(other, self.__class__):
             return NotImplemented

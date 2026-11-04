@@ -25,6 +25,12 @@ class _ResolvedModelTypes:
     dependencies may be cyclic even when values are acyclic, so affected models
     are created together and rebuilt against a complete forward-reference
     namespace. Original classes and their field metadata are not modified.
+
+    Attributes
+    ----------
+    models
+        Original model classes mapped to generated replacements. Only generated
+        types are cached; unchanged classes are returned directly.
     """
 
     def __init__(self) -> None:
@@ -186,6 +192,14 @@ class _FactoryResolver:
     cached: repeated factories invoke their targets separately, and shared
     containers and models are rebuilt at each occurrence. Arbitrary objects are
     returned unchanged. Use a fresh resolver for each public resolution call.
+
+    Attributes
+    ----------
+    active
+        Identities on the current recursion path. Entries are removed on return
+        or failure so a repeated value in a sibling branch is not a cycle.
+    types
+        Model-type cache shared across the traversal, including nested models.
     """
 
     def __init__(self) -> None:

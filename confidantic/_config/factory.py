@@ -36,7 +36,12 @@ U = TypeVar("U")
 
 
 def _factory_target(factory_type: type[Any]) -> type[Any] | None:
-    """Read a concrete target or the target argument of a generic specialization."""
+    """Read a concrete target or the target argument of a generic specialization.
+
+    Explicit or inherited ``factory_target`` metadata takes precedence. Otherwise
+    a single class-valued generic argument supplies the target; an unresolved
+    TypeVar or absent specialization returns None without constructing a model.
+    """
     target = cast(type[Any] | None, getattr(factory_type, "factory_target", None))
     if target is not None:
         return target
@@ -96,6 +101,30 @@ class Factory(BaseConfig, Generic[T]):
         source_type: Any,
         handler: GetCoreSchemaHandler,
     ) -> CoreSchema:
+        """Build target-aware lax and strict validation with shared serialization.
+
+        Parameters
+        ----------
+        source_type
+            Factory annotation supplied by Pydantic. A generic specialization
+            obtains constructor fields from a generated concrete factory model.
+        handler
+            Generator for the model schema wrapped with settings-source assembly.
+
+        Returns
+        -------
+        CoreSchema
+            Lax/strict schema checking target compatibility. Lax validation can
+            convert target classes and instances; strict validation accepts model
+            input and compatible factory instances. Both branches delegate
+            instance serialization while preserving factory class values.
+
+        Notes
+        -----
+        Specialized schemas are copied before use so serialized schema state
+        can be restored independently. Compatible existing factories bypass
+        field revalidation in the lax branch.
+        """
         target = _factory_target(cls) or _factory_target(source_type)
         generic_arguments = getattr(cls, "__pydantic_generic_metadata__", {}).get(
             "args", ()
@@ -112,6 +141,7 @@ class Factory(BaseConfig, Generic[T]):
             schema = deepcopy(schema)
 
         def check_target(value: Any) -> Any:
+            """Retain a factory only if its recorded target satisfies this annotation."""
             value_target = _factory_target(
                 type(value) if isinstance(value, Factory) else value
             )
@@ -125,6 +155,11 @@ class Factory(BaseConfig, Generic[T]):
             return value
 
         def validate(value: Any, next_validator: Callable[[Any], Any]) -> Any:
+            """Retain compatible factories, validate mappings, or generate from targets.
+
+            Conversion TypeError and ValueError become the annotation's custom
+            factory error. Mapping validation keeps the normal model errors.
+            """
             if isinstance(value, Factory) or _is_factory_type(value):
                 return check_target(value)
             if isinstance(value, Mapping):
@@ -199,10 +234,10 @@ class Factory(BaseConfig, Generic[T]):
 
         When ``source`` is an instance, attributes with matching parameter names
         replace constructor defaults. Missing attributes retain those defaults,
-        or leave a field required if no default exists. Mutable collections and
-        unhashable defaults are deep-copied for each configuration through
-        generated field default factories. Their templates still participate
-        in settings-source merging. Other hashable objects retain normal
+        or leave a field required if no default exists. Factory instances,
+        mutable collections, and unhashable defaults are deep-copied for each
+        configuration through generated field default factories. Their templates
+        still participate in settings-source merging. Other hashable objects retain normal
         Pydantic default behavior; explicit inputs undergo normal validation.
 
         Parameters

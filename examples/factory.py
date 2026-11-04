@@ -1,0 +1,60 @@
+# %% Define the target --------------------------------------------------------------
+
+"""Generate configuration from a constructor or an existing object template."""
+
+from dataclasses import dataclass
+
+from pydantic import ValidationError
+
+from confidantic import Factory
+
+
+@dataclass
+class Service:
+    """Service address whose constructor supplies the configuration schema.
+
+    Parameters
+    ----------
+    host
+        Required server hostname.
+    port
+        Server port, defaulting to 8000.
+    """
+
+    host: str
+    port: int = 8000
+
+
+# %% Generate a class, validate its fields, then construct the target ----------------
+
+ServiceConfig = Factory.model_from(Service)
+assert ServiceConfig.model_fields["host"].is_required()
+
+try:
+    ServiceConfig()
+except ValidationError:
+    pass
+else:
+    raise AssertionError("The generated configuration must require host")
+
+config = ServiceConfig(host="api.example.com", port=8080)
+assert isinstance(config, Factory)
+service = config.model_resolve()
+assert isinstance(service, Service)
+assert service == Service("api.example.com", 8080)
+print(service)
+
+# %% Capture defaults from an instance ----------------------------------------------
+
+template = Service("template.example.com", 9000)
+TemplateConfig = Factory.model_from(template)
+configured = TemplateConfig(port=9001)
+assert configured.host == "template.example.com"
+assert configured.model_resolve() == Service("template.example.com", 9001)
+assert template.port == 9000
+
+# %% Generate and instantiate in one call -------------------------------------------
+
+shortcut = Factory.instance_from(Service, host="worker.example.com")
+assert shortcut.model_resolve() == Service("worker.example.com", 8000)
+print(shortcut.model_resolve())

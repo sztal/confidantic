@@ -168,19 +168,25 @@ guides with the details:
 - [`basic.py`](examples/basic.py), [`cli.py`](examples/cli.py), and [`multilevel_cli.py`](examples/multilevel_cli.py): settings sources, environment variables, and CLI input.
 - [`env_files.py`](examples/env_files.py): explicit single- and multi-file dotenv configuration plus automatic discovery.
 - [`delimited.py`](examples/delimited.py): comma-delimited lists and flexible `key=value` mappings from environment values or standard Pydantic Settings CLI input.
-- [`nested.py`](examples/nested.py), [`factory_template.py`](examples/factory_template.py), and [`factory_dynamic_template.py`](examples/factory_dynamic_template.py): nested, path-aware, and constructor-derived configuration.
+- [`config_updates.py`](examples/config_updates.py): validated copying, mutation, and field provenance.
+- [`nested.py`](examples/nested.py) and [`paths.py`](examples/paths.py): nested models and path-aware configuration.
+- [`factory.py`](examples/factory.py), [`factory_template.py`](examples/factory_template.py), and [`factory_dynamic_template.py`](examples/factory_dynamic_template.py): constructor-derived configuration and recursive object templates.
+- [`custom_sources.py`](examples/custom_sources.py): explicit priority for a TOML settings source.
 - [`configurable.py`](examples/configurable.py): instance configuration for configurable classes.
 - [`context.py`](examples/context.py): context-local configuration and scoped overrides.
 - [`logging_config.py`](examples/logging_config.py): logging configuration.
 - [`directive_annotations.py`](examples/directive_annotations.py) and [`serialization.py`](examples/serialization.py): trusted call directives and portable configuration dumps.
+- [`formats.py`](examples/formats.py): YAML and TOML round trips with validation.
 
 Run a guide as a script or open it in VS Code's Python Interactive Window. The
 project smoke-tests the scripts listed in `tests/integration/test_examples.py`.
 
-For deeper design and API details, see the [API reference](docs/reference/api.md)
-and the focused wiki pages on [configuration resolution](wiki/configuration-resolution.md),
-[factories and annotations](wiki/factories-and-annotations.md), and
-[contexts and serialization](wiki/contexts-and-serialization.md).
+For guided usage and implementation details, start with the [wiki handbook](wiki/README.md).
+It covers [sources and inheritance](wiki/concepts/sources-and-inheritance.md),
+[factories and templates](wiki/concepts/factories-and-templates.md),
+[contexts](wiki/concepts/contexts.md), and [serialization](wiki/concepts/serialization.md),
+with runnable guides and a source-shaped implementation reference.
+The [public API reference](docs/reference/api.md) provides signatures and docstrings.
 
 ## Development
 

@@ -15,8 +15,10 @@ EXAMPLES_DIRECTORY = Path(__file__).parents[2] / "examples"
     [
         ("basic.py", []),
         ("cli.py", ["--name", "command-line", "--number", "5"]),
+        ("config_updates.py", []),
         ("configurable.py", []),
         ("context.py", []),
+        ("custom_sources.py", []),
         (
             "delimited.py",
             [
@@ -32,6 +34,8 @@ EXAMPLES_DIRECTORY = Path(__file__).parents[2] / "examples"
         ),
         ("directive_annotations.py", []),
         ("env_files.py", []),
+        ("factory.py", []),
+        ("formats.py", []),
         ("logging_config.py", []),
         ("import_directive.py", []),
         (
@@ -39,6 +43,7 @@ EXAMPLES_DIRECTORY = Path(__file__).parents[2] / "examples"
             ["project", "create", "demo", "--dry-run", "true"],
         ),
         ("nested.py", []),
+        ("paths.py", []),
         ("serialization.py", []),
     ],
 )

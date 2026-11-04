@@ -1,13 +1,13 @@
 """Smoke tests for the runnable example scripts."""
 
-import subprocess
-import sys
 from pathlib import Path
 from textwrap import dedent
 
 import pytest
 
-EXAMPLES_DIRECTORY = Path(__file__).parents[1] / "examples"
+from tests.helpers import run_python
+
+EXAMPLES_DIRECTORY = Path(__file__).parents[2] / "examples"
 
 
 @pytest.mark.parametrize(
@@ -33,6 +33,7 @@ EXAMPLES_DIRECTORY = Path(__file__).parents[1] / "examples"
         ("directive_annotations.py", []),
         ("env_files.py", []),
         ("logging_config.py", []),
+        ("import_directive.py", []),
         (
             "multilevel_cli.py",
             ["project", "create", "demo", "--dry-run", "true"],
@@ -47,15 +48,7 @@ def test_example_runs(
     tmp_path: Path,
 ) -> None:
     """Run each guide from an isolated working directory."""
-    result = subprocess.run(
-        [sys.executable, str(EXAMPLES_DIRECTORY / filename), *arguments],
-        cwd=tmp_path,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-
-    assert result.returncode == 0, result.stderr
+    run_python(EXAMPLES_DIRECTORY / filename, tmp_path, args=arguments)
 
 
 @pytest.mark.parametrize(
@@ -95,11 +88,10 @@ def test_recursive_factory_template_cli(
         assert application.database.port == 6543
         """
     )
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-c",
-            script,
+    run_python(
+        script,
+        tmp_path,
+        args=[
             str(EXAMPLES_DIRECTORY / filename),
             database_type,
             *arguments,
@@ -108,10 +100,4 @@ def test_recursive_factory_template_cli(
             "--application.database.port",
             "6543",
         ],
-        cwd=tmp_path,
-        capture_output=True,
-        text=True,
-        timeout=60,
-        check=False,
     )
-    assert result.returncode == 0, result.stderr

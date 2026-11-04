@@ -1,4 +1,4 @@
-"""Attribute-section generation across supported docstring formats."""
+"""Attribute extraction and marked docstring sections through BaseConfig."""
 
 from typing import Literal
 
@@ -8,6 +8,190 @@ from pydantic import Field
 
 from confidantic import BaseConfig, ConfigModelDict
 from confidantic._config._docstring_backend import _AttributeDocstringBackend
+
+
+class DocumentedConfig(BaseConfig):
+    """Configuration with a source-level field description.
+
+    Attributes
+    ----------
+    @attrs
+    """
+
+    name: str
+    """The name of the configuration."""
+
+
+def _docstring_attributes(
+    settings_cls: type[BaseConfig],
+) -> list[tuple[str, str | None]]:
+    parsed = parse(settings_cls.__doc__, style=DocstringStyle.NUMPYDOC)
+    return [
+        (item.arg_name, item.description)
+        for item in parsed.params
+        if item.args[0] == "attribute"
+    ]
+
+
+def test_model_info_uses_attribute_docstrings() -> None:
+    """Source-level attribute docstrings populate field descriptions."""
+    assert DocumentedConfig.model_fields["name"].description == (
+        "The name of the configuration."
+    )
+    assert _docstring_attributes(DocumentedConfig) == [
+        ("name", "The name of the configuration.")
+    ]
+    assert "The name of the configuration." in DocumentedConfig.model_info(
+        output="string"
+    )
+
+
+def test_model_docstring_replaces_marker_and_preserves_other_sections() -> None:
+    """Generated attributes replace the marker without losing other content."""
+
+    class Config(BaseConfig):
+        """Current summary.
+
+        Attributes
+        ----------
+        @attrs
+
+        Notes
+        -----
+        Keep this note.
+        """
+
+        primary: str = Field(description="Primary value.")
+        secondary: int = Field(default=1, alias="SECONDARY")
+
+    assert Config.__doc__ is not None
+    parsed = parse(Config.__doc__, style=DocstringStyle.NUMPYDOC)
+
+    assert parsed.short_description == "Current summary."
+    assert _docstring_attributes(Config) == [
+        ("primary", "Primary value."),
+        ("secondary", None),
+    ]
+    assert "@attrs" not in Config.__doc__
+    assert "SECONDARY" not in Config.__doc__
+    assert any(
+        item.args == ["notes"] and item.description == "Keep this note."
+        for item in parsed.meta
+    )
+
+
+def test_model_docstring_marker_includes_inherited_fields() -> None:
+    """Marked subclasses describe all effective model fields in order."""
+
+    class ParentConfig(BaseConfig):
+        """Parent configuration.
+
+        Attributes
+        ----------
+        @attrs
+        """
+
+        inherited: str = Field(description="Inherited value.")
+
+    class Config(ParentConfig):
+        """Child configuration.
+
+        Attributes
+        ----------
+        @attrs
+        """
+
+        direct: int = Field(description="Direct value.")
+
+    assert _docstring_attributes(Config) == [
+        ("inherited", "Inherited value."),
+        ("direct", "Direct value."),
+    ]
+    assert _docstring_attributes(ParentConfig) == [("inherited", "Inherited value.")]
+
+
+def test_model_docstring_generation_can_be_disabled() -> None:
+    """The inherited opt-out leaves class docstrings unchanged."""
+    original_docstring = "Original documentation.\n\nAttributes\n----------\n@attrs"
+
+    class DisabledConfig(BaseConfig):
+        __doc__ = original_docstring
+        model_config = ConfigModelDict(
+            docstring_set_attributes_section=False,
+        )
+
+        value: str = Field(description="Generated description.")
+
+    class ChildConfig(DisabledConfig):
+        """Child documentation."""
+
+        child: int
+
+    assert DisabledConfig.__doc__ == original_docstring
+    assert ChildConfig.__doc__ == "Child documentation."
+
+
+def test_model_docstring_without_marker_is_preserved_for_cli_models() -> None:
+    """CLI-enabled models preserve docstrings without an opt-in marker."""
+    original_docstring = (
+        "Original documentation.\n\n"
+        "Attributes\n"
+        "----------\n"
+        "handwritten\n"
+        "    Keep this entry."
+    )
+
+    class Config(BaseConfig, cli_parse_args=True):
+        __doc__ = original_docstring
+
+        value: str = Field(description="Generated description.")
+
+    assert Config.__doc__ == original_docstring
+
+
+def test_model_docstring_generation_requires_a_docstring_by_default() -> None:
+    """Undocumented models do not receive a generated attributes section."""
+
+    class Config(BaseConfig):
+        value: str = Field(description="Generated description.")
+
+    assert Config.__doc__ is None
+
+
+def test_model_docstring_without_marker_is_preserved() -> None:
+    """Documented models need a marker before an Attributes section is added."""
+
+    class Config(BaseConfig):
+        """Summary without an attributes marker."""
+
+        value: str = Field(description="Generated description.")
+
+    assert Config.__doc__ == "Summary without an attributes marker."
+
+
+def test_model_docstring_marker_is_replaced_for_cli_models() -> None:
+    """CLI-enabled models replace the marker when they explicitly opt in."""
+
+    class Config(BaseConfig, cli_parse_args=True):
+        """CLI summary.
+
+        Attributes
+        ----------
+        @attrs
+        """
+
+        value: str = Field(description="Generated description.")
+
+    assert _docstring_attributes(Config) == [("value", "Generated description.")]
+
+
+def test_fieldless_model_does_not_gain_an_attributes_section() -> None:
+    """A model without fields keeps its original docstring unchanged."""
+
+    class Config(BaseConfig):
+        """Summary only."""
+
+    assert Config.__doc__ == "Summary only."
 
 
 @pytest.fixture(params=["numpy", "google"])
@@ -269,15 +453,6 @@ def test_expected_format_conflict(style: Literal["numpy", "google"]) -> None:
             value: int
 
 
-def test_invalid_generated_docstring_raises() -> None:
-    """Parsing the complete result detects malformed recognized sections."""
-    with pytest.raises(ValueError, match="invalid generated google docstring"):
-
-        class Config(BaseConfig):
-            __doc__ = "Summary.\n\nAttributes:\n    @attrs\n\nArgs:\n    invalid entry"
-            value: int
-
-
 @pytest.mark.parametrize(
     "fragment, message",
     [
@@ -303,23 +478,6 @@ def test_candidate_validation(
             value: int
 
 
-def test_marked_fieldless_numpy() -> None:
-    """A valid empty NumPy section retains its heading."""
-
-    class Config(BaseConfig):
-        __doc__ = "Summary.\n\n" + _section("numpy")
-
-    assert Config.__doc__ == "Summary.\n\nAttributes\n----------"
-
-
-def test_marked_fieldless_google() -> None:
-    """An empty Google section fails the required parser validation."""
-    with pytest.raises(ValueError, match="invalid generated google docstring"):
-
-        class Config(BaseConfig):
-            __doc__ = "Summary.\n\n" + _section("google")
-
-
 @pytest.mark.parametrize("trailing", ["", "  "])
 def test_numpy_marker_whitespace(trailing: str) -> None:
     """Whitespace around a standalone marker does not change its meaning."""
@@ -343,14 +501,3 @@ def test_numpy_typed_handwritten_entry() -> None:
         value: int
 
     assert Config.__doc__ == "Summary.\n\nAttributes\n----------\nvalue"
-
-
-def test_custom_numpy_heading_with_punctuation() -> None:
-    """Opaque custom headings are treated literally during validation."""
-    suffix = "\n\nCustom (details)\n----------------\nKeep this content."
-
-    class Config(BaseConfig):
-        __doc__ = "Summary.\n\nAttributes\n----------\n@attrs" + suffix
-        value: int
-
-    assert Config.__doc__ == "Summary.\n\nAttributes\n----------\nvalue" + suffix

@@ -1,28 +1,15 @@
 """Regression tests for dynamically defined configuration serialization."""
 
-import subprocess
-import sys
 from pathlib import Path
-from textwrap import dedent
 
 import pytest
 
-
-def _run(script: str, directory: Path) -> None:
-    result = subprocess.run(
-        [sys.executable, "-c", dedent(script)],
-        cwd=directory,
-        capture_output=True,
-        text=True,
-        timeout=60,
-        check=False,
-    )
-    assert result.returncode == 0, result.stderr
+from tests.helpers import run_python
 
 
 def test_dynamic_configs_round_trip_in_fresh_interpreter(tmp_path: Path) -> None:
     """Data and validators survive transfer without copying ambient activation."""
-    _run(
+    run_python(
         """
         from pathlib import Path
         import cloudpickle
@@ -61,7 +48,7 @@ def test_dynamic_configs_round_trip_in_fresh_interpreter(tmp_path: Path) -> None
         """,
         tmp_path,
     )
-    _run(
+    run_python(
         """
         from pathlib import Path
         import cloudpickle
@@ -81,7 +68,7 @@ def test_dynamic_configs_round_trip_in_fresh_interpreter(tmp_path: Path) -> None
 
 def test_local_context_transfers_through_loky(tmp_path: Path) -> None:
     """Local context classes work across worker processes."""
-    _run(
+    run_python(
         """
         from joblib import Parallel, delayed
         from confidantic.context import BaseContext
@@ -147,7 +134,7 @@ def test_generated_factories_round_trip(tmp_path: Path, from_instance: bool) -> 
         assert restored[2].model_resolve().target.value == 8
         Path("factory.pkl").write_bytes(blob)
     """.replace("FROM_INSTANCE", repr(from_instance))
-    _run(producer, tmp_path)
+    run_python(producer, tmp_path)
     consumer = """
         from pathlib import Path
         import cloudpickle
@@ -168,12 +155,12 @@ def test_generated_factories_round_trip(tmp_path: Path, from_instance: bool) -> 
         assert second.items == ([2] if FROM_INSTANCE else [1])
         assert second.payload.value == (8 if FROM_INSTANCE else 5)
     """.replace("FROM_INSTANCE", repr(from_instance))
-    _run(consumer, tmp_path)
+    run_python(consumer, tmp_path)
 
 
 def test_recursive_factory_serialization_and_loky_transfer(tmp_path: Path) -> None:
     """Recursive factory defaults remain usable and isolated across processes."""
-    _run(
+    run_python(
         """
         from pathlib import Path
         import cloudpickle
@@ -201,7 +188,7 @@ def test_recursive_factory_serialization_and_loky_transfer(tmp_path: Path) -> No
         """,
         tmp_path,
     )
-    _run(
+    run_python(
         """
         from pathlib import Path
         import cloudpickle
@@ -220,7 +207,7 @@ def test_resolved_recursive_models_round_trip_in_fresh_interpreter(
     tmp_path: Path,
 ) -> None:
     """Already-resolved model types retain recursive schemas after transfer."""
-    _run(
+    run_python(
         """
         from pathlib import Path
         import cloudpickle
@@ -246,7 +233,7 @@ def test_resolved_recursive_models_round_trip_in_fresh_interpreter(
         """,
         tmp_path,
     )
-    _run(
+    run_python(
         """
         from pathlib import Path
         import cloudpickle
@@ -277,7 +264,7 @@ def test_resolved_recursive_models_round_trip_in_fresh_interpreter(
 
 def test_hashable_mutable_factory_defaults_transfer(tmp_path: Path) -> None:
     """Copy-default wrappers and templates survive fresh-process cloudpickle."""
-    _run(
+    run_python(
         """
         from pathlib import Path
         from typing import Any
@@ -295,7 +282,7 @@ def test_hashable_mutable_factory_defaults_transfer(tmp_path: Path) -> None:
         """,
         tmp_path,
     )
-    _run(
+    run_python(
         """
         from pathlib import Path
         import cloudpickle
@@ -330,7 +317,7 @@ def test_unavailable_module_preserves_descriptions_with_extraction(
         '        """Extracted description."""\n'
         "    return Config\n"
     )
-    _run(
+    run_python(
         """
         from pathlib import Path
         import cloudpickle
@@ -342,7 +329,7 @@ def test_unavailable_module_preserves_descriptions_with_extraction(
         """,
         producer,
     )
-    _run(
+    run_python(
         """
         from importlib.util import find_spec
         from pathlib import Path

@@ -7,7 +7,7 @@ Do not track bugs in `wiki/`.
 
 ## Nested model partial updates lose per-call validation options
 
-Partial updates to an existing nested model call `_update_nested_model`, which
+Partial updates to an existing nested model call `_NestedModelUpdates._update_model`, which
 starts another `model_validate` call without forwarding `strict`, `extra`, or
 validation `context`. Moving outer settings assembly into the active validation
 schema does not fix this separate reconstruction path.
@@ -52,3 +52,47 @@ and `extra="forbid"` silently drops unknown nested keys. Conversely,
 The failures occur with static defaults and default factories, including
 concrete subclass defaults. Disabling partial updates restores strictness,
 context, and the per-call extra policy in the corresponding controls.
+
+Executable reproductions are in
+`tests/_config/test_nested.py::test_nested_updates_forward_validation_options`.
+They cover static and factory defaults for strictness, context, and both extra
+policies. Partial updates are marked as strict expected failures; the same cases
+with partial updates disabled must pass. An unexpected pass requires removing
+the corresponding expected-failure marker when the source defect is fixed.
+
+## Default environment prefix breaks supplied CLI source construction
+
+Creating a Pydantic Settings `CliSettingsSource` for a default `BaseConfig`
+subclass raises `TypeError: object of type 'NoneType' has no len()` before the
+source can be supplied to the model. `BaseConfig` enables `cli_show_env_vars`
+and sets `env_prefix=None`; the upstream CLI source constructs an environment
+source to describe environment names, which calls `len(None)`. Confidantic
+normalizes the prefix when building its own parser, but direct source
+construction does not go through that normalization.
+
+```python
+from pydantic_settings import CliSettingsSource
+from confidantic import BaseConfig
+
+
+class Config(BaseConfig):
+    value: int = 1
+
+
+source = CliSettingsSource(Config, cli_parse_args=["--value", "7"])
+config = Config(_cli_settings_source=source, _cli_parse_args=False)
+assert config.value == 7
+```
+
+Expected: a supplied CLI source can be constructed using the model's defaults,
+while the disabled environment source contributes no environment-name help.
+Affected: custom parser/source construction with the default `env_prefix=None`
+and environment-name help enabled. Passing `cli_show_env_vars=False` to the
+source avoids the error. Setting an explicit string prefix also works, but
+enables environment parsing and therefore changes settings behavior. The same
+construction succeeds for an ordinary Pydantic `BaseSettings` subclass.
+
+Regression coverage is in
+`tests/_config/test_cli.py::test_supplied_cli_source_keeps_its_parser_and_values`:
+the default-help case is a strict expected failure, and the disabled-help
+workaround must pass.

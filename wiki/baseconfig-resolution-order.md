@@ -57,7 +57,7 @@ For a runnable walkthrough of source precedence, see
 [`examples/basic.py`](../examples/basic.py). The complete runnable guide set is
 in [`examples/`](../examples/), including CLI, dotenv, nested, factory,
 context, logging, and serialization examples. They are smoke-tested by
-[`tests/test_examples.py`](../tests/test_examples.py).
+[`tests/integration/test_examples.py`](../tests/integration/test_examples.py).
 
 ## Public references
 

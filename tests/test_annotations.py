@@ -19,17 +19,17 @@ from confidantic.annotations import (
     Make,
     Map,
     SemiColonDelimited,
+    TabDelimited,
     WhitespaceDelimited,
     get_proper_args,
 )
-from confidantic.utils import make
 
 
 def test_absolute_path_annotation_accepts_path_values() -> None:
-    """The default annotation is assignable from ordinary paths."""
-    path: AbsolutePath = Path(".")
+    """The unparameterized annotation validates ordinary Path inputs."""
+    path: AbsolutePath = TypeAdapter(AbsolutePath).validate_python(Path("."))
 
-    assert path == Path(".")
+    assert path == Path.cwd().resolve()
 
 
 def test_get_proper_args_extracts_types_from_nested_annotations() -> None:
@@ -82,6 +82,7 @@ def test_absolute_path_retains_specialized_path_validation(tmp_path: Path) -> No
         (CommaDelimited, "1, 2,3"),
         (SemiColonDelimited, "1; 2;3"),
         (WhitespaceDelimited, "1  2\t3"),
+        (TabDelimited, "1\t2\t3"),
     ],
 )
 def test_delimited_annotations_parse_strings_and_sequences(
@@ -101,6 +102,31 @@ def test_delimited_annotations_preserve_item_validation_errors() -> None:
 
     with raises(ValidationError):
         adapter.validate_python("one, two")
+
+
+@pytest.mark.parametrize(
+    ("annotation", "value", "expected"),
+    [
+        (CommaDelimited[list[str]], '["a,b", "c"]', ["a,b", "c"]),
+        (CommaDelimited[list[str]], "a,,c", ["a", "", "c"]),
+        (WhitespaceDelimited[list[str]], "a   c", ["a", "c"]),
+        (Map[dict[str, str]], "a=first,a=last=b", {"a": "last=b"}),
+    ],
+)
+def test_flexible_inputs_preserve_separator_semantics(
+    annotation: Any, value: str, expected: Any
+) -> None:
+    """JSON quoting, empty items, duplicate keys, and embedded equals signs are stable."""
+    assert TypeAdapter(annotation).validate_python(value) == expected
+
+
+@pytest.mark.parametrize("value", [42, "invalid", '["invalid"]'])
+def test_delimited_fallback_preserves_the_original_error(value: Any) -> None:
+    """Unsuccessful parsing retains normal validation's error type and input."""
+    with raises(ValidationError) as error:
+        TypeAdapter(CommaDelimited[list[int]]).validate_python(value)
+    assert error.value.errors()[0]["type"] == "list_type"
+    assert error.value.errors()[0]["input"] == value
 
 
 @pytest.mark.parametrize(
@@ -337,31 +363,6 @@ def test_make_recursively_evaluates_nested_call_mappings() -> None:
     )
 
     assert settings.value == {"items": [{"answer": 42}]}
-
-
-def test_make_can_evaluate_values_without_a_pydantic_handler() -> None:
-    """The standalone helper returns the value a Make field would receive."""
-    value = make(
-        {
-            "items": [
-                {"@call": "builtins:dict", "answer": 42},
-            ]
-        }
-    )
-
-    assert value == {"items": [{"answer": 42}]}
-
-
-@pytest.mark.parametrize(
-    ("value", "expected"),
-    [("builtins:list", []), (lambda: 42, 42)],
-)
-def test_make_evaluates_direct_import_strings_and_callables(
-    value: Any,
-    expected: Any,
-) -> None:
-    """The standalone Make helper evaluates direct executable values."""
-    assert make(value) == expected
 
 
 def test_make_preserves_nested_constructed_values() -> None:

@@ -2,6 +2,7 @@
 
 import sys
 from types import ModuleType
+from typing import Any
 
 import pytest
 
@@ -13,12 +14,16 @@ from confidantic.utils import (
 )
 
 
+@pytest.mark.parametrize(
+    "ipython", [None, ModuleType("IPython")], ids=["missing", "no-shell-hook"]
+)
 def test_runtime_without_ipython_is_not_jupyterlike(
     monkeypatch: pytest.MonkeyPatch,
+    ipython: ModuleType | None,
 ) -> None:
-    """An unavailable IPython runtime uses the non-kernel fallback."""
+    """Unavailable IPython or a missing shell hook uses the non-kernel fallback."""
     monkeypatch.delitem(sys.modules, "ipykernel", raising=False)
-    monkeypatch.setitem(sys.modules, "IPython", ModuleType("IPython"))
+    monkeypatch.setitem(sys.modules, "IPython", ipython)
 
     assert is_runtime_jupyterlike() is False
 
@@ -111,3 +116,28 @@ def test_make_evaluates_public_directive_forms() -> None:
     assert make("builtins:dict") == {}
     assert make({"nested": {"@call": "builtins:int", "@args": ["4"]}}) == {"nested": 4}
     assert make(3, handler=lambda value: value + 1) == 4
+
+
+def test_make_can_evaluate_values_without_a_pydantic_handler() -> None:
+    """The standalone helper returns the value a Make field would receive."""
+    value = make(
+        {
+            "items": [
+                {"@call": "builtins:dict", "answer": 42},
+            ]
+        }
+    )
+
+    assert value == {"items": [{"answer": 42}]}
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [("builtins:list", []), (lambda: 42, 42)],
+)
+def test_make_evaluates_direct_import_strings_and_callables(
+    value: Any,
+    expected: Any,
+) -> None:
+    """The standalone Make helper evaluates direct executable values."""
+    assert make(value) == expected

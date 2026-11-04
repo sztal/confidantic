@@ -1,11 +1,11 @@
 """Optional features fail locally without affecting core configuration behavior."""
 
-import subprocess
-import sys
 from pathlib import Path
 from textwrap import dedent
 
 import pytest
+
+from tests.helpers import run_python
 
 
 def _run(
@@ -34,15 +34,7 @@ def _run(
         sys.meta_path.insert(0, BlockOptional())
     """
     script.write_text(dedent(setup) + "\n" + dedent(code))
-    result = subprocess.run(
-        [sys.executable, str(script)],
-        cwd=directory,
-        capture_output=True,
-        text=True,
-        timeout=30,
-        check=False,
-    )
-    assert result.returncode == 0, result.stdout + result.stderr
+    run_python(script, directory)
 
 
 def test_core_does_not_import_optional_packages(tmp_path: Path) -> None:
@@ -210,6 +202,7 @@ def test_invalid_marker_precedes_missing_parser(
     [
         ("rich", "Config.model_info()"),
         ("yaml", "Config().model_dump_yaml()"),
+        ("yaml", "Config.model_validate_yaml('value: 1')"),
         ("tomli_w", "Config().model_dump_toml()"),
         (
             "docstring_parser",

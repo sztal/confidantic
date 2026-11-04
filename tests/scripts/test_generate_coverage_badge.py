@@ -9,6 +9,7 @@ from scripts.generate_coverage_badge import (
     generate_badge,
     get_badge_color,
     get_coverage_percentage,
+    main,
 )
 
 
@@ -69,3 +70,16 @@ def test_get_coverage_percentage_rejects_missing_report(tmp_path: Path) -> None:
     """A missing coverage report fails clearly."""
     with pytest.raises(ValueError):
         get_coverage_percentage(tmp_path / "coverage.json")
+
+
+def test_main_writes_the_requested_badge(tmp_path: Path) -> None:
+    """The script reads the selected report and replaces the selected output file."""
+    report = tmp_path / "coverage.json"
+    output = tmp_path / "coverage.svg"
+    report.write_text(json.dumps({"totals": {"percent_covered": 94.99}}))
+    output.write_text("old badge")
+
+    assert main([str(report), str(output)]) == 0
+    badge = output.read_text()
+    assert "coverage: 95%" in badge
+    assert "#97ca00" in badge

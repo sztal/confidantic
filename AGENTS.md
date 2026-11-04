@@ -6,6 +6,10 @@
 - Import package: `confidantic`
 - Source directory: `confidantic/`
 - Tests: `tests/`
+- Test layout mirrors `confidantic/`: top-level module tests live directly in
+  `tests/`, and configuration internals live in `tests/_config/`. Cross-module
+  subprocess and example checks live in `tests/integration/`; maintenance-script
+  tests live in `tests/scripts/`. See `tests/README.md` for placement conventions.
 - Documentation: `docs/`
 - Runnable examples: `examples/` (including `factory_dynamic_template.py` and
   `factory_template.py` for recursive `__recursive__` generation)
@@ -40,8 +44,8 @@ pytest, and coverage configuration.
 Set up the development environment with `uv sync --group dev`; add the `docs`
 group when building documentation. The repository default interpreter is read
 from `.python-version` (currently 3.13). Examples are executable scripts;
-`tests/test_examples.py` smoke-tests a selected subset, so check that test
-before assuming every script is covered.
+`tests/integration/test_examples.py` lists the smoke-tested scripts; check that
+file when adding or changing a guide.
 
 Keep changes focused, preserve public behavior unless the task intentionally
 changes it, and add or update tests for behavior changes.

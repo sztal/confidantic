@@ -16,8 +16,8 @@ have changed and agent guidance may be stale.
    `zensical.toml`, `.python-version`, and tests.
    `confidantic/` is the import package; `docs/`, `examples/`, and
    `changelog.d/` are the documentation, runnable-guide, and release-note
-   surfaces. `tests/test_examples.py` covers a selected subset of the scripts
-   under `examples/`, not necessarily every script.
+   surfaces. `tests/integration/test_examples.py` lists the scripts under
+   `examples/` that have smoke-test coverage.
 1. Replace every placeholder in `AGENTS.md` with verified project facts.
 1. Update every skill under `.github/skills/` with the actual paths, commands,
    environment rules, and testing conventions.

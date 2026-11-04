@@ -1,12 +1,11 @@
 """Import-time package defaults."""
 
 import os
-import subprocess
-import sys
 from pathlib import Path
-from textwrap import dedent
 
 import pytest
+
+from tests.helpers import run_python
 
 _ENVIRONMENT_VARIABLE = "CONFIDANTIC_USE_ATTRIBUTE_DOCSTRINGS"
 
@@ -41,13 +40,4 @@ def test_attribute_docstring_default(
         assert Explicit.model_config["use_attribute_docstrings"] is {not expected!r}
         assert Inherited.model_fields["value"].description == "Explicit description"
     '''
-    result = subprocess.run(
-        [sys.executable, "-c", dedent(script)],
-        cwd=tmp_path,
-        env=environment,
-        capture_output=True,
-        text=True,
-        timeout=30,
-        check=False,
-    )
-    assert result.returncode == 0, result.stderr
+    run_python(script, tmp_path, env=environment)

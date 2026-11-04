@@ -15,7 +15,7 @@ Prioritize branches, validation, error paths, and public behavior. Avoid adding
 tests only to execute trivial lines.
 
 Use `confidantic/` as the source package and `tests/` as the behavioral test
-surface. Example scripts are under `examples/`; check `tests/test_examples.py`
+surface. Example scripts are under `examples/`; check `tests/integration/test_examples.py`
 to see which are covered by smoke tests.
 
 If the audit confirms an unresolved source bug, add a concise entry to

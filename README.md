@@ -175,7 +175,7 @@ guides with the details:
 - [`directive_annotations.py`](examples/directive_annotations.py) and [`serialization.py`](examples/serialization.py): trusted call directives and portable configuration dumps.
 
 Run a guide as a script or open it in VS Code's Python Interactive Window. The
-project smoke-tests the subset listed in `tests/test_examples.py`.
+project smoke-tests the scripts listed in `tests/integration/test_examples.py`.
 
 For deeper design and API details, see the [API reference](docs/reference/api.md)
 and the focused wiki pages on [configuration resolution](wiki/configuration-resolution.md),

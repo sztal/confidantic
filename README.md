@@ -7,219 +7,242 @@
 [![Coverage](https://sztal.github.io/confidantic/coverage.svg)](https://sztal.github.io/confidantic/coverage/)
 [![License](https://img.shields.io/github/license/sztal/confidantic)](https://github.com/sztal/confidantic/blob/master/LICENSE)
 
-Configuration and CLIs for Python projects based on Pydantic and Pydantic
-Settings. Confidantic requires Python 3.11 or later.
+Confidantic lets you define application settings as typed Python classes and
+read their values from code, environment variables, or the command line. It
+builds on Pydantic and Pydantic Settings to validate those inputs. Factories and
+object templates let you use the same approach to construct application components.
 
-Confidantic extends Pydantic Settings with frozen, validated configuration
-models, inheritance-aware source resolution, constructor-derived factories,
-context-local state, and portable configuration documents.
+```python
+import os
+from confidantic import BaseConfig
+from confidantic.annotations import CommaDelimited
+
+os.environ["APP_TAGS"] = "a,b"
+
+class AppConfig(BaseConfig, env_prefix="APP_"):
+    name: str = "orders"
+    retries: int = 3
+    tags: CommaDelimited[tuple[str, ...]] = ()
+
+
+config = AppConfig(retries=5)
+print(config.model_dump())
+```
+
+```text
+{'name': 'orders', 'retries': 5, 'tags': ('a', 'b')}
+```
+
+**[Follow the first-application tutorial](https://sztal.github.io/confidantic/getting-started/first-application/)**
+for a step-by-step introduction.
 
 ## Installation
 
-Install the latest release from [PyPI](https://pypi.org/project/confidantic/)
-with [pip](https://pip.pypa.io/) or [uv](https://docs.astral.sh/uv/):
+Confidantic requires Python 3.11 or later. Install with pip:
 
 ```console
-pip install confidantic
+python -m pip install confidantic
+```
+
+Or add it to a uv-managed project:
+
+```console
 uv add confidantic
 ```
 
-The core install includes configuration validation, settings sources, CLI
-parsing, factories, and attribute-docstring extraction. Install optional
-features with the corresponding extra:
+The core package supports all examples below. Optional extras provide:
 
-| Extra        | Feature                                                       |
-| ------------ | ------------------------------------------------------------- |
-| `rich`       | `model_info()` and `info()` table, string, and printed output |
-| `docstrings` | Generate class `Attributes` sections from `@attrs` markers    |
-| `yaml`       | YAML loading and dumping                                      |
-| `toml`       | TOML dumping; TOML loading is included in the core install    |
-| `all`        | All optional features                                         |
+| Extra        | Feature                                                    |
+| ------------ | ---------------------------------------------------------- |
+| `rich`       | Inspect settings with `model_info()` and `info()`          |
+| `docstrings` | Generate class `Attributes` sections from `@attrs` markers |
+| `yaml`       | YAML loading and dumping                                   |
+| `toml`       | TOML dumping; loading is included in the core package      |
+| `all`        | All optional features                                      |
 
-For example, install every feature with:
+For example, install every extra with:
 
 ```console
-pip install "confidantic[all]"
-uv add "confidantic[all]"
+python -m pip install "confidantic[all]"
 ```
 
-Optional packages load only when their feature is used. A missing dependency
-raises `ImportError` with the installation command for its extra. An active
-`@attrs` generation request needs `docstrings` during class creation; unmarked
-docstrings, literal marker mentions, and disabled generation work without it.
-
-Install directly from [GitHub](https://github.com/sztal/confidantic) to use an
-unreleased change, a branch, or a tag:
+To try unreleased code from GitHub:
 
 ```console
-pip install "confidantic @ git+https://github.com/sztal/confidantic.git@<tag-or-branch>"
-uv add "confidantic @ git+https://github.com/sztal/confidantic.git@<tag-or-branch>"
+python -m pip install "confidantic @ git+https://github.com/sztal/confidantic.git@master"
 ```
 
-Replace `<tag-or-branch>` with a reference such as `v1.2.3` or `master`. Omit the
-`@<tag-or-branch>` suffix to install the repository's default branch.
+Replace `master` with another branch or a tag to select that revision. See the
+[installation guide](https://sztal.github.io/confidantic/getting-started/installation/)
+for environment setup and optional features.
 
-## Quick start
+## How it works
 
-Define a configuration model with the sources your application needs. When CLI
-parsing is enabled, values are resolved in this order: CLI arguments, explicit
-initialization arguments, environment variables, dotenv values, secret files,
-and class defaults.
+Pydantic validates fields; Pydantic Settings supplies input sources and CLI
+parsing. Confidantic adds configuration inheritance rules, validated updates,
+and ways to construct application objects from those settings.
+
+Fields are frozen by default. Use `config.copy(retries=6)` to create a validated
+updated copy. Nested mutable values are not recursively frozen, and updated
+copies can consult settings sources again. See [settings and updates](https://sztal.github.io/confidantic/guide/settings/).
+
+Enable environment and CLI input explicitly through `ConfigModelDict`. Within
+one class, enabled sources normally take priority in this order: CLI, Python
+initializer arguments, environment, dotenv, secret files, then declared defaults.
+A child's sources and defaults precede its parents', so a child default can beat
+a parent environment value. The [sources guide](https://sztal.github.io/confidantic/guide/sources/)
+and [inheritance explanation](https://sztal.github.io/confidantic/concepts/values-and-inheritance/)
+cover the details.
+
+## Examples
+
+### CLI and environment
+
+Use the same fields for Python inputs, environment variables, and command-line
+options. Save this complete program as `app.py`:
 
 ```python
 from confidantic import BaseConfig, ConfigModelDict
 
 
 class AppConfig(BaseConfig):
-		model_config = ConfigModelDict(
-				env_prefix="APP_",
-				env_file=".env",
-				cli_parse_args=True,
-		)
+    model_config = ConfigModelDict(env_prefix="APP_", cli_parse_args=True)
 
-		name: str = "demo"
-		retries: int = 3
+    name: str = "orders"
+    retries: int = 3
 
 
-config = AppConfig()
-updated = config.copy(retries=5)
+print(AppConfig().model_dump())
 ```
 
-`BaseConfig` keeps Pydantic validation while resolving each configuration
-class before its parents in the Python MRO. Nested values can be filled by
-lower-priority sources, and `model_field_sources` records field-level source
-provenance. Structured JSON, TOML, YAML, and `pyproject.toml` sources are
-opt-in through Pydantic Settings source customization.
+```console
+python app.py --name shipping --retries 5
+```
 
-## Design and functionality
+```text
+{'name': 'shipping', 'retries': 5}
+```
 
-Use the package according to the shape of the configuration problem:
+The same fields accept `APP_NAME` and `APP_RETRIES` environment variables; CLI
+values take priority. Read the [CLI guide](https://sztal.github.io/confidantic/guide/cli/)
+for help, nested options, and subcommands.
 
-- **Application settings:** `BaseConfig` and `ConfigModelDict` provide frozen
-  models, environment and dotenv input, CLI parsing, inherited defaults, and
-  source provenance.
-- **Configured components:** `Factory` generates validated
-  configuration from constructor signatures, then constructs target objects with `model_resolve()`.
-- **Scoped runtime state:** `BaseContext` provides context-local settings with
-  persistent and temporary overrides.
-- **Flexible inputs:** annotations such as `AbsolutePath`, `CommaDelimited`,
-  `Map`, `Import`, `Call`, and `Make` adapt common environment and document
-  formats while retaining Pydantic validation.
-- **Integrations:** path-aware configuration, configurable classes, and
-  logging settings are available through `confidantic.paths`,
-  `confidantic.configurable`, and `confidantic.logging`.
-- **Portable documents:** trusted `Make` directives can restore concrete
-  configuration types; optional YAML and TOML extras provide serialization
-  and validation helpers.
+### Factories
 
-## Common use cases
-
-### Constructor-derived components
-
-Generate configuration for a component directly from its constructor:
+Derive configuration from an annotated constructor instead of declaring its
+parameters twice. A dataclass provides a small example:
 
 ```python
-from confidantic import BaseConfig, Factory
+from dataclasses import dataclass
+
+from confidantic import Factory
 
 
+@dataclass
 class Service:
-		def __init__(self, host: str = "localhost", port: int = 8000) -> None:
-				self.host = host
-				self.port = port
+    host: str
+    port: int = 8000
 
 
-class Config(BaseConfig):
-		service: Factory[Service] = Factory.model_from(Service)
-
-
-config = Config(service=Factory.model_from(Service("api.example.com"))())
-service = config.service.model_resolve()
+ServiceConfig = Factory.model_from(Service)
+config = ServiceConfig(host="api.example.com", port=8080)
+service = config.model_resolve()
+print(service)
 ```
 
-See [`examples/factory_template.py`](examples/factory_template.py) and
-[`examples/factory_dynamic_template.py`](examples/factory_dynamic_template.py)
-for recursive defaults and runtime selection of dependency types.
+```text
+Service(host='api.example.com', port=8080)
+```
 
-### Context-local settings
+`model_from()` generates a configuration class, instantiating it validates the
+inputs, and `model_resolve()` constructs the service. See the
+[factory guide](https://sztal.github.io/confidantic/guide/factories/).
 
-Keep request- or task-specific configuration available without threading it
-through every function:
+### Templates
+
+An existing object can supply configuration defaults. Continuing with `Service`
+and `Factory` from the preceding example:
 
 ```python
-from confidantic.context import BaseContext
-
-
-class RequestContext(BaseContext):
-		request_id: str = "default"
-
-
-with RequestContext.temporary(RequestContext(request_id="request-42")):
-		assert RequestContext.current().request_id == "request-42"
+template = Service("api.example.com", 8000)
+TemplateConfig = Factory.model_from(template)
+config = TemplateConfig(port=9000)
+service = config.model_resolve()
+print(service)
+print(template)
 ```
 
-See [`examples/context.py`](examples/context.py) for persistent and temporary
-overrides.
+```text
+Service(host='api.example.com', port=9000)
+Service(host='api.example.com', port=8000)
+```
 
-## Examples and documentation
+The new service uses the overridden port; the original template is unchanged.
+Read about [object templates](https://sztal.github.io/confidantic/guide/factories/#use-an-object-as-a-template)
+or [recursive templates and runtime type selection](https://sztal.github.io/confidantic/advanced/dynamic-template-clis/).
 
-The [examples/](examples/) directory contains runnable, VS Code cell-delimited
-guides with the details:
+### Smart annotations
 
-- [`basic.py`](examples/basic.py), [`cli.py`](examples/cli.py), and [`multilevel_cli.py`](examples/multilevel_cli.py): settings sources, environment variables, and CLI input.
-- [`env_files.py`](examples/env_files.py): explicit single- and multi-file dotenv configuration plus automatic discovery.
-- [`delimited.py`](examples/delimited.py): comma-delimited lists and flexible `key=value` mappings from environment values or standard Pydantic Settings CLI input.
-- [`config_updates.py`](examples/config_updates.py): validated copying, mutation, and field provenance.
-- [`nested.py`](examples/nested.py) and [`paths.py`](examples/paths.py): nested models and path-aware configuration.
-- [`factory.py`](examples/factory.py), [`factory_template.py`](examples/factory_template.py), and [`factory_dynamic_template.py`](examples/factory_dynamic_template.py): constructor-derived configuration and recursive object templates.
-- [`custom_sources.py`](examples/custom_sources.py): explicit priority for a TOML settings source.
-- [`configurable.py`](examples/configurable.py): instance configuration for configurable classes.
-- [`context.py`](examples/context.py): context-local configuration and scoped overrides.
-- [`logging_config.py`](examples/logging_config.py): logging configuration.
-- [`directive_annotations.py`](examples/directive_annotations.py) and [`serialization.py`](examples/serialization.py): trusted call directives and portable configuration dumps.
-- [`formats.py`](examples/formats.py): YAML and TOML round trips with validation.
+Accept convenient text inputs while validating the types of individual values:
 
-Run a guide as a script or open it in VS Code's Python Interactive Window. The
-project smoke-tests the scripts listed in `tests/integration/test_examples.py`.
+```python
+from confidantic import BaseConfig
+from confidantic.annotations import CommaDelimited, Map
 
-For guided usage and implementation details, start with the [wiki handbook](wiki/README.md).
-It covers [sources and inheritance](wiki/concepts/sources-and-inheritance.md),
-[factories and templates](wiki/concepts/factories-and-templates.md),
-[contexts](wiki/concepts/contexts.md), and [serialization](wiki/concepts/serialization.md),
-with runnable guides and a source-shaped implementation reference.
-The [public API reference](docs/reference/api.md) provides signatures and docstrings.
+
+class WorkerConfig(BaseConfig):
+    ports: CommaDelimited[list[int]]
+    limits: Map[dict[str, int]]
+
+
+config = WorkerConfig(ports="8000,9000", limits="workers=4,retries=3")
+print(config.model_dump())
+```
+
+```text
+{'ports': [8000, 9000], 'limits': {'workers': 4, 'retries': 3}}
+```
+
+See [input parsing](https://sztal.github.io/confidantic/guide/input-parsing/)
+for other separators, mappings, and paths.
+
+For other application needs, explore [contexts](https://sztal.github.io/confidantic/recipes/contexts/),
+[configured objects](https://sztal.github.io/confidantic/recipes/configurable-objects/),
+[paths](https://sztal.github.io/confidantic/recipes/paths/),
+[logging](https://sztal.github.io/confidantic/recipes/logging/), and
+[file formats](https://sztal.github.io/confidantic/guide/files/).
+The [examples directory](https://github.com/sztal/confidantic/tree/master/examples)
+contains complete runnable scripts.
 
 ## Development
 
-Install [uv](https://docs.astral.sh/uv/getting-started/installation/), clone the
-repository, and install the default Python version plus all contributor and
-documentation dependencies:
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then clone
+the repository and set up the development environment:
 
 ```console
 git clone https://github.com/sztal/confidantic.git
 cd confidantic
-uv python install 3.13
+uv python install
 uv sync --group dev --group docs --extra all
 ```
 
-Run the checks used by CI:
+`uv python install` reads the repository's `.python-version`. Run the checks in
+this order so formatting happens before tests:
 
 ```console
 uv run noxfile.py -s lint
 uv run pytest
 uv run noxfile.py -s typecheck
-uv run noxfile.py -s docs
-uv run noxfile.py -s optional-deps
+make docs
 ```
 
-Build the documentation into `site/` with `make docs`. Use `make docs-serve`
-to open a local preview that reloads as you edit the Markdown sources.
+`make docs` builds the documentation into `site/`. Use `make docs-serve` for a
+local preview that reloads when you edit the Markdown sources.
 
-The `optional-deps` check builds a wheel once and verifies core, each individual
-extra, and `all` in fresh environments using the default interpreter. It runs
-outside the checkout so editable installs and development dependencies cannot
-mask missing runtime dependencies.
-
-## Development and releases
-
-See [Merging and releasing](docs/releasing.md) for merge-time release notes,
-Git-tag-based versions, local release preparation, and explicit publishing.
+Start with the [architecture overview](https://sztal.github.io/confidantic/architecture/overview/)
+and [wiki handbook](https://github.com/sztal/confidantic/blob/master/wiki/README.md)
+for the design, then the [implementation reference](https://github.com/sztal/confidantic/blob/master/wiki/api/README.md)
+for internals. Follow the [style guide](https://github.com/sztal/confidantic/blob/master/STYLE.md)
+and [test-placement guide](https://github.com/sztal/confidantic/blob/master/tests/README.md)
+when contributing. See [merging and releasing](https://sztal.github.io/confidantic/releasing/)
+for distribution checks (including optional dependencies), release notes, and publication.

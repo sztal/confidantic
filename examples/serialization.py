@@ -3,7 +3,8 @@
 """Serialize nested configurations and restore them from portable data.
 
 `BaseConfig` values can write `@call` directives with `make=True`. This is
-designed for trusted documents because restoring a directive imports a class.
+designed for trusted documents because restoring a directive imports and calls
+a class constructor.
 """
 
 from pydantic import BaseModel, Field
@@ -58,7 +59,9 @@ assert '"@call"' in document
 
 # %% Validate the document back into the configuration -------------------------------
 
-# `Make[Config]` consumes the root directive and restores concrete nested types.
+# `Make[Config]` consumes directives for Config and NestedConfig. NestedModel's
+# concrete type is recovered from Config's default during partial updating;
+# an ordinary BaseModel dump does not carry a concrete-type directive.
 dump = config.model_dump(context={"make": True}, serialize_as_any=True)
 config_roundtrip = ConfigDocument.model_validate({"config": dump}).config
 

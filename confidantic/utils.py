@@ -1,3 +1,5 @@
+"""Runtime detection, object import identifiers, and call-directive evaluation."""
+
 import sys
 from collections.abc import Callable, Iterable, Mapping
 from functools import singledispatch
@@ -20,14 +22,14 @@ def is_runtime_jupyterlike() -> bool:
     Returns
     -------
     bool
-        ``True`` for Jupyter-style kernel runtimes (including VS Code
-        Interactive and notebooks), ``False`` otherwise.
+        ``True`` if ``ipykernel`` is loaded or the active IPython shell's class
+        name is ``ZMQInteractiveShell``; ``False`` otherwise.
 
     Notes
     -----
-    This intentionally excludes the standard IPython terminal shell so
-    CLI argument parsing remains available when running scripts via
-    ``%run`` with command-line arguments.
+    The standard IPython terminal shell is not recognized as a kernel unless
+    ``ipykernel`` has also been imported. Detection is a heuristic, not a check
+    that a kernel is running.
     """
     if "ipykernel" in sys.modules:
         return True
@@ -46,7 +48,7 @@ def is_runtime_jupyterlike() -> bool:
 
 @singledispatch
 def get_import_string(obj: Any) -> str:
-    """Get the import string for an object.
+    """Describe an object or its type using module and qualified names.
 
     Parameters
     ----------
@@ -56,7 +58,21 @@ def get_import_string(obj: Any) -> str:
     Returns
     -------
     str
-        The import string for the object.
+        The module name for a module, otherwise ``module:qualname``. Objects
+        without those attributes fall back to their type's identifier.
+
+    Notes
+    -----
+    The identifier is not checked for importability. Local classes, lambdas,
+    and unregistered dynamically generated classes may not be importable.
+    An ordinary instance identifies its class, not its state.
+
+    Examples
+    --------
+    >>> get_import_string(dict)
+    'builtins:dict'
+    >>> get_import_string({"answer": 42})
+    'builtins:dict'
     """
     try:
         return f"{obj.__module__}:{obj.__qualname__}"
@@ -75,20 +91,48 @@ def import_from_string(import_string: str, type_hint: Any = Any) -> Any:
     Parameters
     ----------
     import_string
-        The import string to import the object from.
+        Module or object path accepted by Pydantic ``ImportString``, such as
+        ``"collections"``, ``"builtins:dict"``, or ``"builtins.dict"``.
     type_hint
         Type or type annotation the imported object must satisfy.
 
     Returns
     -------
     Any
-        The imported object.
+        The imported object after validation against ``type_hint``.
+
+    Raises
+    ------
+    ValidationError
+        If the import cannot be resolved or its value fails validation.
     """
     import_type = cast(Any, ImportString)[type_hint]
     return TypeAdapter(import_type).validate_python(import_string)
 
 
 def _call_mapping(value: Mapping[Any, Any]) -> Any:
+    """Invoke a mapping's target without traversing its arguments or return value.
+
+    Parameters
+    ----------
+    value
+        Mapping with an ``@call`` callable or import string, optional iterable
+        ``@args``, and remaining entries passed as keyword arguments. The
+        mapping is not modified. Callers handle any recursive preprocessing.
+
+    Returns
+    -------
+    Any
+        Target's return value, without additional validation.
+
+    Raises
+    ------
+    ValueError
+        If ``@call`` is absent or ``@args`` is not iterable.
+    TypeError
+        If the target or arguments cannot be called. Import-validation and
+        target-call errors also propagate.
+    """
     if "@call" not in value:
         errmsg = "Call mappings require an '@call' key"
         raise ValueError(errmsg)
@@ -104,7 +148,20 @@ def _call_mapping(value: Mapping[Any, Any]) -> Any:
 
 
 def make(value: Any, handler: Callable[[Any], Any] | None = None) -> Any:
-    """Evaluate nested Make directives in a value.
+    """Evaluate call directives and optionally validate the result.
+
+    Mapping values, lists, and tuples are traversed recursively. A mapping
+    containing ``@call`` invokes that callable or import string with optional
+    iterable ``@args`` and all remaining entries as keyword arguments. Other
+    mappings become plain dictionaries. Mapping keys are left unchanged.
+
+    A top-level string is imported and called without arguments; a top-level
+    callable is also called without arguments. Nested strings and callables
+    remain unchanged unless used as an ``@call`` target. Return values from
+    calls are not traversed again. Other container types are not traversed.
+    Lists and tuples are rebuilt as plain lists and tuples; shared directives
+    are evaluated separately at each occurrence. Cycles are not detected and
+    recursive input can raise ``RecursionError``.
 
     Parameters
     ----------
@@ -118,10 +175,33 @@ def make(value: Any, handler: Callable[[Any], Any] | None = None) -> Any:
     -------
     Any
         The value after recursively evaluating call mappings and applying the
-        optional handler.
+        optional handler once, after evaluation.
+
+    Raises
+    ------
+    ValueError
+        If an ``@args`` value is not iterable. Import validation errors,
+        callable exceptions, and errors from the final handler also propagate.
+    TypeError
+        If an ``@call`` target is not callable or its arguments cannot be bound.
+
+    Examples
+    --------
+    >>> make("builtins:list")
+    []
+    >>> make({"label": "builtins:list", "value": {"@call": "builtins:list"}})
+    {'label': 'builtins:list', 'value': []}
+    >>> make({"@call": "builtins:dict", "@args": [[("@call", "builtins:list")]]})
+    {'@call': 'builtins:list'}
     """
 
     def build(item: Any) -> Any:
+        """Rebuild supported containers and evaluate call mappings from the inside out.
+
+        Ordinary strings and callables remain data at this stage. Mapping keys
+        and call results are not visited, and repeated references are rebuilt
+        independently without cycle detection.
+        """
         if isinstance(item, Mapping):
             built = {key: build(nested_value) for key, nested_value in item.items()}
             return _call_mapping(built) if "@call" in built else built

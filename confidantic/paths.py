@@ -7,7 +7,8 @@ from typing import TYPE_CHECKING, Any, Self
 from pydantic import Field, GetCoreSchemaHandler, model_validator
 from pydantic_core import CoreSchema, core_schema
 
-from confidantic._config.base import BaseConfig, ConfigModelDict
+from confidantic._config._options import ConfigModelDict
+from confidantic._config.base import BaseConfig
 
 __all__ = ("BasePaths", "ExtensiblePath")
 
@@ -38,23 +39,25 @@ class ExtensiblePath(_ExtensiblePathBase):
         _source_type: Any,
         handler: GetCoreSchemaHandler,
     ) -> CoreSchema:
+        """Validate as a standard Path, then construct this concrete path subclass."""
         return core_schema.no_info_after_validator_function(
             cls,
             handler.generate_schema(Path),
         )
 
     def __call__(self, *pathsegments: str | PathLike[str]) -> Self:
-        """Join path segments and return a dynamic path.
+        """Join path segments and return a path of the same concrete type.
 
         Parameters
         ----------
         *pathsegments
-                Child path segments to append.
+            Segments passed to :meth:`pathlib.Path.joinpath`. An absolute
+            segment replaces the preceding path on the current platform.
 
         Returns
         -------
         ExtensiblePath
-                Joined path.
+            Joined path, without expansion or filesystem resolution.
         """
         return type(self)(self.joinpath(*pathsegments))
 
@@ -70,12 +73,29 @@ class BasePaths(BaseConfig):
 
     Subclasses may declare additional :class:`pathlib.Path`-compatible fields.
     Their validated values are canonicalized to ``ExtensiblePath``. Undeclared
-    path values are accepted as Pydantic extra fields by default.
+    path values are accepted as Pydantic extra fields by default. Declared fields
+    are resolved in model field order, followed by extras in their input order.
+    All declared fields must have a concrete ``Path`` subclass annotation;
+    optional and union path annotations are not accepted. Field constraints such
+    as ``FilePath`` run before canonicalization, so relative existence checks
+    use the current working directory rather than ``root``.
+
+    ``~`` is expanded and existing symlinks are followed. A bare ``@field``
+    resolves to the anchor itself; unknown or forward anchors raise a validation
+    error. Root is resolved independently and cannot reference an anchor.
+    Only canonical paths are retained: changing ``root`` or an anchor with
+    :meth:`copy` or :meth:`mutate` does not relocate existing absolute paths.
+    Supply new relative definitions for paths that should move.
 
     Examples
     --------
     >>> paths = BasePaths(root=Path.cwd(), data="data")
     >>> paths.data == Path.cwd().joinpath("data").resolve(strict=False)
+    True
+    >>> moved = paths.copy(root=paths.root / "elsewhere")
+    >>> moved.data == paths.data
+    True
+    >>> moved.copy(data="data").data == moved.root / "data"
     True
     """
 
@@ -86,8 +106,28 @@ class BasePaths(BaseConfig):
     root: ExtensiblePath = ExtensiblePath(".")
     """Root directory used to resolve relative path definitions."""
 
+    def __call__(self, *args: Any, **kwargs: Any) -> ExtensiblePath:
+        """Join path segments to the configured root directory.
+
+        Parameters
+        ----------
+        *args
+            Segments passed to :meth:`pathlib.Path.joinpath`. An absolute
+            segment replaces the root on the current platform.
+        **kwargs
+            Forwarded to :meth:`pathlib.Path.joinpath`, whose standard
+            implementation accepts only positional path segments.
+
+        Returns
+        -------
+        ExtensiblePath
+            Joined path, without additional expansion or canonicalization.
+        """
+        return self.root.joinpath(*args, **kwargs)
+
     @classmethod
     def __pydantic_init_subclass__(cls, **kwargs: Any) -> None:
+        """Reject non-Path field annotations after Pydantic has collected fields."""
         super().__pydantic_init_subclass__(**kwargs)
         invalid_fields = [
             name
@@ -103,6 +143,13 @@ class BasePaths(BaseConfig):
 
     @model_validator(mode="after")
     def _canonicalize_paths(self) -> Self:
+        """Replace validated paths in place, resolving root before dependent fields.
+
+        Declared fields are processed in model order, then extras in input
+        order. Each resolved path becomes an anchor for subsequent paths.
+        Updates bypass frozen-field assignment; the validator returns this
+        instance and preserves its existing field and source metadata.
+        """
         root = _canonicalize_path(self.root)
         object.__setattr__(self, "root", root)
         anchors = {"root": root}
@@ -129,9 +176,33 @@ def _canonicalize_path(
     root: ExtensiblePath | None = None,
     anchors: dict[str, ExtensiblePath] | None = None,
 ) -> ExtensiblePath:
+    """Expand and resolve one path against an optional root and earlier anchors.
+
+    Parameters
+    ----------
+    path
+        Validated path. Home expansion precedes absolute-path and anchor checks.
+    root
+        Base for relative paths. Without it, relative paths use the working
+        directory and ``@`` prefixes are treated as literal path components.
+    anchors
+        Already resolved paths keyed by field or extra name. Used only for
+        relative paths beginning with ``@name`` when ``root`` is supplied.
+
+    Returns
+    -------
+    ExtensiblePath
+        Absolute path with existing symlinks resolved; the leaf need not exist.
+
+    Raises
+    ------
+    ValueError
+        If a requested anchor is unavailable. Path expansion and filesystem
+        resolution errors also propagate.
+    """
     expanded = path.expanduser()
     if root is not None and not expanded.is_absolute():
-        anchor, *segments = expanded.parts
+        anchor, *segments = expanded.parts or (".",)
         if anchor.startswith("@"):
             anchor_name = anchor[1:]
             if anchors is None or anchor_name not in anchors:

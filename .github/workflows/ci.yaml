@@ -3,8 +3,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
-    tags: ['*']
+    branches: [master]
   pull_request: null
   workflow_dispatch: null
 
@@ -12,125 +11,22 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-permissions: {}
+permissions:
+  contents: read
 
 jobs:
-  check:
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        session:
-          - lint
-          - typecheck
-          - docs
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-      - name: Install the latest version of uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: true
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Install Nox
-        run: >-
-          uv tool install nox
-          --python-preference only-managed
-          --python 3.14
-      - name: Set up ${{ matrix.session }}
-        run: >-
-          nox
-          --install-only
-          --error-on-missing-interpreters
-          --session ${{ matrix.session }}
-      - name: Run ${{ matrix.session }}
-        run: >-
-          nox
-          --no-install
-          --session ${{ matrix.session }}
-
-  tests:
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python_version:
-          - '3.14'
-          - '3.13'
-          - '3.12'
-          - '3.11'
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-      - name: Install the latest version of uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: true
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Install Nox
-        run: >-
-          uv tool install nox
-          --python-preference only-managed
-          --python 3.14
-      - name: Set up the test suite
-        run: >-
-          nox
-          --install-only
-          --error-on-missing-interpreters
-          --session tests-${{ matrix.python_version }}
-      - name: Run the test suite
-        run: >-
-          nox
-          --no-install
-          --session tests-${{ matrix.python_version }}
-        env:
-          COVERAGE_FILE: coverage-data
-      - name: Store coverage data
-        if: matrix.python_version == '3.13'
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-data
-          path: coverage-data
+  checks:
+    uses: ./.github/workflows/checks.yaml
+    with:
+      ref: ${{ github.sha }}
 
   pages:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [check, tests]
-    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    needs: checks
+    uses: ./.github/workflows/pages.yaml
+    with:
+      ref: ${{ github.sha }}
     permissions:
       contents: read
       pages: write
       id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-      - name: Install the latest version of uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: true
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Download coverage data
-        uses: actions/download-artifact@v5
-        with:
-          name: coverage-data
-      - name: Build the documentation and coverage report
-        run: |
-          uv sync --group docs --group test
-          uv run coverage json --data-file=coverage-data -o coverage.json
-          uv run zensical build --clean --strict
-          uv run coverage html --data-file=coverage-data -d site/coverage
-          uv run scripts/generate_coverage_badge.py coverage.json site/coverage.svg
-      - name: Configure GitHub Pages
-        uses: actions/configure-pages@v5
-      - name: Upload GitHub Pages artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: site
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4

@@ -12,10 +12,12 @@ have changed and agent guidance may be stale.
 ## First run in a newly generated repository
 
 1. Inspect the complete repository tree and the selected package layout.
-1. Read `pyproject.toml`, `README.md`, `Makefile`, `noxfile.py`, and tests.
+1. Read `pyproject.toml`, `README.md`, `Makefile`, `noxfile.py`,
+   `zensical.toml`, `.python-version`, and tests.
    `confidantic/` is the import package; `docs/`, `examples/`, and
    `changelog.d/` are the documentation, runnable-guide, and release-note
-   surfaces.
+   surfaces. `tests/integration/test_examples.py` lists the scripts under
+   `examples/` that have smoke-test coverage.
 1. Replace every placeholder in `AGENTS.md` with verified project facts.
 1. Update every skill under `.github/skills/` with the actual paths, commands,
    environment rules, and testing conventions.
@@ -28,8 +30,13 @@ have changed and agent guidance may be stale.
 1. Re-read all agent files and confirm they agree with each other.
 
 Never run `make test`, `nox -s tests`, or `uv run noxfile.py -s tests` as an
-agent. The full multi-version Nox test matrix is reserved for a human
-contributor.
+agent. The Nox `tests` session runs the full supported-Python matrix; that
+multi-version run is reserved for a human contributor. Use the direct pytest
+command for the repository test suite:
+
+```console
+uv run pytest
+```
 
 ## Later updates
 
@@ -37,5 +44,7 @@ Keep edits limited to agent guidance and project records such as `BUGS.md` or
 wiki migrations. Verify claims against source code and current commands before
 documenting them. Do not change runtime behavior.
 
-The package supports Python 3.11 and later, with Python 3.13 as the repository
-default. Use `uv sync --group dev` to install the development toolchain.
+The package supports Python 3.11 and later. The repository default is recorded
+in `.python-version` and is currently Python 3.13. Use `uv sync --group dev`
+to install the development toolchain and add `--group docs` for documentation
+builds.

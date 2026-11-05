@@ -6,157 +6,76 @@ icon: lucide/house
 
 [![PyPI](https://img.shields.io/pypi/v/confidantic)](https://pypi.org/project/confidantic/)
 [![Supported Python versions](https://img.shields.io/pypi/pyversions/confidantic?logo=python)](https://pypi.org/project/confidantic/)
-[![CI](https://img.shields.io/github/actions/workflow/status/sztal/confidantic/ci.yaml?branch=main&logo=github&label=CI)](https://github.com/sztal/confidantic/actions/workflows/ci.yaml)
-[![Package build](https://img.shields.io/github/actions/workflow/status/sztal/confidantic/release.yaml?branch=main&logo=github&label=package%20build)](https://github.com/sztal/confidantic/actions/workflows/release.yaml)
+[![CI](https://img.shields.io/github/actions/workflow/status/sztal/confidantic/ci.yaml?branch=master&logo=github&label=CI)](https://github.com/sztal/confidantic/actions/workflows/ci.yaml)
+[![Package build](https://img.shields.io/github/actions/workflow/status/sztal/confidantic/release.yaml?branch=master&logo=github&label=package%20build)](https://github.com/sztal/confidantic/actions/workflows/release.yaml)
 [![Coverage](https://sztal.github.io/confidantic/coverage.svg)](coverage/)
-[![License](https://img.shields.io/github/license/sztal/confidantic)](https://github.com/sztal/confidantic/blob/main/LICENSE)
+[![License](https://img.shields.io/github/license/sztal/confidantic)](https://github.com/sztal/confidantic/blob/master/LICENSE)
+
+Confidantic helps you give a Python application clear, validated settings. Define
+fields once, supply values from Python, environment variables, or a command line,
+and get useful errors when an input is wrong.
+
+```python
+from confidantic import BaseConfig
+
+
+class AppConfig(BaseConfig):
+    name: str = "orders"
+    retries: int = 3
+
+
+config = AppConfig(retries=5)
+print(config.model_dump())
+```
+
+```text
+{'name': 'orders', 'retries': 5}
+```
+
+It builds on [Pydantic models][pydantic.BaseModel] and
+[Pydantic Settings][pydantic_settings.BaseSettings]. Confidantic adds rules for
+configuration inheritance, validated updates, and ways to construct application
+objects from settings. You can start with a few fields and add those capabilities
+when your application needs them.
+
+## Start here
+
+- **New to Confidantic?** [Install it](getting-started/installation.md), then
+    [configure your first application](getting-started/first-application.md).
+- **Working on an application?** Learn about [input sources](guide/sources.md),
+    [command-line options](guide/cli.md), and [nested settings](guide/nested-settings.md).
+- **Building objects from configuration?** Start with [factories](guide/factories.md)
+    or [objects that own their configuration](recipes/configurable-objects.md).
+- **Want to understand the design?** Read the [concepts](concepts/values-and-inheritance.md)
+    and [architecture overview](architecture/overview.md).
+- **Looking up a name or option?** Use the [reference](reference/index.md).
 
 ## Installation
 
-Install `confidantic` using [pip](https://pip.pypa.io/) or [uv](https://docs.astral.sh/uv/):
-
-```
-pip install confidantic
-```
+The core package requires Python 3.11 or later. See
+[installation and optional extras](getting-started/installation.md).
 
 ## Frozen configuration
 
-`BaseConfig` instances are frozen by default, so model fields cannot be
-reassigned after validation. Create a modified copy with `copy`; supplied
-updates are validated as normal model input:
-
-```python
-from confidantic import BaseConfig
-
-
-class AppConfig(BaseConfig):
-	retries: int = 3
-
-
-config = AppConfig()
-updated = config.copy(retries=5)
-```
-
-`copy()` is shallow and `deepcopy()` recursively copies field values. Both
-methods accept validated keyword updates. The standard-library `copy.copy()`
-and `copy.deepcopy()` functions are also supported.
-
-Use `mutate()` to apply validated updates to the same instance, including a
-frozen configuration:
-
-```python
-config.mutate(retries=5)
-```
-
-Take care when mutating a frozen configuration: changing its fields may
-invalidate its hash. Do not continue to use a mutated configuration as a
-dictionary key or set member.
-
-Pydantic's frozen behavior is shallow: mutable values stored in fields are not
-recursively frozen. A subclass that intentionally requires field reassignment
-can opt out:
-
-```python
-from confidantic import BaseConfig, ConfigModelDict
-
-
-class MutableAppConfig(BaseConfig):
-	model_config = ConfigModelDict(frozen=False)
-
-	retries: int = 3
-```
+Fields are frozen by default. Learn how to [create validated copies and choose an
+update operation](guide/settings.md#frozen-configuration).
 
 ## Field documentation
 
-Add an `@attrs` marker to a `BaseConfig` subclass's NumPy-style `Attributes`
-section to replace it with effective model field names and descriptions:
+Add field descriptions for people reading help or inspecting settings. See
+[field documentation](guide/descriptions-and-display.md#field-documentation).
 
-```python
-from confidantic import BaseConfig
-from pydantic import Field
+## Configuration display
 
-
-class AppConfig(BaseConfig):
-	"""Application configuration."""
-
-	Attributes
-	----------
-	@attrs
-
-	retries: int = Field(3, description="Number of retry attempts.")
-```
-
-Set `docstring_set_attributes_section=False` to retain an `@attrs` marker
-without replacing it:
-
-```python
-from confidantic import BaseConfig, ConfigModelDict
-
-
-class AppConfig(BaseConfig):
-	"""Application configuration."""
-
-	Attributes
-	----------
-	@attrs
-
-	model_config = ConfigModelDict(
-		docstring_set_attributes_section=False,
-	)
-```
+Use the optional Rich integration to inspect settings. See
+[configuration display](guide/descriptions-and-display.md#configuration-display).
 
 ## Make directives
 
-Pass `context={"make": True}` to `model_dump()` or `model_dump_json()` to add
-a `Make` directive for each serialized `BaseConfig`:
-
-```python
-config.model_dump(context={"make": True})
-# {"@call": "package.module:AppConfig", "retries": 3}
-```
-
-Nested `BaseConfig` instances receive their own directive; ordinary Pydantic
-models do not.
-
-Deserialize the result with the `Make` annotation:
-
-```python
-from confidantic.annotations import Make
-from pydantic import BaseModel
-
-
-class Container(BaseModel):
-	config: Make[AppConfig]
-
-
-config = Container.model_validate({"config": data}).config
-```
-
-This feature is intended for trusted serialized data: the directive controls an
-import and invokes the selected class constructor.
+For trusted documents that construct Python objects, see
+[Make directives](advanced/object-directives-and-portability.md#make-directives).
 
 ## YAML and TOML
 
-Install an optional writer to serialize configurations as YAML or TOML:
-
-```console
-pip install "confidantic[yaml]"
-pip install "confidantic[toml]"
-```
-
-Both methods accept the same model-dump filtering, context, and serialization
-options as `model_dump_json()` and return a string:
-
-```python
-yaml_text = config.model_dump_yaml(context={"make": True})
-toml_text = config.model_dump_toml(exclude_none=True)
-
-loaded_yaml = AppConfig.model_validate_yaml(yaml_text)
-loaded_toml = AppConfig.model_validate_toml(toml_text)
-```
-
-YAML uses block formatting and preserves model field order, including a leading
-Make directive. TOML has no null representation, so use `exclude_none=True` when
-the configuration can contain `None` values. The YAML loader requires the YAML
-extra; TOML loading uses Python's standard library. Both loaders forward their
-validation options to `model_validate()`.
+Learn to [read and write configuration documents](guide/files.md#yaml-and-toml)
+and register files as settings sources.

@@ -10,6 +10,7 @@ from pydantic import ValidationError
 
 from confidantic import ConfigModelDict as ConfigModelDict
 from confidantic.logging import BaseLogging
+from tests.helpers import run_python
 
 
 class AppLogging(BaseLogging):
@@ -39,7 +40,7 @@ def test_log_levels_reject_unknown_names() -> None:
 
 def test_base_logging_has_no_environment_prefix() -> None:
     """Applications choose the environment variable namespace in subclasses."""
-    assert BaseLogging.model_config.get("env_prefix") == ""
+    assert BaseLogging.model_config.get("env_prefix") is None
 
 
 def test_subclass_reads_environment_and_dotenv(
@@ -72,16 +73,26 @@ def test_config_uses_file_fallbacks_and_independent_root_level(tmp_path: Path) -
 
 def test_file_handler_receives_records_below_console_threshold(tmp_path: Path) -> None:
     """The root logger does not prevent more-verbose file logging."""
-    log_file = tmp_path / "app.log"
-    logger = BaseLogging(
-        level="WARNING",
-        file=log_file,
-        file_level="DEBUG",
-    ).get_logger("tests.logging", capture_warnings=None)
+    result = run_python(
+        """
+        import logging
+        from pathlib import Path
+        from confidantic.logging import BaseLogging
 
-    logger.debug("debug-record")
-
-    assert "debug-record" in log_file.read_text(encoding="utf-8")
+        logger = BaseLogging(
+            level="WARNING", file=Path("app.log"), file_level="DEBUG"
+        ).get_logger("tests.logging", capture_warnings=None)
+        logger.debug("debug-record")
+        logger.warning("warning-record")
+        logging.shutdown()
+        """,
+        tmp_path,
+    )
+    contents = (tmp_path / "app.log").read_text(encoding="utf-8")
+    assert "debug-record" in contents
+    assert "warning-record" in contents
+    assert "debug-record" not in result.stderr
+    assert "warning-record" in result.stderr
 
 
 def test_get_logger_configures_root_and_returns_named_logger() -> None:

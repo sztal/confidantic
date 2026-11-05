@@ -2,9 +2,9 @@
 
 """Validate ordinary values or build them from portable call directives.
 
-`Call` and `Make` pass ordinary values to Pydantic validation. Their call
-directives import and invoke callables, so validate only trusted configuration
-data when a document can contain `@call`.
+`Call` and `Make` pass non-callable, non-string scalar values to validation.
+Top-level strings are imported and called; callables and `@call` mappings also
+execute code. Use these annotations with trusted configuration data.
 """
 
 from collections.abc import Callable
@@ -85,7 +85,7 @@ assert direct_values.model_dump() == {
 # %% Recursively make values inside nested mappings ---------------------------------
 
 
-# `Make[T]` traverses mappings and sequences, invoking every mapping with `@call`.
+# `Make[T]` traverses mapping values, lists, and tuples to evaluate `@call` mappings.
 class MakeConfig(BaseModel):
     """Service definitions assembled from a configuration document."""
 

@@ -19,6 +19,7 @@ nox.options.sessions = [
     "lint",
     "typecheck",
     "docs",
+    "optional-deps",
     "tests",
 ]
 
@@ -30,8 +31,19 @@ DEFAULT_PYTHON_VERSION = Path(".python-version").read_text().rstrip()
 
 @nox.session(python=SUPPORTED_PYTHON_VERSIONS, tags=["tests"])
 def tests(session: nox.Session) -> None:
-    """Run the test suite."""
-    session.install(".[all]", "--group", "test")
+    """Run tests for each supported Python version in the contributor matrix.
+
+    With positional arguments, invoke pytest directly with those arguments.
+    Otherwise run pytest under coverage with xdist, combine subprocess data,
+    and report coverage. Coverage uses a session temporary file unless the
+    caller supplies COVERAGE_FILE.
+    """
+    session.install(".[all]", "--group", "dev")
+
+    if session.posargs:
+        session.run("pytest", *session.posargs)
+        return
+
     tmp_dir = Path(session.create_tmp())
 
     if os.getenv("COVERAGE_FILE") is None:
@@ -83,7 +95,7 @@ def typecheck(session: nox.Session) -> None:
 @nox.session(python=DEFAULT_PYTHON_VERSION, tags=["checks"])
 def docs(session: nox.Session) -> None:
     """Build the documentation."""
-    session.install("-e", ".", "--group", "docs")
+    session.install("-e", ".[all]", "--group", "docs")
     session.run(
         "zensical",
         "build",
@@ -96,13 +108,20 @@ def docs(session: nox.Session) -> None:
 @nox.session(python=DEFAULT_PYTHON_VERSION)
 def autodocs(session: nox.Session) -> None:
     """Serve the documentation locally."""
-    session.install("-e", ".", "--group", "docs")
+    session.install("-e", ".[all]", "--group", "docs")
     session.run(
         "zensical",
         "serve",
         "--open",
         *session.posargs,
     )
+
+
+@nox.session(name="optional-deps", python=DEFAULT_PYTHON_VERSION, tags=["checks"])
+def optional_dependencies(session: nox.Session) -> None:
+    """Check the built wheel with each optional dependency in an isolated install."""
+    session.install("uv>=0.8.6")
+    session.run("python", "scripts/check_optional_dependencies.py", *session.posargs)
 
 
 if __name__ == "__main__":

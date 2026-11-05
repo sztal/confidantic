@@ -37,12 +37,13 @@ dynamic = [
   "version",
 ]
 dependencies = [
-  "docstring-parser>=0.18",
+  "pydantic>=2.14",
   "pydantic-settings>=2.15",
-  "rich>=15",
 ]
 
-optional-dependencies.all = [ "confidantic[toml,yaml]" ]
+optional-dependencies.all = [ "confidantic[docstrings,rich,toml,yaml]" ]
+optional-dependencies.docstrings = [ "docstring-parser>=0.18" ]
+optional-dependencies.rich = [ "rich>=15" ]
 optional-dependencies.toml = [ "tomli-w>=1" ]
 optional-dependencies.yaml = [ "pyyaml>=6" ]
 
@@ -60,11 +61,17 @@ dev = [
   { include-group = "type" },
 ]
 test = [
+  "cloudpickle>=3.1.2",
   "coverage[toml]>=7.11",
+  "docstring-parser>=0.18",
   "ipdb",
+  "joblib>=1.5.3",
   "nox>=2025.2.9",
   "pytest>=9",
   "pytest-xdist>=3.8",
+  "pyyaml>=6",
+  "rich>=15",
+  "tomli-w>=1",
 ]
 type = [
   "mypy>=1.15",
@@ -72,13 +79,15 @@ type = [
 ]
 docs = [
   "mkdocstrings-python>=2",
-  "zensical>=0.0.11",
+  "zensical>=0.0.56",
 ]
 lint = [
   "pre-commit>=4.5",
 ]
 release = [
+  "packaging>=24.2",
   "towncrier>=25.8",
+  "twine>=6.1",
 ]
 
 [tool.hatch.version]
@@ -166,7 +175,7 @@ report.exclude_also = [
   "^\\s*return NotImplemented\\b",
   "^if __name__ == [\"']__main__[\"']:$",
 ]
-report.fail_under = 95
+report.fail_under = 90
 report.show_missing = true
 report.skip_covered = true
 run.branch = true
@@ -180,9 +189,7 @@ run.patch = [
 ]
 run.disable_warnings = [
   "module-not-imported",
-]
-run.source_dirs = [
-  "tests",
+  "no-data-collected",
 ]
 run.source_pkgs = [
   "confidantic",

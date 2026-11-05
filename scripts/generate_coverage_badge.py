@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 def get_badge_color(percentage: float) -> str:
-    """Return the badge color for a coverage percentage."""
+    """Choose color at the 95, 90, and 80 percent thresholds without rounding."""
     if percentage >= 95:
         return "#4c1"
     if percentage >= 90:
@@ -18,12 +18,24 @@ def get_badge_color(percentage: float) -> str:
 
 
 def format_percentage(percentage: float) -> str:
-    """Format a coverage percentage for the badge label."""
+    """Round to one decimal place, omit a trailing .0, and append a percent sign."""
     return f"{percentage:.1f}".rstrip("0").rstrip(".") + "%"
 
 
 def generate_badge(percentage: float) -> str:
-    """Return an SVG coverage badge for ``percentage``."""
+    """Return an SVG coverage badge for ``percentage``.
+
+    Parameters
+    ----------
+    percentage
+        Coverage on the 0-to-100 scale. Color thresholds use the unrounded value;
+        the displayed label rounds to one decimal place and omits a trailing .0.
+
+    Returns
+    -------
+    str
+        Complete SVG document, including an accessible title and trailing newline.
+    """
     label = "coverage"
     value = format_percentage(percentage)
     color = get_badge_color(percentage)
@@ -50,7 +62,22 @@ def generate_badge(percentage: float) -> str:
 
 
 def get_coverage_percentage(report_path: Path) -> float:
-    """Read and validate the total percentage from a Coverage.py JSON report."""
+    """Read the numeric total percentage from a Coverage.py JSON report.
+
+    Missing files or keys, malformed JSON, and nonnumeric values raise
+    ``ValueError``. No finiteness or percentage-range check is performed.
+
+    Parameters
+    ----------
+    report_path
+        JSON report containing ``totals.percent_covered``. Filesystem errors
+        other than a missing file propagate without conversion.
+
+    Returns
+    -------
+    float
+        Numeric total converted to a float, without rounding.
+    """
     try:
         report = json.loads(report_path.read_text())
         percentage = report["totals"]["percent_covered"]
@@ -75,7 +102,20 @@ def create_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Generate an SVG coverage badge."""
+    """Read a coverage report and write a badge, replacing any existing output.
+
+    Parameters
+    ----------
+    argv
+        Input report and output path arguments, or ``None`` for process arguments.
+        The output's parent directory must already exist.
+
+    Returns
+    -------
+    int
+        Zero on success. Input, filesystem, and argument-parsing errors propagate
+        or exit instead of returning a failure code.
+    """
     args = create_parser().parse_args(argv)
     args.output.write_text(generate_badge(get_coverage_percentage(args.report)))
     return 0

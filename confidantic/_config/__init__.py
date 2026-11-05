@@ -7,5 +7,7 @@ __all__ = (
     "Factory",
 )
 
-from confidantic._config.base import BaseConfig, ClassDefaultsSource, ConfigModelDict
+from confidantic._config._options import ConfigModelDict
+from confidantic._config._settings import ClassDefaultsSource
+from confidantic._config.base import BaseConfig
 from confidantic._config.factory import Factory

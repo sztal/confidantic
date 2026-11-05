@@ -43,7 +43,10 @@ repos:
           - mdformat-front-matters
       - id: mdformat
         files: ^docs/
+        # API references are resolved by mkdocstrings during the docs build.
+        args: [--ignore-missing-references]
         additional_dependencies:
           - mdformat-footnote
           - mdformat-front-matters
+          - mdformat-mkdocs==5.3.0
           - mdformat-simple-breaks

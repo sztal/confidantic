@@ -1,43 +1,60 @@
-# %% Generate a configuration model from a constructor ------------------------------
+# %% Define the target --------------------------------------------------------------
 
-"""Create an object from configuration derived from its constructor.
+"""Generate configuration from a constructor or an existing object template."""
 
-Run cells individually to inspect the generated model, then materialize the
-target object from validated configuration values.
-"""
+from dataclasses import dataclass
 
-from confidantic import BaseConfig, Factory
+from pydantic import ValidationError
+
+from confidantic import Factory
 
 
+@dataclass
 class Service:
-    """A small application component with configurable constructor arguments."""
+    """Service address whose constructor supplies the configuration schema.
 
-    def __init__(self, host: str = "localhost", port: int = 8000) -> None:
-        self.host = host
-        self.port = port
+    Parameters
+    ----------
+    host
+        Required server hostname.
+    port
+        Server port, defaulting to 8000.
+    """
 
-    def __repr__(self) -> str:
-        return f"{self.__class__.__name__}(host={self.host!r}, port={self.port})"
-
-
-class Config(BaseConfig, cli_parse_args=True):
-    """Application settings containing a configurable service."""
-
-    service: Factory[Service] = Factory.instance_from(Service, port=9999)
-    """Values passed to `Service` when it is materialized."""
+    host: str
+    port: int = 8000
 
 
-# %% Inspect config fields, then materialize the target -----------------------------
+# %% Generate a class, validate its fields, then construct the target ----------------
 
-config = Config(service={"host": "127.0.0.1"})
-config.info()
+ServiceConfig = Factory.model_from(Service)
+assert ServiceConfig.model_fields["host"].is_required()
 
-service = config.service.materialize()
-# OR just `service = config.service()` because `Factory` is callable.
+try:
+    ServiceConfig()
+except ValidationError:
+    pass
+else:
+    raise AssertionError("The generated configuration must require host")
+
+config = ServiceConfig(host="api.example.com", port=8080)
+assert isinstance(config, Factory)
+service = config.model_resolve()
+assert isinstance(service, Service)
+assert service == Service("api.example.com", 8080)
 print(service)
 
-assert isinstance(service, Service)
-assert service.host == "127.0.0.1"
-assert service.port == 9999
+# %% Capture defaults from an instance ----------------------------------------------
 
-# %% ---------------------------------------------------------------------------------
+template = Service("template.example.com", 9000)
+TemplateConfig = Factory.model_from(template)
+configured = TemplateConfig(port=9001)
+assert configured.host == "template.example.com"
+assert configured.model_resolve() == Service("template.example.com", 9001)
+assert template.port == 9000
+
+# %% Generate and instantiate in one call -------------------------------------------
+
+shortcut = Factory.instance_from(Service, host="worker.example.com")
+assert shortcut.model_resolve() == Service("worker.example.com", 8000)
+print(shortcut.model_resolve())

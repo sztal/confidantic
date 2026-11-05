@@ -53,29 +53,39 @@ class BaseLogging(BaseConfig):
     level: LogLevelT = "INFO"
     """The logging level for the console handler."""
     root_level: LogLevelT = "NOTSET"
-    """The logging level at which the root logger admits records."""
+    """Root logger level, inherited by named loggers without their own level.
+    Ancestor logger levels do not filter records propagated by a named logger
+    with an explicit level; handler levels still apply.
+    """
     format: str = "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
     """The log message format for the console handler."""
     file: Path | None = None
     """The file to which logging output will be written.
-    If ``None``, file logging is disabled."""
+    If ``None``, file logging is disabled. Relative paths are made absolute
+    against the working directory when :meth:`config` is called; ``~`` is not
+    expanded and parent directories are not created.
+    """
     file_level: LogLevelT | None = None
     """The logging level for the file handler.
     If ``None``, defaults to the value of ``level``."""
     file_format: str | None = None
-    """The log message format for the file handler.
-    If ``None``, defaults to the value of ``format``."""
+    """The file handler format; ``None`` or an empty string uses ``format``."""
     file_max_bytes: PositiveInt = 5 * 1024 * 1024
     """The maximum size in bytes of the log file before it is rotated."""
     file_backup_count: PositiveInt = 3
     """The number of backup log files to keep when rotating."""
     version: PositiveInt = 1
-    """The version of the logging configuration schema."""
+    """Schema version passed through to dictConfig, which supports only 1."""
     disable_existing_loggers: bool = False
     """Whether to disable existing loggers when configuring logging."""
 
     def config(self) -> dict[str, Any]:
         """Return a :func:`logging.config.dictConfig`-compatible dictionary.
+
+        This method builds data only; :meth:`get_logger` applies it. No handlers
+        are created and no files are opened here. Values such as schema version,
+        formatter syntax, and stream references are checked by ``dictConfig``
+        when the configuration is applied.
 
         Builds a configuration dict with:
 
@@ -147,7 +157,9 @@ class BaseLogging(BaseConfig):
     ) -> logging.Logger:
         """Apply this logging configuration and return a logger.
 
-        The generated configuration always applies to the root logger.
+        The generated configuration always applies to the root logger and
+        replaces its handlers. Calling this method has process-wide effects;
+        file-handler parent directories must already exist.
 
         Parameters
         ----------

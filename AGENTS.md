@@ -6,16 +6,29 @@
 - Import package: `confidantic`
 - Source directory: `confidantic/`
 - Tests: `tests/`
+- Test layout mirrors `confidantic/`: top-level module tests live directly in
+  `tests/`, and configuration internals live in `tests/_config/`. Cross-module
+  subprocess and example checks live in `tests/integration/`; maintenance-script
+  tests live in `tests/scripts/`. See `tests/README.md` for placement conventions.
 - Documentation: `docs/`
-- Runnable examples: `examples/`
+- Runnable examples: `examples/` (including `factory_dynamic_template.py` and
+  `factory_template.py` for recursive `__recursive__` generation)
 - Release notes: `changelog.d/` managed by Towncrier
+- Agent workflows: `.github/skills/`
+- `Factory.model_from(..., __recursive__=...)` can turn matching concrete defaults
+  into nested generated `Factory` fields; the generated factory annotation also
+  enables nested CLI options such as `--database.host`.
 - Repository: https://github.com/sztal/confidantic
 
 Configuration and CLIs for Python projects based on Pydantic and Pydantic Settings.
 The package requires Python 3.11 or later; the repository's default interpreter
 is Python 3.13.
 
-The core public APIs live in the package root and in
+The package root re-exports `BaseConfig`, `ClassDefaultsSource`,
+`ConfigModelDict`, `Factory`, and `__version__`. `Factory`
+provides `model_from`, `instance_from`, and explicit `model_resolve` methods;
+`BaseConfig` also provides `model_resolve` for nested factory values. Other
+core public APIs live in
 `confidantic/annotations.py`, `confidantic/configurable.py`,
 `confidantic/context.py`, `confidantic/logging.py`, `confidantic/paths.py`,
 `confidantic/types.py`, and `confidantic/utils.py`. Internal configuration
@@ -28,16 +41,22 @@ Read and follow [STYLE.md](STYLE.md) before changing Python code or tests.
 `pyproject.toml` is the source of truth for dependency groups, Ruff, mypy,
 pytest, and coverage configuration.
 
-Set up the development environment with `uv sync --group dev`. Examples are
-executable scripts and are smoke-tested by `tests/test_examples.py`.
+Set up the development environment with `uv sync --group dev`; add the `docs`
+group when building documentation. The repository default interpreter is read
+from `.python-version` (currently 3.13). Examples are executable scripts;
+`tests/integration/test_examples.py` lists the smoke-tested scripts; check that
+file when adding or changing a guide.
 
 Keep changes focused, preserve public behavior unless the task intentionally
 changes it, and add or update tests for behavior changes.
 
-Add a Towncrier fragment under `changelog.d/` for every user-visible behavior
-change, bug fix, or public API change. Do this as part of the same change, not
-as a later release step. Documentation-only and strictly internal changes do
-not need a fragment.
+Write release notes only when merging a feature/development branch into `master`.
+Ordinary development and bug-fixing tasks do not add Towncrier fragments. Use the
+`merge-to-master` skill to summarize the final integrated behavior once per merge;
+documentation-only and internal merges record a no-notes reason. The
+`release-package` skill assembles these notes when preparing a final release.
+Package versions come from annotated Git tags, never a static version field.
+See `docs/releasing.md` for commands, setup, and recovery.
 
 ## Project records
 
@@ -55,12 +74,16 @@ task-session notes.
 
 Agents must run the Nox lint session before pytest. Pre-commit may apply
 formatting or lockfile updates, so linting after pytest can invalidate the test
-result:
+result. The standard checks are:
 
 ```console
 uv run noxfile.py -s lint
 uv run pytest
+uv run noxfile.py -s typecheck
+uv run noxfile.py -s docs
 ```
+
+Lint, pytest, typecheck, and docs are currently passing.
 
 Use the coverage target only when coverage statistics are needed:
 
@@ -75,9 +98,14 @@ stale paths and fail with `No source for code`. The Nox test session uses a
 temporary coverage file by default, runs pytest with xdist, combines its data,
 and reports coverage.
 
-Do not run the full Nox test matrix through `make test`, `nox -s tests`, or
-`uv run noxfile.py -s tests`. Full multi-version Nox testing is reserved for a
-human contributor.
+Do not run `make test`, `nox -s tests`, or `uv run noxfile.py -s tests` as an
+agent. The Nox `tests` session runs the full supported-Python matrix; that
+multi-version run is reserved for a human contributor. Use the direct pytest
+command for the repository test suite:
+
+```console
+uv run pytest
+```
 
 Agents may use the non-test Nox sessions directly when a focused check is
 needed:
@@ -87,6 +115,10 @@ uv run noxfile.py -s lint
 uv run noxfile.py -s typecheck
 uv run noxfile.py -s docs
 ```
+
+Pytest is configured to collect tests and doctests from `docs/`,
+`confidantic/`, `tests/`, and `README.md`. Documentation builds use
+`zensical.toml` and require the `docs` dependency group.
 
 ## Documentation
 

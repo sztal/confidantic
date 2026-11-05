@@ -1,6 +1,7 @@
-# Sandbox
+# Sandbox & reports
 **/_sandbox
 **/_sandbox.py
+/reports
 
 # Cache
 .cache/

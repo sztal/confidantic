@@ -3,7 +3,9 @@
 from collections.abc import Generator
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import Any, ClassVar, Self
+from threading import RLock
+from typing import Self, TypeVar, cast
+from weakref import WeakKeyDictionary
 
 from confidantic._config.base import BaseConfig
 
@@ -18,15 +20,12 @@ class BaseContext(BaseConfig):
     persistent activation or :meth:`temporary` for a scoped activation.
 
     The active instance is local to the current thread and asynchronous task.
-    Each subclass receives an independent context variable automatically.
+    New asynchronous tasks inherit the current activation by reference;
+    replacing it in one task does not replace it in another. Mutating a shared
+    active instance can still affect both tasks. Each subclass receives
+    independent process-local storage lazily. Serializing
+    an instance does not transfer ambient activation into a fresh interpreter.
     """
-
-    _current: ClassVar[ContextVar[Self]] = ContextVar("BaseContext.current")
-
-    @classmethod
-    def __pydantic_init_subclass__(cls, **kwargs: Any) -> None:
-        super().__pydantic_init_subclass__(**kwargs)
-        cls._current = ContextVar(f"{cls.__module__}.{cls.__qualname__}.current")
 
     @classmethod
     def current(cls) -> Self:
@@ -42,10 +41,10 @@ class BaseContext(BaseConfig):
             Active instance of the receiving context class.
         """
         try:
-            return cls._current.get()
+            return _context_var(cls).get()
         except LookupError:
             context = cls()
-            cls._current.set(context)
+            _context_var(cls).set(context)
             return context
 
     @classmethod
@@ -55,7 +54,8 @@ class BaseContext(BaseConfig):
         Parameters
         ----------
         context
-            Validated instance to activate.
+            Instance to activate by reference. Its class is checked, but its
+            fields are not revalidated.
 
         Returns
         -------
@@ -71,7 +71,7 @@ class BaseContext(BaseConfig):
             raise TypeError(
                 f"Expected an instance of {cls.__name__}, got {type(context).__name__}"
             )
-        cls._current.set(context)
+        _context_var(cls).set(context)
         return context
 
     @classmethod
@@ -79,11 +79,14 @@ class BaseContext(BaseConfig):
     def temporary(cls, context: Self) -> Generator[Self, None, None]:
         """Temporarily activate an instance in the current execution context.
 
+        The previous activation, including an unset state, is restored on
+        exit even when the block raises an exception.
+
         Parameters
         ----------
         context
-            Validated instance to activate for the duration of the context
-            manager.
+            Instance to activate by reference for the duration of the context
+            manager. Its class is checked, but its fields are not revalidated.
 
         Yields
         ------
@@ -99,8 +102,44 @@ class BaseContext(BaseConfig):
             raise TypeError(
                 f"Expected an instance of {cls.__name__}, got {type(context).__name__}"
             )
-        token = cls._current.set(context)
+        variable = _context_var(cls)
+        token = variable.set(context)
         try:
             yield context
         finally:
-            cls._current.reset(token)
+            variable.reset(token)
+
+
+_ContextT = TypeVar("_ContextT", bound=BaseContext)
+_CONTEXT_VARS: WeakKeyDictionary[type[BaseContext], ContextVar[BaseContext]] = (
+    WeakKeyDictionary()
+)
+_CONTEXT_VARS_LOCK = RLock()
+
+
+def _context_var(cls: type[_ContextT]) -> ContextVar[_ContextT]:
+    """Find or create a context variable for one concrete context class.
+
+    Parameters
+    ----------
+    cls
+        Class used as a weak registry key. Subclasses have separate entries.
+
+    Returns
+    -------
+    ContextVar
+        Process-local variable with no default value. Creating it does not
+        construct or activate a configuration instance.
+
+    Notes
+    -----
+    The lock serializes registry access across threads. Keeping variables
+    outside the classes avoids serializing ambient activation with a class;
+    weak keys avoid retaining classes solely through this registry.
+    """
+    with _CONTEXT_VARS_LOCK:
+        variable = _CONTEXT_VARS.get(cls)
+        if variable is None:
+            variable = ContextVar(f"{cls.__module__}.{cls.__qualname__}.current")
+            _CONTEXT_VARS[cls] = variable
+        return cast(ContextVar[_ContextT], variable)

@@ -1,138 +1,147 @@
-# /// script
-# requires-python = ">=3.11"
-# dependencies = [
-#   "packaging>=24.2",
-#   "towncrier>=25.8",
-# ]
-# ///
-"""Release a new version."""
+"""Prepare a checked, annotated release tag on local master without publishing."""
 
 import argparse
 import subprocess
 from collections.abc import Sequence
+from pathlib import Path
 
-from packaging.version import Version
+from packaging.version import InvalidVersion, Version
 
-
-def create_parser() -> argparse.ArgumentParser:
-    """Return the argument parser."""
-    parser = argparse.ArgumentParser(
-        description="release a new version",
-    )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="do not update the origin remote and reset the local repository",
-    )
-    parser.add_argument("version", type=Version, help="provide the version")
-    return parser
+from scripts import check
+from scripts._repository import (
+    advance,
+    clean,
+    git,
+    isolated,
+    preflight,
+    tag_version,
+    unchanged,
+)
 
 
-def check_repository() -> None:
-    """Check whether the local repository is dirty or clean."""
-    subprocess.check_call(["git", "diff", "--exit-code"])
+def available_version(project: Path, tag: str) -> None:
+    """Reject existing tags and versions that do not advance local or remote tags."""
+    version = tag_version(tag)
+    tags = set(git(project, "tag", "--list").splitlines())
+    for line in git(project, "ls-remote", "--tags", "--refs", "origin").splitlines():
+        tags.add(line.split()[1].removeprefix("refs/tags/"))
+    for existing in tags:
+        if existing == tag:
+            raise ValueError(f"Release tag already exists: {tag}")
+        try:
+            previous = Version(existing.removeprefix("v"))
+        except InvalidVersion:
+            continue
+        if previous >= version:
+            raise ValueError(f"Release must be newer than {existing}")
 
 
-def get_current_branch() -> str:
-    """Get the current Git branch."""
+def release_notes(project: Path, version: str) -> str:
+    """Render pending Towncrier notes without editing tracked files."""
     return subprocess.check_output(
-        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+        [
+            "uv",
+            "run",
+            "--locked",
+            "--group",
+            "release",
+            "towncrier",
+            "build",
+            "--version",
+            version,
+            "--draft",
+        ],
+        cwd=project,
         text=True,
-    ).rstrip()
-
-
-def get_release_notes(version: str) -> str:
-    """Return the release notes."""
-    release_notes = subprocess.check_output(
-        ["towncrier", "build", "--version", version, "--draft"],
-        stderr=subprocess.DEVNULL,
-        text=True,
-    ).rstrip()
-    release_notes = "".join(release_notes.splitlines(keepends=True)[1:])
-    release_notes = release_notes.strip()
-    return f"## Release notes\n\n{release_notes}"
-
-
-def update_changelog(version: str) -> None:
-    """Update the changelog."""
-    subprocess.check_call(["towncrier", "build", "--version", version, "--yes"])
-
-
-def create_release_tag(version: str) -> str:
-    """Create and return the release tag."""
-    release_tag = f"v{version}"
-    message = f"bump version to {version}"
-    # Make sure to create an annotated tag.
-    subprocess.check_call(
-        ["git", "tag", "--annotate", release_tag, "--message", message],
-    )
-    return release_tag
-
-
-def create_release(release_tag: str, release_notes: str) -> None:
-    """Create the GitHub release with release notes."""
-    subprocess.check_call(
-        ["gh", "release", "create", release_tag, "--notes", release_notes]
     )
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Release a new version."""
-    # Parse command-line arguments.
-    parser = create_parser()
+    """Prepare a local release or a completely isolated rehearsal.
+
+    Parameters
+    ----------
+    argv
+        Canonical version without ``v``, optionally ``--notes`` for a preview or
+        ``--dry-run`` for validation without changing caller refs or files.
+
+    Returns
+    -------
+    int
+        Zero after successful preparation. Failures retain the isolated checkout
+        for inspection and propagate without pushing or publishing.
+    """
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("version")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--dry-run", action="store_true")
+    mode.add_argument("--notes", action="store_true")
     args = parser.parse_args(argv)
-
-    # Check whether the local repository is dirty or clean.
-    check_repository()
-    version = str(args.version)
-    release_branch = f"release/{version}"
-    base_branch = get_current_branch()
-
-    try:
-        # Create the release branch and switch to it.
-        subprocess.check_call(["git", "switch", "--create", release_branch])
-
-        # Update the changelog.
-        release_notes = get_release_notes(version)
-        update_changelog(version)
-
-        # Add all changes as the local repository was clean.
-        subprocess.check_call(["git", "add", "--all", "."])
-
-        # Commit changes.
-        message = f"chore: prepare release {version}"
-        subprocess.check_call(["git", "commit", "--no-verify", "--message", message])
-
-        # Create the release tag.
-        release_tag = create_release_tag(version)
-
-        if args.dry_run:
-            # Remove the release tag.
-            subprocess.check_call(["git", "tag", "--delete", release_tag])
-            return 0
-
-        # Push the release branch and the release tag to the origin remote.
-        # The local release branch is pushed to the remote main branch.
-        subprocess.check_call(
-            ["git", "push", "--atomic", "origin", f"{release_branch}:main", release_tag]
+    tag = f"v{args.version}"
+    version = tag_version(tag)
+    project = Path(git(Path.cwd(), "rev-parse", "--show-toplevel"))
+    if args.notes:
+        print(release_notes(project, str(version)))
+        return 0
+    head, remote = preflight(project)
+    available_version(project, tag)
+    with isolated(project, head) as checkout:
+        if version.is_prerelease:
+            print(release_notes(checkout, str(version)))
+        else:
+            subprocess.run(
+                [
+                    "uv",
+                    "run",
+                    "--group",
+                    "release",
+                    "towncrier",
+                    "build",
+                    "--version",
+                    str(version),
+                    "--yes",
+                ],
+                cwd=checkout,
+                check=True,
+            )
+            git(checkout, "add", "--all", "--", "CHANGELOG.md", "changelog.d")
+        tree = git(checkout, "write-tree")
+        check.source_checks(checkout)
+        if git(checkout, "write-tree") != tree or git(checkout, "diff", "--name-only"):
+            raise RuntimeError("Checks modified the prepared release")
+        if not version.is_prerelease:
+            git(
+                checkout,
+                "-c",
+                "core.hooksPath=/dev/null",
+                "commit",
+                "-m",
+                f"chore: prepare release {version}",
+            )
+        clean(checkout)
+        git(checkout, "tag", "--annotate", tag, "--message", f"Release {version}")
+        check.package_checks(checkout, tag)
+        clean(checkout)
+        unchanged(project, head, remote)
+        available_version(project, tag)
+        if not args.dry_run:
+            advance(project, checkout, head, remote)
+            git(
+                project,
+                "fetch",
+                "--no-write-fetch-head",
+                "--no-tags",
+                str(checkout),
+                f"refs/tags/{tag}:refs/tags/{tag}",
+            )
+    if args.dry_run:
+        print("Release rehearsal passed; caller files and refs unchanged")
+    else:
+        print(
+            f"Prepared {tag} locally. To push explicitly:\n"
+            f"git push --atomic origin refs/heads/master:refs/heads/master refs/tags/{tag}:refs/tags/{tag}\n"
+            f"Then publish explicitly: make publish TAG={tag}"
         )
-
-        # Create the GitHub release.
-        create_release(release_tag, release_notes)
-
-    finally:
-        # Switch back to the base Git branch.
-        subprocess.check_call(["git", "checkout", base_branch])
-        # Remove the release branch.
-        subprocess.check_call(["git", "branch", "--delete", "--force", release_branch])
-
-    # Fetch all changes from the remote main branch.
-    subprocess.check_call(["git", "fetch", "origin", "main"])
-    # Switch to the main branch.
-    subprocess.check_call(["git", "switch", "main"])
-    # Pull changes from the remote main branch.
-    subprocess.check_call(["git", "pull", "--ff-only", "origin", "main"])
-
     return 0
 
 

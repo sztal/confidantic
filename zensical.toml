@@ -6,16 +6,54 @@ site_url = "https://sztal.github.io/confidantic/"
 copyright = "Copyright &copy; 2026 Szymon Talaga"
 repo_url =  "https://github.com/sztal/confidantic"
 repo_name = "sztal/confidantic"
-edit_uri = "edit/main/docs/"
+edit_uri = "edit/master/docs/"
 nav = [
-  { "Home" = [
-    "index.md",
-    { "Release notes" = "changelog.md" },
-    { "License" = "license.md" },
+  { "Home" = "index.md" },
+  { "Getting started" = [
+    { "Installation" = "getting-started/installation.md" },
+    { "First application" = "getting-started/first-application.md" },
+  ] },
+  { "User guide" = [
+    { "Settings and updates" = "guide/settings.md" },
+    { "Sources" = "guide/sources.md" },
+    { "Command-line interfaces" = "guide/cli.md" },
+    { "Nested settings" = "guide/nested-settings.md" },
+    { "Input parsing" = "guide/input-parsing.md" },
+    { "Files" = "guide/files.md" },
+    { "Factories" = "guide/factories.md" },
+    { "Descriptions and display" = "guide/descriptions-and-display.md" },
+  ] },
+  { "Concepts" = [
+    { "Values and inheritance" = "concepts/values-and-inheritance.md" },
+    { "Configuration and objects" = "concepts/configuration-and-objects.md" },
+    { "State and lifetimes" = "concepts/state-and-lifetimes.md" },
+  ] },
+  { "Architecture" = [
+    { "Overview" = "architecture/overview.md" },
+    { "Settings lifecycle" = "architecture/settings-lifecycle.md" },
+    { "Factory lifecycle" = "architecture/factory-lifecycle.md" },
+  ] },
+  { "Recipes" = [
+    { "Contexts" = "recipes/contexts.md" },
+    { "Configured objects" = "recipes/configurable-objects.md" },
+    { "Paths" = "recipes/paths.md" },
+    { "Logging" = "recipes/logging.md" },
+  ] },
+  { "Advanced" = [
+    { "Custom sources" = "advanced/custom-sources.md" },
+    { "Dynamic template CLIs" = "advanced/dynamic-template-clis.md" },
+    { "Object directives and portability" = "advanced/object-directives-and-portability.md" },
   ] },
   { "Reference" = [
-    "reference/index.md",
+    { "Overview" = "reference/index.md" },
     { "API" = "reference/api.md" },
+    { "Options" = "reference/options.md" },
+    { "Annotations" = "reference/annotations.md" },
+  ] },
+  { "Project" = [
+    { "Release notes" = "changelog.md" },
+    { "Merging and releasing" = "releasing.md" },
+    { "License" = "license.md" },
   ] },
 ]
 
@@ -61,14 +99,35 @@ icon = "fontawesome/brands/github"
 link = "https://github.com/sztal/confidantic"
 
 [project.markdown_extensions]
+admonition = {}
+attr_list = {}
+def_list = {}
+footnotes = {}
+md_in_html = {}
+toc = { permalink = true }
+pymdownx.details = {}
 pymdownx.highlight = { anchor_linenums = true, pygments_lang_class = true }
+pymdownx.inlinehilite = {}
 pymdownx.snippets = {}
-pymdownx.superfences = {}
+pymdownx.superfences.custom_fences = [
+  { name = "mermaid", class = "mermaid", format = "pymdownx.superfences.fence_code_format" },
+]
 pymdownx.tabbed = { alternate_style = true }
 
+[project.validation]
+invalid_links = true
+invalid_link_anchors = true
+
+[project.plugins.mkdocstrings]
+enable_inventory = true
+
 [project.plugins.mkdocstrings.handlers.python]
+paths = ["."]
 inventories = [
   "https://docs.python.org/3/objects.inv",
+  # Pydantic's inventory also includes Pydantic Settings.
+  "https://pydantic.dev/docs/validation/latest/objects.inv",
+  "https://rich.readthedocs.io/en/stable/objects.inv",
 ]
 
 [project.plugins.mkdocstrings.handlers.python.options]
@@ -80,7 +139,7 @@ type_parameter_headings = true
 inherited_members = true
 members_order = "source"
 summary = true
-docstring_style = "google"
+docstring_style = "numpy"
 docstring_options = { ignore_init_summary = true }
 docstring_section_style = "table"
 merge_init_into_class = true

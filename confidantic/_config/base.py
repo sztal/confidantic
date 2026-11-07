@@ -656,6 +656,8 @@ class BaseConfig(BaseSettings):
         header: bool = True,
         describe: bool = True,
         colors: bool = False,
+        *,
+        respect_field_repr: bool = True,
     ) -> None: ...
 
     @classmethod
@@ -666,6 +668,8 @@ class BaseConfig(BaseSettings):
         header: bool = True,
         describe: bool = True,
         colors: bool = False,
+        *,
+        respect_field_repr: bool = True,
     ) -> "Table": ...
 
     @classmethod
@@ -676,6 +680,8 @@ class BaseConfig(BaseSettings):
         header: bool = True,
         describe: bool = True,
         colors: bool = False,
+        *,
+        respect_field_repr: bool = True,
     ) -> str: ...
 
     @classmethod
@@ -685,6 +691,8 @@ class BaseConfig(BaseSettings):
         header: bool = True,
         describe: bool = True,
         colors: bool = False,
+        *,
+        respect_field_repr: bool = True,
     ) -> "Table | str | None":
         """Present the configuration options as a Rich table.
 
@@ -707,6 +715,9 @@ class BaseConfig(BaseSettings):
             escapes when supported. Rich still honors environment controls such
             as ``NO_COLOR`` and ``TERM``. A returned table is styled but its
             eventual rendering is controlled by the caller's console.
+        respect_field_repr
+            Whether to omit fields configured with ``repr=False``. Set to
+            ``False`` to include all declared fields.
 
         Returns
         -------
@@ -723,6 +734,10 @@ class BaseConfig(BaseSettings):
 
         Notes
         -----
+        Filtering applies only to top-level fields. Nested values retain their
+        own representations, and serialization exclusions do not affect this
+        table. This option is not a general secrecy guarantee.
+
         Rich return types are imported only for static type checking. Runtime
         evaluation of these annotations requires a namespace containing Table.
         """
@@ -735,7 +750,13 @@ class BaseConfig(BaseSettings):
                 "model_info() requires Rich; install confidantic[rich]"
             ) from error
 
-        renderer = _InfoRenderer(cls, header=header, describe=describe, colors=colors)
+        renderer = _InfoRenderer(
+            cls,
+            header=header,
+            describe=describe,
+            colors=colors,
+            respect_field_repr=respect_field_repr,
+        )
         table = renderer.build_table(types=True, defaults=True)
         return renderer.render(table, output=output)
 
@@ -747,6 +768,8 @@ class BaseConfig(BaseSettings):
         describe: bool = True,
         colors: bool = False,
         types: bool = False,
+        *,
+        respect_field_repr: bool = True,
     ) -> None: ...
 
     @overload
@@ -757,6 +780,8 @@ class BaseConfig(BaseSettings):
         describe: bool = True,
         colors: bool = False,
         types: bool = False,
+        *,
+        respect_field_repr: bool = True,
     ) -> "Table": ...
 
     @overload
@@ -767,6 +792,8 @@ class BaseConfig(BaseSettings):
         describe: bool = True,
         colors: bool = False,
         types: bool = False,
+        *,
+        respect_field_repr: bool = True,
     ) -> str: ...
 
     def info(
@@ -776,6 +803,8 @@ class BaseConfig(BaseSettings):
         describe: bool = True,
         colors: bool = False,
         types: bool = False,
+        *,
+        respect_field_repr: bool = True,
     ) -> "Table | str | None":
         """Present the configuration fields and current values as a Rich table.
 
@@ -801,6 +830,9 @@ class BaseConfig(BaseSettings):
             eventual rendering is controlled by the caller's console.
         types
             Whether to include the ``Type`` column.
+        respect_field_repr
+            Whether to omit fields configured with ``repr=False``. Set to
+            ``False`` to include all declared fields.
 
         Returns
         -------
@@ -817,6 +849,10 @@ class BaseConfig(BaseSettings):
 
         Notes
         -----
+        Filtering applies only to top-level fields. Nested values retain their
+        own representations, and serialization exclusions do not affect this
+        table. This option is not a general secrecy guarantee.
+
         Rich return types are imported only for static type checking. Runtime
         evaluation of these annotations requires a namespace containing Table.
         """
@@ -830,9 +866,14 @@ class BaseConfig(BaseSettings):
             ) from error
 
         cls = type(self)
-        renderer = _InfoRenderer(cls, header=header, describe=describe, colors=colors)
-        values = {name: getattr(self, name) for name in cls.model_fields}
-        table = renderer.build_table(values=values, types=types, defaults=False)
+        renderer = _InfoRenderer(
+            cls,
+            header=header,
+            describe=describe,
+            colors=colors,
+            respect_field_repr=respect_field_repr,
+        )
+        table = renderer.build_table(instance=self, types=types, defaults=False)
         return renderer.render(table, output=output)
 
     @classmethod

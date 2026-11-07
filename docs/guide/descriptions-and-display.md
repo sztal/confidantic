@@ -150,5 +150,11 @@ The table shows `name` as `orders` and `retries` as `5`; its layout adapts to th
 terminal. `model_info()` describes declared fields rather than one instance's
 stored values. The table output uses [rich.table.Table][].
 
+Both methods omit top-level fields declared with `Field(repr=False)` by default.
+Pass `respect_field_repr=False` to include those fields. This option only controls
+table rows; nested values retain their own representations, and `Field(exclude=True)`
+controls serialization rather than display. Repr filtering is not a general
+secrecy guarantee.
+
 For plain Python data, `model_dump()` needs no display extra. To find an input's
 origin, use [source provenance](sources.md#explain-a-values-origin).

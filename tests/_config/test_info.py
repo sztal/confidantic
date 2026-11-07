@@ -233,3 +233,76 @@ def test_info_controls_table_and_output(
     invalid_output: Any = "invalid"
     with pytest.raises(ValueError, match="Invalid output mode: 'invalid'"):
         config.info(output=invalid_output)
+
+
+@pytest.mark.parametrize("method_name", ["model_info", "info"])
+@pytest.mark.parametrize("output", ["table", "string", "print"])
+@pytest.mark.parametrize("respect_field_repr", [None, True, False])
+def test_display_respects_field_repr(
+    method_name: str,
+    output: str,
+    respect_field_repr: bool | None,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Repr filtering controls top-level fields independently of serialization."""
+
+    class Nested(BaseModel):
+        nested_visible: str = "nested-value"
+        nested_hidden: str = Field("nested-secret", repr=False)
+
+    class ParentConfig(BaseConfig):
+        masked_field: str = Field("hidden-default", repr=False)
+
+    class Config(ParentConfig):
+        visible: str = "visible-value"
+        excluded: str = Field("excluded-value", exclude=True)
+        nested: Nested = Nested()
+
+    config = Config(masked_field="hidden-current")
+    target = Config if method_name == "model_info" else config
+    method = getattr(target, method_name)
+    options = (
+        {} if respect_field_repr is None else {"respect_field_repr": respect_field_repr}
+    )
+    result = method(output=output, **options)
+    if output == "table":
+        buffer = StringIO()
+        Console(file=buffer, width=120).print(result)
+        rendered = buffer.getvalue()
+    elif output == "print":
+        assert result is None
+        rendered = capsys.readouterr().out
+    else:
+        rendered = result
+
+    assert "visible-value" in rendered
+    assert "excluded-value" in rendered
+    assert "nested-value" in rendered
+    assert "nested-secret" not in rendered
+    hidden_value = "hidden-default" if method_name == "model_info" else "hidden-current"
+    assert ("masked_field" in rendered) is (respect_field_repr is False)
+    assert (hidden_value in rendered) is (respect_field_repr is False)
+
+
+def test_info_does_not_access_repr_hidden_field(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Omitted values are not accessed before filtering."""
+
+    class Config(BaseConfig):
+        visible: str = "visible-value"
+        hidden: str = Field("hidden-value", repr=False)
+
+    config = Config()
+    original_getattribute = Config.__getattribute__
+
+    def getattribute(self: Config, name: str) -> Any:
+        if name == "hidden":
+            raise AssertionError("hidden field was accessed")
+        return original_getattribute(self, name)
+
+    monkeypatch.setattr(Config, "__getattribute__", getattribute)
+
+    assert "visible-value" in config.info(output="string")
+    with pytest.raises(AssertionError, match="hidden field was accessed"):
+        config.info(output="string", respect_field_repr=False)

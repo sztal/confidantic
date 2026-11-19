@@ -67,10 +67,9 @@ jobs:
       fail-fast: false
       matrix:
         python_version:
+          - '3.15'
           - '3.14'
           - '3.13'
-          - '3.12'
-          - '3.11'
     steps:
       - uses: actions/checkout@v5
         with:
@@ -81,20 +80,15 @@ jobs:
         with:
           enable-cache: true
           github-token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Install Nox
-        run: >-
-          uv tool install nox
-          --python-preference only-managed
-          --python 3.14
       - name: Set up the test suite
         run: >-
-          nox
+          uv run --python 3.14 noxfile.py
           --install-only
           --error-on-missing-interpreters
           --session tests-${{ matrix.python_version }}
       - name: Run the test suite
         run: >-
-          nox
+          uv run --python 3.14 noxfile.py
           --no-install
           --session tests-${{ matrix.python_version }}
         env:

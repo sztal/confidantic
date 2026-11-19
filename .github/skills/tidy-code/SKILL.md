@@ -90,7 +90,7 @@ mechanically. Keep existing relative order when it is already coherent.
 
 ## Lazy import opportunities
 
-Confidantic supports Python 3.11 and later. A newer development interpreter does
+Confidantic supports Python 3.13 and later. A newer development interpreter does
 not permit introducing Python 3.15 `lazy import` syntax into package code.
 
 For Python packages targeting Python 3.15 or later, also check whether imports

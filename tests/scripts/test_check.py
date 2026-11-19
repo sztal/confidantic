@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 import yaml
 
+import noxfile
 from scripts import check
 
 
@@ -50,3 +51,12 @@ def test_ci_honors_the_same_typecheck_policy_after_lint() -> None:
     assert not policy_step.get("continue-on-error", False)
     assert not job.get("continue-on-error", False)
     assert any(step.get("run") == "git diff --exit-code" for step in job["steps"])
+
+
+def test_ci_matrix_matches_nox_sessions() -> None:
+    root = Path(__file__).resolve().parents[2]
+    workflow = yaml.safe_load((root / ".github/workflows/checks.yaml").read_text())
+    job = workflow["jobs"]["tests"]
+    versions = job["strategy"]["matrix"]["python_version"]
+    assert "3.15" in versions
+    assert set(versions) == set(noxfile.SUPPORTED_PYTHON_VERSIONS)

@@ -52,7 +52,7 @@ when your application needs them.
 
 ## Installation
 
-The core package requires Python 3.11 or later. See
+The core package requires Python 3.13 or later. See
 [installation and optional extras](getting-started/installation.md).
 
 ## Frozen configuration

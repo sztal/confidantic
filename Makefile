@@ -53,7 +53,7 @@ install:
 	uv sync --group dev
 
 nox:
-	uv run nox -s tests
+	uv run noxfile.py -s tests
 
 test:
 	uv run pytest

@@ -3,13 +3,12 @@
 import sys
 from collections.abc import Callable
 from types import ModuleType
-from typing import Annotated, Any, ForwardRef, NewType, Optional, Union
+from typing import Annotated, Any, ForwardRef, NewType, Optional, TypedDict, Union
 
 import pytest
 from pydantic import Field, TypeAdapter, ValidationError, create_model
 from pydantic.errors import PydanticUserError
 from pydantic_settings import InitSettingsSource
-from typing_extensions import TypedDict
 
 from confidantic import BaseConfig, ClassDefaultsSource, Factory
 from confidantic._config._factory_build import _FactoryModelBuilder

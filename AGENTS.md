@@ -21,7 +21,7 @@
 - Repository: https://github.com/sztal/confidantic
 
 Configuration and CLIs for Python projects based on Pydantic and Pydantic Settings.
-The package requires Python 3.11 or later; the repository's default interpreter
+The package requires Python 3.13 or later; the repository's default interpreter
 is read from `.python-version` (currently Python 3.15).
 
 The package root re-exports `BaseConfig`, `ClassDefaultsSource`,

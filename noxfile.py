@@ -1,5 +1,5 @@
 # /// script
-# requires-python = ">=3.11"
+# requires-python = ">=3.13"
 # dependencies = [
 #   "nox[uv]>=2025.2.9",
 #   "uv>=0.8.6",

@@ -38,7 +38,8 @@ for a step-by-step introduction.
 
 ## Installation
 
-Confidantic requires Python 3.11 or later. Install with pip:
+Confidantic requires Python 3.13 or later. CI tests Python 3.13, 3.14, and 3.15.
+Install with pip:
 
 ```console
 python -m pip install confidantic

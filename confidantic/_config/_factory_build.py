@@ -161,7 +161,7 @@ class _FactoryModelBuilder:
                 namespace.update(vars(module))
         namespace.update(getattr(init, "__globals__", {}))
         namespace.update(self.types_namespace)
-        # Distinct locals force cached ForwardRefs to re-evaluate on Python 3.11-3.13.
+        # Distinct locals force cached ForwardRefs to re-evaluate on Python 3.13.
         local_namespace = namespace.copy()
         parameters = _constructor_signature(self.target).parameters
         named_parameters = {

@@ -35,7 +35,7 @@ change and agent guidance may be stale. Read [the agent guide](../../../AGENTS.m
 
 Keep later updates limited to agent guidance unless the user explicitly requests
 related tooling or documentation changes. Do not change package behavior.
-The package supports Python 3.11 and later; read the development interpreter
+The package supports Python 3.13 and later; read the development interpreter
 from `.python-version` (currently 3.15). Use `uv sync --group dev` and add the
 `docs` group for documentation work.
 

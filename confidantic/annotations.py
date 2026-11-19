@@ -19,7 +19,6 @@ from pydantic.functional_validators import (
     WrapValidator,
 )
 from pydantic_settings import NoDecode
-from typing_extensions import TypeVar as TypeVarWithDefault
 
 from confidantic.utils import _call_mapping, get_import_string, import_from_string, make
 
@@ -39,7 +38,7 @@ __all__ = (
 )
 
 T = TypeVar("T")
-P = TypeVarWithDefault("P", bound=Path, default=Path)
+P = TypeVar("P", bound=Path, default=Path)
 
 
 def get_proper_args(annotation: Any) -> Iterator[type]:

@@ -1,6 +1,6 @@
 # Install Confidantic
 
-Use Python 3.11 or later. A virtual environment keeps your application's
+Use Python 3.13 or later. A virtual environment keeps your application's
 packages separate from other projects.
 
 === "pip"

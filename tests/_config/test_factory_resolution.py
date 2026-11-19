@@ -14,7 +14,7 @@ from confidantic._config._factory_resolution import (
 from tests._config.factory_targets import Child, SimpleTarget, UnrelatedTarget
 
 
-def test_model_resolve_resolves_nested_base_models() -> None:
+def test_instance_resolves_nested_base_models() -> None:
     """Resolution updates nested BaseModel annotations containing factories."""
     child_type = Factory.model_from(Child)
 
@@ -28,7 +28,7 @@ def test_model_resolve_resolves_nested_base_models() -> None:
             self.payload = payload
 
     payload = Payload(child=child_type(value=3))
-    resolved = Factory.model_from(Parent)(payload=payload).model_resolve()
+    resolved = Factory.model_from(Parent)(payload=payload).instance()
 
     assert isinstance(resolved.payload.child, Child)
     assert resolved.payload.child.value == 3
@@ -106,7 +106,7 @@ def test_base_config_resolution_rebuilds_a_factory_root(name: str | None) -> Non
 
     # Pydantic already warns when this path overrides the inherited field.
     with pytest.warns(UserWarning, match='Field name "child".*shadows an attribute'):
-        result = BaseConfig.model_resolve(config, name=name)
+        result = config.model_resolve(name=name)
 
     assert isinstance(result, Factory)
     assert result.factory_target is Parent
@@ -127,7 +127,7 @@ def test_base_config_model_resolve_resolves_factory_values() -> None:
     assert isinstance(resolved.child, Child)
 
 
-def test_model_resolve_preserves_nested_model_extra_values() -> None:
+def test_instance_preserves_nested_model_extra_values() -> None:
     """Nested model extras survive factory resolution alongside resolved fields."""
 
     class Payload(BaseModel):
@@ -143,7 +143,7 @@ def test_model_resolve_preserves_nested_model_extra_values() -> None:
             self.payload = payload
 
     payload = Payload(child=Factory.model_from(Child)(value=7), label="extra")
-    resolved = Factory.model_from(Parent)(payload=payload).model_resolve()
+    resolved = Factory.model_from(Parent)(payload=payload).instance()
 
     assert isinstance(resolved.payload.child, Child)
     assert resolved.payload.child.value == 7
@@ -185,7 +185,7 @@ def test_base_config_model_resolve_without_factories_returns_shallow_copy() -> N
     assert resolved.value == 1
 
 
-def test_model_resolve_resolves_nested_factory_configs() -> None:
+def test_instance_resolves_nested_factory_configs() -> None:
     """Direct resolution recursively resolves nested factories."""
 
     class Parent:
@@ -199,13 +199,13 @@ def test_model_resolve_resolves_nested_factory_configs() -> None:
     parent = Factory.model_from(Parent)(
         child=child_config(value=1),
         children=[child_config(value=2), child_config(value=3)],
-    ).model_resolve()
+    ).instance()
 
     assert isinstance(parent.child, Child)
     assert [child.value for child in parent.children] == [2, 3]
 
 
-def test_model_resolve_resolves_nested_factories_in_containers() -> None:
+def test_instance_resolves_nested_factories_in_containers() -> None:
     """Nested factories are resolved in mappings and immutable containers."""
 
     class Parent:
@@ -230,7 +230,7 @@ def test_model_resolve_resolves_nested_factories_in_containers() -> None:
             set_value={child_config(value=3)},
             frozenset_value=frozenset({child_config(value=4)}),
         )
-        .model_resolve()
+        .instance()
     )
 
     assert parent.mapping["child"].value == 1
@@ -257,13 +257,13 @@ def test_factory_accepts_nested_factories_in_set_inputs() -> None:
         frozen_children=frozenset({child_config(value=2)}),
     )
 
-    parent = config.model_resolve()
+    parent = config.instance()
 
     assert {child.value for child in parent.children} == {1}
     assert {child.value for child in parent.frozen_children} == {2}
 
 
-def test_model_resolve_rejects_cyclic_values() -> None:
+def test_instance_rejects_cyclic_values() -> None:
     """Cyclic nested values cannot be recursively resolved."""
 
     class Parent:
@@ -275,7 +275,7 @@ def test_model_resolve_rejects_cyclic_values() -> None:
     config = Factory.model_from(Parent).model_construct(payload=payload)
 
     with pytest.raises(ValueError, match="cyclic values cannot be resolved"):
-        config.model_resolve()
+        config.instance()
 
 
 def test_resolution_constructs_repeated_factory_references_independently() -> None:
@@ -294,7 +294,7 @@ def test_resolution_constructs_repeated_factory_references_independently() -> No
     child = Factory.instance_from(Target)
     config = Factory.model_from(Parent).model_construct(children=[child, child])
 
-    result = config.model_resolve()
+    result = config.instance()
 
     assert calls == [3, 3]
     assert result.children[0] is not result.children[1]
@@ -335,7 +335,7 @@ def test_resolution_normalizes_container_subclasses(container: type[Any]) -> Non
     payload = subtype([(child_type, child_type)] if container is dict else [child_type])
     config = Factory.model_from(Parent).model_construct(payload=payload)
 
-    result = config.model_resolve().payload
+    result = config.instance().payload
 
     assert type(result) is container
     assert all(isinstance(item, Child) for item in result)
@@ -405,7 +405,7 @@ def test_resolution_preserves_arbitrary_objects_and_unchecked_scalars(
         else model(value=1, token=token).model_copy(update={"value": "unchecked"})
     )
 
-    result = config.model_resolve()
+    result = config.instance()
 
     assert result.value == "unchecked"
     assert result.token is token
@@ -492,3 +492,80 @@ def test_recursive_resolution_keeps_distinct_same_named_types_and_metadata() -> 
         _ResolvedModelTypes().resolve_annotation(annotation)
         == Annotated[list[SimpleTarget], Factory[UnrelatedTarget]]
     )
+
+
+def test_instance_binds_before_resolving_and_skips_overridden_dependencies() -> None:
+    """Invalid calls and overridden inputs never construct unused dependencies."""
+
+    class Broken:
+        def __init__(self) -> None:
+            raise RuntimeError("dependency constructed")
+
+    class Target:
+        def __init__(self, runtime: Any, child: Any) -> None:
+            self.runtime = runtime
+            self.child = child
+
+    config = Factory.instance_from(
+        Target, __exclude__={"runtime"}, child=Factory.instance_from(Broken)
+    )
+    with pytest.raises(TypeError, match="runtime"):
+        config.instance()
+    with pytest.raises(TypeError, match="unexpected"):
+        config.instance(1, unexpected=2)
+    assert config.instance(1, child="override").child == "override"
+    with pytest.raises(RuntimeError, match="dependency constructed"):
+        config.instance(1)
+
+
+def test_resolved_factory_constructs_only_root_after_preparing_dependencies() -> None:
+    """Preparing a factory builds dependencies while preserving its root target."""
+    calls: list[str] = []
+
+    class Dependency:
+        def __init__(self) -> None:
+            calls.append("dependency")
+
+    class Target:
+        def __init__(self, child: Any) -> None:
+            calls.append("target")
+            self.child = child
+
+    config = Factory.instance_from(Target, child=Factory.instance_from(Dependency))
+    prepared = config.model_resolve()
+    assert calls == ["dependency"]
+    result = prepared.instance()
+    assert result.child is prepared.child
+    assert calls == ["dependency", "target"]
+    assert isinstance(config.child, Factory)
+
+
+def test_nested_partial_factory_requires_its_own_runtime_inputs() -> None:
+    """Outer construction does not route root runtime arguments into children."""
+
+    class Target:
+        def __init__(self, runtime: Any) -> None:
+            self.runtime = runtime
+
+    class Container(BaseConfig):
+        child: Factory[Target]
+
+    child = Factory.instance_from(Target, __include__=set())
+    assert isinstance(child.model_resolve(), Factory)
+    assert child.instance(runtime=1).runtime == 1
+    with pytest.raises(TypeError, match="runtime"):
+        Container(child=child).model_resolve()
+
+
+@pytest.mark.parametrize("entry", ["instance", "model_resolve"])
+def test_factory_root_cycles_share_traversal_state(entry: str) -> None:
+    """A self-reference is rejected through either public entry point."""
+
+    class Target:
+        def __init__(self, child: Any) -> None:
+            self.child = child
+
+    config = Factory.instance_from(Target, child=None)
+    object.__setattr__(config, "child", config)
+    with pytest.raises(ValueError, match="cyclic"):
+        getattr(config, entry)()

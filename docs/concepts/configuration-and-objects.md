@@ -25,7 +25,8 @@ Use the smallest abstraction that fits the task:
 A factory describes a construction that will happen later. The target class
 supplies constructor fields; a template instance can supply concrete defaults.
 The generated factory class is a configuration schema, and its instance contains
-validated constructor inputs. Calling `model_resolve()` performs construction.
+validated constructor inputs. Calling `instance()` performs construction. The inherited `model_resolve()`
+returns a model copy with nested factories resolved.
 
 This separation lets an application validate inputs before opening resources.
 It does not guarantee that construction succeeds: the target can still fail, for

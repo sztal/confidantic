@@ -32,10 +32,19 @@ importable module attribute.
 configuration inputs. They are subject to normal settings precedence. Recursive
 generation and constructor arguments use `model_from` followed by instantiation.
 
-`model_resolve()` delegates to [\_factory_resolution](_factory_resolution.md) under
-CLI suppression. Only `factory_fields` are forwarded as constructor keyword arguments;
-additional fields on a Factory subclass are excluded. Every call can execute target
-constructors. Updates must be made before resolution.
+`instance(*args, **kwargs)` delegates to [\_factory_resolution](_factory_resolution.md)
+under CLI suppression. Runtime bindings override configured `factory_fields` before
+recursive traversal. Additional model fields are excluded. Runtime values receive
+no additional field validation; use `copy(...).instance()` for validated updates.
+
+`model_resolve()` is inherited from BaseConfig and preserves the root model while
+constructing nested factories. Factory instances remain non-callable, including
+when supplied to `Make[Factory[T]]` or `Call[Factory[T]]` validation.
+
+`__include__` and `__exclude__` select root constructor fields using name sets,
+name predicates, or (resolved annotation, name) predicates. They are mutually
+exclusive, persist through target conversions, and do not propagate recursively.
+Excluded required inputs must be supplied to `instance()`.
 
 ## Serialization and preservation rules
 

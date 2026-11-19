@@ -146,7 +146,7 @@ class Service:
 
 ServiceConfig = Factory.model_from(Service)
 config = ServiceConfig(host="api.example.com", port=8080)
-service = config.model_resolve()
+service = config.instance()
 print(service)
 ```
 
@@ -155,7 +155,7 @@ Service(host='api.example.com', port=8080)
 ```
 
 `model_from()` generates a configuration class, instantiating it validates the
-inputs, and `model_resolve()` constructs the service. See the
+inputs, and `instance()` constructs the service. See the
 [factory guide](https://sztal.github.io/confidantic/guide/factories/).
 
 ### Templates
@@ -167,7 +167,7 @@ and `Factory` from the preceding example:
 template = Service("api.example.com", 8000)
 TemplateConfig = Factory.model_from(template)
 config = TemplateConfig(port=9000)
-service = config.model_resolve()
+service = config.instance()
 print(service)
 print(template)
 ```

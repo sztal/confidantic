@@ -22,14 +22,14 @@ the next excerpt explicitly constructs the target:
 ```python
 config = ServiceConfig(host="api.example.com", port=8080)
 assert isinstance(config, Factory)
-service = config.model_resolve()
+service = config.instance()
 assert isinstance(service, Service)
 assert service == Service("api.example.com", 8080)
 print(service)
 ```
 
 Generating ServiceConfig creates a configuration class. Instantiating it validates
-settings. Calling model_resolve builds the runtime Service from constructor fields.
+settings. Calling instance builds the runtime Service from constructor fields.
 
 ## Capture template defaults
 

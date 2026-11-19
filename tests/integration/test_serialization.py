@@ -130,7 +130,7 @@ def test_generated_factories_round_trip(tmp_path: Path, from_instance: bool) -> 
         blob = cloudpickle.dumps(objects)
         restored = cloudpickle.loads(blob)
         assert restored[0] is Config
-        assert restored[1].model_resolve().value == 7
+        assert restored[1].instance().value == 7
         assert restored[2].model_resolve().target.value == 8
         Path("factory.pkl").write_bytes(blob)
     """.replace("FROM_INSTANCE", repr(from_instance))
@@ -141,8 +141,8 @@ def test_generated_factories_round_trip(tmp_path: Path, from_instance: bool) -> 
         Config, instance, container, specialized = cloudpickle.loads(Path("factory.pkl").read_bytes())
         assert issubclass(Config, specialized)
         assert type(instance) is Config
-        assert instance.model_resolve().value == 7
-        assert Config(value=9).model_resolve().value == 9
+        assert instance.instance().value == 7
+        assert Config(value=9).instance().value == 9
         assert container.model_resolve().target.value == 8
         assert type(container)(target={"value": 11}).model_resolve().target.value == 11
         first, second = Config(), Config()
@@ -179,9 +179,9 @@ def test_recursive_factory_serialization_and_loky_transfer(tmp_path: Path) -> No
         blob = cloudpickle.dumps((Config, Config()))
         restored_type, restored = cloudpickle.loads(blob)
         assert restored_type is Config
-        assert restored.model_resolve().child.items == [1]
+        assert restored.instance().child.items == [1]
         assert Parallel(n_jobs=2)(
-            delayed(lambda config: config.model_resolve().child.items)(Config())
+            delayed(lambda config: config.instance().child.items)(Config())
             for _ in range(2)
         ) == [[1], [1]]
         Path("recursive.pkl").write_bytes(blob)
@@ -193,11 +193,11 @@ def test_recursive_factory_serialization_and_loky_transfer(tmp_path: Path) -> No
         from pathlib import Path
         import cloudpickle
         Config, instance = cloudpickle.loads(Path("recursive.pkl").read_bytes())
-        assert instance.model_resolve().child.items == [1]
+        assert instance.instance().child.items == [1]
         first, second = Config(), Config()
         first.child.items.append(2)
-        assert first.model_resolve().child.items == [1, 2]
-        assert second.model_resolve().child.items == [1]
+        assert first.instance().child.items == [1, 2]
+        assert second.instance().child.items == [1]
         """,
         tmp_path,
     )
@@ -291,7 +291,7 @@ def test_hashable_mutable_factory_defaults_transfer(tmp_path: Path) -> None:
         first, second = model(), model()
         first.items.append(2)
         assert second.items == [1]
-        assert model().model_resolve().items == [1]
+        assert model().instance().items == [1]
         """,
         tmp_path,
     )
@@ -379,8 +379,8 @@ def test_factory_annotation_policy_survives_process_transfer(
         Config.model_rebuild(force=True)
         assert issubclass(Config, specialized)
         expected = 2 if STRICT else "2"
-        assert Config(value="2").model_resolve().value == expected
-        assert TypeAdapter(Config).validate_python(Target(expected)).model_resolve().value == expected
+        assert Config(value="2").instance().value == expected
+        assert TypeAdapter(Config).validate_python(Target(expected)).instance().value == expected
         assert Config._factory_strict is STRICT
         assert Config._factory_types_namespace == ({"Missing": int} if STRICT else {})
         try:
@@ -391,5 +391,51 @@ def test_factory_annotation_policy_survives_process_transfer(
             raise AssertionError("Generation policy leaked to the generic base")
         assert "type" in Config.model_json_schema()["properties"]["value"] if STRICT else "type" not in Config.model_json_schema()["properties"]["value"]
         """.replace("STRICT", repr(strict)),
+        tmp_path,
+    )
+
+
+@pytest.mark.parametrize("predicate", [False, True])
+def test_partial_factory_policy_survives_fresh_process_transfer(
+    tmp_path: Path, predicate: bool
+) -> None:
+    """Field selection and construction survive dynamic-model serialization."""
+    run_python(
+        """
+        from pathlib import Path
+        import cloudpickle
+        from confidantic import Factory
+
+        class Target:
+            def __init__(self, runtime: object, count: int = 1):
+                self.runtime = runtime
+                self.count = count
+
+        selector = (lambda annotation, name: name == "count") if PREDICATE else {"count"}
+        Config = Factory.model_from(Target, __include__=selector)
+        Path("partial.pkl").write_bytes(cloudpickle.dumps((Config, Config(count=3), Target)))
+        """.replace("PREDICATE", repr(predicate)),
+        tmp_path,
+    )
+    run_python(
+        """
+        from pathlib import Path
+        import cloudpickle
+        from pydantic import TypeAdapter
+        from confidantic import Factory
+
+        Config, config, Target = cloudpickle.loads(Path("partial.pkl").read_bytes())
+        assert Config.factory_fields == ("count",)
+        assert config.instance("runtime").count == 3
+        assert config.instance("runtime", count="raw").count == "raw"
+        prepared = config.model_resolve()
+        assert isinstance(prepared, Factory)
+        assert prepared.instance("prepared").runtime == "prepared"
+        Config.model_rebuild(force=True)
+        converted = TypeAdapter(Config).validate_python(Target("template", 7))
+        assert type(converted).factory_fields == ("count",)
+        assert converted.instance("override").count == 7
+        assert converted.instance("override").runtime == "override"
+        """,
         tmp_path,
     )

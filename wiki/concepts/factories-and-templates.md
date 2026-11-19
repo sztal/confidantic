@@ -32,12 +32,14 @@ It does not search individual collection elements or invent values for required
 fields. Generated nested annotations expose dependency fields to validation and CLI.
 
 `model_resolve()` always resolves supported nested factory values, regardless of
-whether generation used `__recursive__`. A Factory produces its target; a BaseConfig
-containing factories produces a validated model with resolved target annotations.
+whether generation used `__recursive__`. Both Factory and BaseConfig preserve their root model and produce a validated
+model with resolved target annotations. `Factory.instance()` constructs the target.
 Repeated factory occurrences construct separately, cyclic traversed values fail,
 and arbitrary object attributes are not traversed.
 
-Apply updates before resolution. Only constructor fields are passed to targets.
+Use `copy(...).instance()` for validated updates, or `instance(*args, **kwargs)`
+for raw runtime overrides. Only constructor fields and explicit runtime inputs
+are passed to targets.
 Mutable/copied defaults receive independent values, but this is not universal
 deep-copy semantics for arbitrary objects. Generated classes are not automatically
 importable; portable Make dumps of factories identify their targets instead.

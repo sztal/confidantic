@@ -1,15 +1,21 @@
 # confidantic.\_config.\_factory_resolution
 
 This module separates value traversal, model-type reconstruction, and factory
-discovery. A public `model_resolve` call owns one resolver; no resolver state survives
+discovery. A public `model_resolve` or `instance` call owns one resolver; no resolver state survives
 on the input model or generated schema.
 
 ## Value traversal
 
 `_FactoryResolver.resolve()` constructs factory-class values with defaults, then
 resolves constructor fields and calls their target. A root Factory can instead be
-treated as a model for an explicit BaseConfig-method call. Target return values are
+treated as a model by its inherited `model_resolve()` method. Target return values are
 returned directly rather than traversed a second time.
+
+`instance()` binds runtime arguments against the constructor signature and merges
+them over configured fields before traversal. Missing inputs and invalid bindings
+fail before dependencies are constructed. Omitted defaults remain untraversed;
+only positional gaps needed to form the call are filled. Nested factories share
+the active traversal state but receive no root runtime overrides.
 
 Pydantic model fields and extras are recursively resolved, then validated through a
 resolved model type using field names and aliases. Mappings become dictionaries;

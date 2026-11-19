@@ -35,7 +35,12 @@ from pydantic.errors import PydanticUserError
 from pydantic_core import PydanticUndefined
 
 from confidantic._config._settings import _CopiedDefault
-from confidantic._config.factory import Factory, _is_factory_type
+from confidantic._config.factory import (
+    Factory,
+    _constructor_signature,
+    _FieldSelector,
+    _is_factory_type,
+)
 
 
 class _FactoryModelBuilder:
@@ -56,6 +61,8 @@ class _FactoryModelBuilder:
         Reject unresolved annotations; otherwise use Any and include untyped fields.
     types_namespace
         Explicit names taking precedence over automatic annotation lookup.
+    include, exclude
+        Mutually exclusive selectors for this target's configured parameters.
 
     Notes
     -----
@@ -74,7 +81,48 @@ class _FactoryModelBuilder:
         recursive_selector: type[Any] | Callable[[Any], bool] | None,
         strict: bool = True,
         types_namespace: Mapping[str, Any] | None = None,
+        include: _FieldSelector | None = None,
+        exclude: _FieldSelector | None = None,
     ) -> None:
+        if include is not None and exclude is not None:
+            raise ValueError("__include__ and __exclude__ are mutually exclusive")
+        self.include = frozenset(include) if isinstance(include, set) else include
+        self.exclude = frozenset(exclude) if isinstance(exclude, set) else exclude
+        self.selector = self.include if self.include is not None else self.exclude
+        self.selector_arity = 1
+        if isinstance(self.selector, frozenset):
+            if not all(isinstance(name, str) for name in self.selector):
+                raise TypeError("field selector names must be strings")
+        elif self.selector is not None:
+            message = (
+                "field selector must accept exactly one or two positional arguments"
+            )
+            if not callable(self.selector):
+                raise TypeError(message)
+            try:
+                if sys.version_info >= (3, 14):
+                    from annotationlib import Format
+
+                    selector_signature = signature(
+                        self.selector, annotation_format=Format.FORWARDREF
+                    )
+                else:
+                    selector_signature = signature(self.selector)
+            except (TypeError, ValueError) as error:
+                raise TypeError(message) from error
+            arities = []
+            for count in (1, 2):
+                try:
+                    selector_signature.bind(*([None] * count))
+                except TypeError:
+                    continue
+                arities.append(count)
+            if len(arities) != 1 or any(
+                parameter.kind in {Parameter.VAR_POSITIONAL, Parameter.VAR_KEYWORD}
+                for parameter in selector_signature.parameters.values()
+            ):
+                raise TypeError(message)
+            self.selector_arity = arities[0]
         self.factory_type = factory_type
         self.target = target
         self.instance = instance
@@ -115,18 +163,26 @@ class _FactoryModelBuilder:
         namespace.update(self.types_namespace)
         # Distinct locals force cached ForwardRefs to re-evaluate on Python 3.11-3.13.
         local_namespace = namespace.copy()
-        if sys.version_info >= (3, 14):
-            from annotationlib import Format
-
-            parameters = signature(init, annotation_format=Format.FORWARDREF).parameters
-        else:
-            parameters = signature(init).parameters
+        parameters = _constructor_signature(self.target).parameters
+        named_parameters = {
+            name
+            for name, parameter in parameters.items()
+            if parameter.kind not in {Parameter.VAR_POSITIONAL, Parameter.VAR_KEYWORD}
+        }
+        if isinstance(self.selector, frozenset):
+            unknown = self.selector - named_parameters
+            if unknown:
+                raise ValueError(
+                    f"unknown constructor fields: {', '.join(sorted(unknown))}"
+                )
         fields: dict[str, tuple[Any, Any]] = {}
+        excluded: set[str] = set()
 
-        for index, (field_name, parameter) in enumerate(parameters.items()):
-            if index == 0 and field_name in {"self", "cls"}:
-                continue
+        for field_name, parameter in parameters.items():
             if parameter.kind in {Parameter.VAR_POSITIONAL, Parameter.VAR_KEYWORD}:
+                continue
+            if self.selector_arity == 1 and not self.selects(field_name):
+                excluded.add(field_name)
                 continue
             raw_annotation = (
                 Parameter.empty
@@ -135,13 +191,6 @@ class _FactoryModelBuilder:
             )
             if raw_annotation is Parameter.empty and self.strict:
                 continue
-            if parameter.kind is Parameter.POSITIONAL_ONLY:
-                msg = (
-                    f"{self.target.__qualname__}.__init__ parameter {field_name!r} "
-                    "is positional-only"
-                )
-                raise TypeError(msg)
-
             annotation = Any
             if raw_annotation is not Parameter.empty:
                 # Resolve only this field, without evaluating return/variadic hints
@@ -165,6 +214,19 @@ class _FactoryModelBuilder:
                         )
                         raise NameError(msg, name=error.name) from error
 
+            if self.selector_arity == 2 and not self.selects(field_name, annotation):
+                excluded.add(field_name)
+                continue
+            if parameter.kind is Parameter.POSITIONAL_ONLY:
+                msg = (
+                    f"{self.target.__qualname__}.__init__ parameter {field_name!r} "
+                    "is positional-only"
+                )
+                raise TypeError(msg)
+            if field_name == "instance":
+                raise TypeError(
+                    "exclude reserved field 'instance' and pass it to .instance(instance=...)"
+                )
             default = parameter.default
             if self.instance is not None and hasattr(self.instance, field_name):
                 default = getattr(self.instance, field_name)
@@ -199,6 +261,11 @@ class _FactoryModelBuilder:
                     default = Field(default_factory=_CopiedDefault(default))
             fields[field_name] = (annotation, default)
 
+        conflicts = excluded & self.factory_type.model_fields.keys()
+        if conflicts:
+            raise ValueError(
+                f"cannot exclude inherited model fields: {', '.join(sorted(conflicts))}"
+            )
         model = create_model(
             name or f"{self.target.__name__}Config",
             __base__=self.factory_type,
@@ -209,10 +276,27 @@ class _FactoryModelBuilder:
         model.factory_fields = tuple(fields)
         model._factory_strict = self.strict
         model._factory_types_namespace = self.types_namespace
+        model._factory_include = self.include
+        model._factory_exclude = self.exclude
         # Generic bases are deferred so their cached schema never captures a
         # call's policy. Concrete factories still report schema errors eagerly.
         model.model_rebuild(force=True)
         return model
+
+    def selects(self, name: str, annotation: Any = Any) -> bool:
+        """Evaluate the selected predicate once for a constructor parameter."""
+        if self.selector is None:
+            return True
+        if isinstance(self.selector, frozenset):
+            matched = name in self.selector
+        else:
+            predicate = cast(Callable[..., bool], self.selector)
+            matched = bool(
+                predicate(name)
+                if self.selector_arity == 1
+                else predicate(annotation, name)
+            )
+        return matched if self.include is not None else not matched
 
     def replace_annotation(
         self,

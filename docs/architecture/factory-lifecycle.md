@@ -10,12 +10,12 @@ flowchart TD
     C --> D[Generated configuration class]
     D --> E[Inputs and settings validation]
     E --> F[Factory configuration instance]
-    F --> G[model_resolve]
+    F --> G[instance]
     G --> H[Constructed application object]
 ```
 
 `model_from` returns a class. Instantiating that class validates settings.
-`model_resolve` calls the target. The [factory guide](../guide/factories.md) gives
+`instance` calls the target. The [factory guide](../guide/factories.md) gives
 a runnable example of each stage.
 
 ## Generate the model
@@ -50,7 +50,8 @@ raise an application-specific error. Mutable template defaults have supported
 copying rules, not a promise of universal deep copying for arbitrary objects.
 
 For an outer `BaseConfig` holding factories, resolution returns a validated model
-with resolved target annotations. For a `Factory`, it returns the target object.
+with resolved target annotations. A factory also inherits this model-preserving operation; `Factory.instance()`
+constructs its target object.
 Generated classes are not automatically importable names; portable factory
 [Make directives](../advanced/object-directives-and-portability.md#make-directives)
 identify their target constructors instead.

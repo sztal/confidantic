@@ -74,7 +74,7 @@ def test_model_from_recursive_wraps_matching_defaults() -> None:
     service = config_type().service
 
     assert service.factory_target is Service
-    assert config_type().model_resolve().service.value == 1
+    assert config_type().instance().service.value == 1
 
 
 def test_model_from_as_factory_accepts_type_hints_and_predicates() -> None:
@@ -115,8 +115,8 @@ def test_model_from_as_factory_uses_instance_values() -> None:
 
     config_type = Factory.model_from(source, __recursive__=ServiceBase)
 
-    assert config_type().model_resolve().service.value == 7
-    assert config_type().model_resolve().label == "configured"
+    assert config_type().instance().service.value == 7
+    assert config_type().instance().label == "configured"
 
 
 def test_model_from_as_factory_preserves_optional_union_alternatives() -> None:
@@ -127,7 +127,7 @@ def test_model_from_as_factory_preserves_optional_union_alternatives() -> None:
 
     assert config_type().service.factory_target is Service
     assert config_type(service=None).service is None
-    assert config_type(service=None).model_resolve().service is None
+    assert config_type(service=None).instance().service is None
 
 
 def test_model_from_as_factory_preserves_union_alternatives() -> None:
@@ -137,7 +137,7 @@ def test_model_from_as_factory_preserves_union_alternatives() -> None:
     )
 
     assert config_type(service=None).service is None
-    assert config_type(service="fallback").model_resolve().service == "fallback"
+    assert config_type(service="fallback").instance().service == "fallback"
 
 
 def test_model_from_as_factory_preserves_parameterized_union_alternatives() -> None:
@@ -147,9 +147,9 @@ def test_model_from_as_factory_preserves_parameterized_union_alternatives() -> N
         __recursive__=ServiceBase,
     )
 
-    assert config_type(service="fallback").model_resolve().service == "fallback"
-    assert config_type(service="annotated").model_resolve().service == "annotated"
-    assert config_type(service=None).model_resolve().service is None
+    assert config_type(service="fallback").instance().service == "fallback"
+    assert config_type(service="annotated").instance().service == "annotated"
+    assert config_type(service=None).instance().service is None
 
 
 def test_model_from_as_factory_wraps_required_instance_values() -> None:
@@ -158,7 +158,7 @@ def test_model_from_as_factory_wraps_required_instance_values() -> None:
         RequiredServiceHolder(Service(7)), __recursive__=ServiceBase
     )
 
-    assert config_type().model_resolve().service.value == 7
+    assert config_type().instance().service.value == 7
 
 
 def test_model_from_as_factory_leaves_required_fields_unchanged() -> None:
@@ -487,7 +487,7 @@ def test_recursive_generation_copies_hashable_factory_templates() -> None:
 def test_recursive_annotation_selectors(selector: Any) -> None:
     model = Factory.model_from(ParentTarget, __recursive__=selector)
     assert isinstance(model().child, Factory)
-    assert model().model_resolve().child.value == 1
+    assert model().instance().child.value == 1
 
 
 def test_recursive_selector_does_not_call_constructor() -> None:
@@ -547,8 +547,8 @@ def test_recursive_generation_preserves_annotated_union_metadata(
 
     model = Factory.model_from(Target, __recursive__=ServiceBase)
     assert model.model_fields["service"].description == "Selected service."
-    assert isinstance(model().model_resolve().service, Service)
-    assert model(service="fallback").model_resolve().service == "fallback"
+    assert isinstance(model().instance().service, Service)
+    assert model(service="fallback").instance().service == "fallback"
 
 
 @pytest.fixture
@@ -597,7 +597,7 @@ def test_factory_annotation_policy(
     assert model.model_fields["path"].is_required() is not from_instance
     config = model(path="unchanged", count="2")
     assert config.path == "unchanged"
-    assert config.model_resolve().count == 2
+    assert config.instance().count == 2
     with pytest.raises(ValidationError):
         model(path="x", count="invalid")
     with pytest.raises(ValidationError):
@@ -681,7 +681,7 @@ def test_unresolved_annotation_falls_back_as_a_whole(
     )
     config = Factory.instance_from(target, __strict__=False, value={"raw": "value"})
     assert type(config).model_fields["value"].annotation is Any
-    assert config.model_resolve().value == {"raw": "value"}
+    assert config.instance().value == {"raw": "value"}
     typed = Factory.instance_from(
         target,
         __types_namespace__={"Missing": int},
@@ -702,7 +702,7 @@ def test_irrelevant_annotations_do_not_block_fields(
     )
     model = Factory.model_from(target, __strict__=strict)
     assert model.factory_fields == ("value",)
-    assert model(value="2").model_resolve().value == 2
+    assert model(value="2").instance().value == 2
 
 
 @pytest.mark.parametrize("annotated", [False, True])
@@ -771,7 +771,7 @@ def test_annotation_options_follow_recursive_generation(
         __types_namespace__=namespace,
     )
     config = model(child={"value": "2"})
-    assert config.model_resolve().child.value == (2 if strict else "2")
+    assert config.instance().child.value == (2 if strict else "2")
     assert ("extra" in type(config.child).model_fields) is not strict
 
 
@@ -800,11 +800,9 @@ def test_generated_models_retain_annotation_policy(
     for model in (generated, Derived):
         adapter = TypeAdapter(model)
         converted = adapter.validate_python(target(3 if strict else "3"))
-        assert converted.model_resolve().value == (3 if strict else "3")
+        assert converted.instance().value == (3 if strict else "3")
         converted_class = adapter.validate_python(target)
-        assert converted_class(value="4").model_resolve().value == (
-            4 if strict else "4"
-        )
+        assert converted_class(value="4").instance().value == (4 if strict else "4")
         with pytest.raises(NameError):
             model.model_from(target)
 
@@ -848,7 +846,7 @@ def test_unannotated_required_field_is_included_only_in_permissive_mode() -> Non
     with pytest.raises(ValidationError):
         model()
     value = object()
-    assert model(value=value).model_resolve().value is value
+    assert model(value=value).instance().value is value
 
 
 def test_explicit_forward_refs_do_not_cache_namespace_overrides() -> None:
@@ -877,4 +875,209 @@ def test_no_type_check_annotations_remain_untyped() -> None:
     assert Factory.model_from(Target).factory_fields == ()
     model = Factory.model_from(Target, __strict__=False)
     assert model.model_fields["value"].annotation is Any
-    assert model(value="text").model_resolve().value == "text"
+    assert model(value="text").instance().value == "text"
+
+
+@pytest.mark.parametrize(
+    ("options", "expected"),
+    [
+        ({"__include__": {"label"}}, ("label",)),
+        ({"__exclude__": frozenset({"count", "enabled"})}, ("label",)),
+        ({"__include__": set()}, ()),
+        ({"__exclude__": set()}, ("count", "label", "enabled")),
+        ({"__include__": lambda name: name == "label"}, ("label",)),
+        ({"__exclude__": lambda name: name != "label"}, ("label",)),
+        ({"__include__": lambda annotation, name: annotation is str}, ("label",)),
+        ({"__exclude__": lambda annotation, name: annotation is not str}, ("label",)),
+    ],
+    ids=[
+        "include",
+        "exclude",
+        "none",
+        "all",
+        "name-include",
+        "name-exclude",
+        "type-include",
+        "type-exclude",
+    ],
+)
+def test_factory_field_selection(
+    options: dict[str, Any], expected: tuple[str, ...]
+) -> None:
+    """Selection controls constructor fields without changing their order."""
+    model = Factory.model_from(Product, **options)
+    assert tuple(model.model_fields) == model.factory_fields == expected
+    config = model(count=2) if "count" in expected else model()
+    assert config.instance(3).count == 3
+    assert set(config.model_dump()) == set(expected)
+
+
+@pytest.mark.parametrize(
+    ("options", "error", "message"),
+    [
+        (
+            {"__include__": set(), "__exclude__": set()},
+            ValueError,
+            "mutually exclusive",
+        ),
+        ({"__include__": {"missing"}}, ValueError, "unknown constructor fields"),
+        ({"__exclude__": {"self"}}, ValueError, "unknown constructor fields"),
+        ({"__include__": {"args"}}, ValueError, "unknown constructor fields"),
+        ({"__include__": {1}}, TypeError, "names must be strings"),
+        ({"__include__": "label"}, TypeError, "exactly one or two"),
+        ({"__include__": lambda: True}, TypeError, "exactly one or two"),
+        (
+            {"__include__": lambda name, optional=None: True},
+            TypeError,
+            "exactly one or two",
+        ),
+        ({"__include__": lambda *names: True}, TypeError, "exactly one or two"),
+        (
+            {"__include__": lambda name, **options: True},
+            TypeError,
+            "exactly one or two",
+        ),
+        ({"__include__": dict}, TypeError, "exactly one or two"),
+    ],
+    ids=[
+        "both",
+        "unknown",
+        "receiver",
+        "variadic",
+        "non-string",
+        "string",
+        "zero",
+        "ambiguous",
+        "args",
+        "kwargs",
+        "uninspectable",
+    ],
+)
+def test_invalid_factory_field_selectors(
+    options: dict[str, Any], error: type[Exception], message: str
+) -> None:
+    """Invalid selector policies fail at generation rather than construction."""
+    with pytest.raises(error, match=message):
+        Factory.model_from(Product, **options)
+
+
+@pytest.mark.parametrize("typed", [False, True])
+def test_field_predicate_errors_propagate_once(typed: bool) -> None:
+    """A predicate TypeError is never interpreted as an arity mismatch."""
+    visited: list[str] = []
+
+    def name_predicate(name: str) -> bool:
+        visited.append(name)
+        raise TypeError("predicate failed")
+
+    def typed_predicate(annotation: Any, name: str) -> bool:
+        return name_predicate(name)
+
+    with pytest.raises(TypeError, match="predicate failed"):
+        Factory.model_from(
+            Product, __include__=typed_predicate if typed else name_predicate
+        )
+    assert visited == ["count"]
+
+
+def test_name_selection_precedes_annotation_resolution() -> None:
+    """Runtime-only fields need no resolvable annotation or config schema."""
+
+    class Target:
+        def __init__(self, runtime: "Unavailable", count: int = 1) -> None:  # noqa: F821
+            self.runtime = runtime
+            self.count = count
+
+    model = Factory.model_from(Target, __exclude__={"runtime"})
+    token = object()
+    assert model().instance(token).runtime is token
+    with pytest.raises(NameError, match="Unavailable"):
+        Factory.model_from(
+            Target, __exclude__=lambda annotation, name: name == "runtime"
+        )
+    permissive = Factory.model_from(
+        Target, __strict__=False, __include__=lambda annotation, name: annotation is Any
+    )
+    assert permissive.factory_fields == ("runtime",)
+
+
+def test_selection_preserves_annotation_eligibility() -> None:
+    """Selecting an untyped argument does not make it eligible in strict mode."""
+    assert Factory.model_from(Product, __include__={"untyped"}).factory_fields == ()
+    assert Factory.model_from(
+        Product, __include__={"untyped"}, __strict__=False
+    ).factory_fields == ("untyped",)
+
+
+def test_selection_is_root_only_and_precedes_recursive_conversion() -> None:
+    """Typed predicates see original types; nested constructors keep all fields."""
+    model = Factory.model_from(
+        ServiceHolder,
+        __include__=lambda annotation, name: annotation is ServiceBase,
+        __recursive__=ServiceBase,
+    )
+    assert model.factory_fields == ("service",)
+    assert type(model().service).factory_fields == ("value",)
+    assert model().instance().service.value == 1
+
+
+@pytest.mark.parametrize("predicate", [False, True])
+def test_selection_survives_target_conversion_and_rebuild(predicate: bool) -> None:
+    """Concrete schema conversions retain the generating selection policy."""
+    names = {"label"}
+    selector = (lambda name: name == "label") if predicate else names
+    model = Factory.model_from(Product, __include__=selector)
+    names.add("count")
+    model.model_rebuild(force=True)
+    config = TypeAdapter(model).validate_python(Product(7, "template"))
+    converted = TypeAdapter(model).validate_python(Product)
+    assert type(config).factory_fields == converted.factory_fields == ("label",)
+    assert config.instance(9).label == "template"
+    assert config.instance(9).count == 9
+    assert converted().instance(3).label == "default"
+
+
+def test_selection_rejects_inherited_field_conflicts() -> None:
+    """Exclusion cannot silently leave inherited constructor inputs required."""
+    model = Factory.model_from(Product)
+    with pytest.raises(ValueError, match="inherited model fields: count"):
+        model.model_from(Product, __exclude__={"count"})
+
+    class Custom(Factory[Product]):
+        note: str = "metadata"
+
+    custom = Custom.model_from(Product, __include__={"label"})
+    assert set(custom.model_fields) == {"label", "note"}
+    assert custom.factory_fields == ("label",)
+
+
+def test_instance_method_name_is_reserved() -> None:
+    """A constructor input must not hide the factory construction method."""
+
+    class Target:
+        def __init__(self, instance: int) -> None:
+            self.instance = instance
+
+    with pytest.raises(TypeError, match="reserved field 'instance'"):
+        Factory.model_from(Target)
+    config = Factory.instance_from(Target, __exclude__={"instance"})
+    assert config.instance(instance=3).instance == 3
+
+
+def test_excluded_inputs_are_absent_from_settings_and_cli(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Runtime-only inputs cannot be configured through generated settings."""
+    model = Factory.model_from(Product, __exclude__={"count"})
+    monkeypatch.setenv("PARTIAL_COUNT", "99")
+    monkeypatch.setenv("PARTIAL_LABEL", "environment")
+    config = model(_env_prefix="PARTIAL_")
+    assert config.label == "environment"
+    assert config.instance(2).count == 2
+    with pytest.raises(ValidationError):
+        model(count=2)
+    with pytest.raises(SystemExit):
+        model(_cli_parse_args=["--help"])
+    help_text = capsys.readouterr().out
+    assert "--count" not in help_text
+    assert "--label" in help_text

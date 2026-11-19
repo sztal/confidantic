@@ -18,11 +18,11 @@ target class                 template instance
                     |
            Factory model instance
                     |
-            model_resolve()
+              instance()
                     |
    recursive values + resolved model types
                     |
-        target constructor keyword call
+        bound target constructor call
                     |
               runtime object
 ```
@@ -52,7 +52,8 @@ reconstruction use separate state. The active value path detects cycles; a per-c
 type cache coordinates replacement models and recursive annotations. Repeated values
 are reconstructed independently, even when generated types are shared.
 
-A Factory forwards only constructor fields to its target. A containing BaseConfig
+A Factory merges configured constructor fields with explicit runtime arguments
+through `instance()`. Its inherited `model_resolve()` preserves the root model. A containing BaseConfig
 rebuilds models with factory annotations replaced by target types. Other settings
 sources still participate when those models validate. Arbitrary objects pass through
 without their attributes being traversed, and target return values are not revisited.

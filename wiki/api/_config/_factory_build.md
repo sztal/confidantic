@@ -13,6 +13,11 @@ whose annotations name types in their defining module. Signature order determine
 field order. Unannotated parameters and variadic arguments are omitted; annotated
 positional-only parameters raise TypeError because resolution passes keywords.
 
+Root-only `__include__` / `__exclude__` selectors filter names before annotation
+resolution or inspect resolved annotations before recursive conversion. Name sets
+are snapshotted; predicate arity is checked once. Selection policy is retained on
+generated models for schema rebuilds and target conversions.
+
 A matching attribute on the template replaces the constructor default. A missing
 attribute leaves the constructor default, or keeps the field required. Fields are
 created on the selected Factory base through Pydantic `create_model`, then

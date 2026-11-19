@@ -39,7 +39,7 @@ else:
 
 config = ServiceConfig(host="api.example.com", port=8080)
 assert isinstance(config, Factory)
-service = config.model_resolve()
+service = config.instance()
 assert isinstance(service, Service)
 assert service == Service("api.example.com", 8080)
 print(service)
@@ -50,11 +50,19 @@ template = Service("template.example.com", 9000)
 TemplateConfig = Factory.model_from(template)
 configured = TemplateConfig(port=9001)
 assert configured.host == "template.example.com"
-assert configured.model_resolve() == Service("template.example.com", 9001)
+assert configured.instance() == Service("template.example.com", 9001)
 assert template.port == 9000
 
 # %% Generate and instantiate in one call -------------------------------------------
 
 shortcut = Factory.instance_from(Service, host="worker.example.com")
-assert shortcut.model_resolve() == Service("worker.example.com", 8000)
-print(shortcut.model_resolve())
+assert shortcut.instance() == Service("worker.example.com", 8000)
+print(shortcut.instance())
+
+# Runtime-only inputs can be excluded from the configuration schema.
+PortConfig = Factory.model_from(Service, __exclude__={"host"})
+partial = PortConfig(port=9000)
+assert partial.instance("runtime.example.com") == Service("runtime.example.com", 9000)
+assert partial.instance("runtime.example.com", port="9001").port == "9001"
+assert partial.copy(port="9001").instance("runtime.example.com").port == 9001
+assert isinstance(partial.model_resolve(), Factory)

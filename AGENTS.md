@@ -26,8 +26,10 @@ is read from `.python-version` (currently Python 3.15).
 
 The package root re-exports `BaseConfig`, `ClassDefaultsSource`,
 `ConfigModelDict`, `Factory`, and `__version__`. `Factory`
-provides `model_from`, `instance_from`, and explicit `model_resolve` methods;
-`BaseConfig` also provides `model_resolve` for nested factory values. Other
+provides `model_from`, `instance_from`, and `instance` for target construction.
+Both `Factory` and `BaseConfig` use the inherited `model_resolve` to preserve the
+root configuration and resolve nested factory values. Root-only `__include__`
+and `__exclude__` selectors support partial factories with runtime inputs. Other
 core public APIs live in
 `confidantic/annotations.py`, `confidantic/configurable.py`,
 `confidantic/context.py`, `confidantic/logging.py`, `confidantic/paths.py`,

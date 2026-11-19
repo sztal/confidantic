@@ -1,6 +1,6 @@
 """Per-call factory value traversal and resolved model type construction.
 
-Public model_resolve methods import this module lazily, after Factory exists.
+Public resolution and construction methods import this module lazily.
 Value traversal tracks the active recursion path, while type reconstruction
 caches generated classes. These states serve different graph semantics and
 must not be shared with the cycle-tolerant factory-detection scan.
@@ -9,13 +9,19 @@ must not be shared with the cycle-tolerant factory-detection scan.
 from collections.abc import Callable, Mapping
 from copy import copy
 from functools import reduce
+from inspect import Parameter
 from operator import or_
 from types import UnionType
 from typing import Annotated, Any, ForwardRef, get_args, get_origin
 
 from pydantic import BaseModel, create_model
 
-from confidantic._config.factory import Factory, _factory_target, _is_factory_type
+from confidantic._config.factory import (
+    Factory,
+    _constructor_signature,
+    _factory_target,
+    _is_factory_type,
+)
 
 
 class _ResolvedModelTypes:
@@ -206,6 +212,60 @@ class _FactoryResolver:
         self.active: set[int] = set()
         self.types = _ResolvedModelTypes()
 
+    def instance(
+        self,
+        factory: Factory[Any],
+        args: tuple[Any, ...] = (),
+        kwargs: dict[str, Any] | None = None,
+    ) -> Any:
+        """Bind root overrides before traversing inputs and constructing a target."""
+        identity = id(factory)
+        if identity in self.active:
+            raise ValueError("cyclic values cannot be resolved")
+        self.active.add(identity)
+        try:
+            constructor = _constructor_signature(factory.factory_target)
+            supplied = constructor.bind_partial(*args, **(kwargs or {}))
+            values = {
+                name: getattr(factory, name)
+                for name in factory.factory_fields
+                if name not in supplied.arguments
+            }
+            values.update(supplied.arguments)
+            explicit = tuple(values)
+            parameters = list(constructor.parameters.values())
+            # Positional defaults are needed only to bridge gaps before a supplied
+            # positional-only input or a nonempty variadic positional pack.
+            last_positional = -1
+            for index, parameter in enumerate(parameters):
+                if (
+                    parameter.kind is Parameter.POSITIONAL_ONLY
+                    and parameter.name in values
+                ):
+                    last_positional = index
+                elif parameter.kind is Parameter.VAR_POSITIONAL and values.get(
+                    parameter.name
+                ):
+                    last_positional = index - 1
+            for index, parameter in enumerate(parameters):
+                if parameter.kind in {Parameter.VAR_POSITIONAL, Parameter.VAR_KEYWORD}:
+                    continue
+                if parameter.name not in values:
+                    if parameter.default is Parameter.empty:
+                        raise TypeError(
+                            f"missing a required argument: {parameter.name!r}"
+                        )
+                    if index <= last_positional:
+                        values[parameter.name] = parameter.default
+            bound = constructor.bind_partial()
+            bound.arguments.update(values)
+            constructor.bind(*bound.args, **bound.kwargs)
+            for name in explicit:
+                bound.arguments[name] = self.resolve(values[name])
+            return factory.factory_target(*bound.args, **bound.kwargs)
+        finally:
+            self.active.remove(identity)
+
     def resolve(
         self, value: Any, *, name: str | None = None, as_model: bool = False
     ) -> Any:
@@ -241,15 +301,15 @@ class _FactoryResolver:
         Constructor and validation errors propagate. Active identities are
         removed on both success and failure; the type cache lasts for this
         public call. CLI suppression is owned by the public model_resolve
-        methods and therefore also covers target constructors.
+        and instance methods and therefore also covers target constructors.
         """
         is_factory = isinstance(value, Factory) and not as_model
         if not is_factory and _is_factory_type(value):
             value = value()
             is_factory = True
-        if not is_factory and not isinstance(
-            value, BaseModel | Mapping | list | tuple | set | frozenset
-        ):
+        if is_factory:
+            return self.instance(value)
+        if not isinstance(value, BaseModel | Mapping | list | tuple | set | frozenset):
             return value
 
         identity = id(value)
@@ -258,12 +318,6 @@ class _FactoryResolver:
             raise ValueError(msg)
         self.active.add(identity)
         try:
-            if is_factory:
-                values = {
-                    field_name: self.resolve(getattr(value, field_name))
-                    for field_name in value.factory_fields
-                }
-                return value.factory_target(**values)
             if isinstance(value, BaseModel):
                 model_type = type(value)
                 resolved_type = self.types.resolve_model(

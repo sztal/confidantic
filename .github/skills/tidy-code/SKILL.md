@@ -88,6 +88,28 @@ mechanically. Keep existing relative order when it is already coherent.
 - Use short section comments only when they clarify substantial groups;
   small files do not need a heading for every category.
 
+## Lazy import opportunities
+
+Confidantic supports Python 3.11 and later. A newer development interpreter does
+not permit introducing Python 3.15 `lazy import` syntax into package code.
+
+For Python packages targeting Python 3.15 or later, also check whether imports
+in the requested scope are worth making lazy. Determine both the configured
+target and the minimum supported Python version; a 3.15 target alone does not
+mean older supported versions can parse `lazy import` syntax.
+
+Examine expensive imports that may not be needed on common startup or execution
+paths. Where practical, measure representative package or CLI startup with
+`python -X importtime` and identify candidates rather than assuming an import
+is costly. Consider whether deferring it would affect import-time registration,
+initialization, exception timing, or other observable side effects.
+
+Keep the tidy itself structural: report worthwhile candidates and supporting
+evidence rather than automatically changing import behavior. If no candidates
+are worthwhile, or measurement is unavailable, report that too. Any later
+conversion must preserve compatibility with the minimum supported version and
+be validated with relevant behavior tests and startup measurements.
+
 ## Preserve order-dependent behavior
 
 Check definition-time dependencies before moving blocks. Base classes,

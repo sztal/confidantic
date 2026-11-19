@@ -51,9 +51,35 @@ profile, and rebuilds and installs the sdist outside Git. `TAG=v1.2.0` additiona
 requires an annotated tag at the current commit and matching artifact versions.
 Development versions are allowed only when no release tag is requested.
 
-`check` runs Nox lint before direct pytest, followed by typecheck, docs, build,
-and distribution checks. It never invokes the local multi-Python Nox matrix.
+`check` runs Nox lint before direct pytest, followed by `make check-typecheck`,
+docs, build, and distribution checks. It never invokes the local multi-Python Nox matrix.
 Checks that rewrite files fail preparation so the changes can be reviewed.
+
+### Type-checking policy
+
+The `[tool.project-checks]` table in `pyproject.toml` configures the same policy
+for local checks, CI, merge preparation, and release preparation:
+
+```toml
+[tool.project-checks]
+typecheck_level = "basic"
+typecheck_source_only = true
+require_typecheck = true
+```
+
+`basic` uses non-strict mypy with the existing explicit diagnostics in
+`[tool.mypy]`. `strict` additionally enables strict checks; `none` skips mypy.
+Source-only checking targets `confidantic/`. Setting `typecheck_source_only`
+to false explicitly includes `tests/`, `scripts/`, and `noxfile.py`.
+
+`make typecheck` runs the configured level and scope and propagates errors even
+when `require_typecheck` is false. `make check-typecheck` applies that setting:
+errors block validation by default; setting it to false reports failures as
+advisory and continues. Invalid settings always fail. `_typecheck` is the internal
+Nox execution target. Direct `uv run noxfile.py -s typecheck` also uses the shared
+level and scope and propagates errors; explicit Nox positional arguments can
+override the target paths. Both direct and policy-aware commands skip mypy when
+disabled. These settings do not change pytest strictness or strict docs builds.
 
 ## Build and publish documentation
 

@@ -6,12 +6,15 @@ description: Prepare or complete a local feature/development branch merge into m
 # Merge to master
 
 Read [the release guide](../../../docs/releasing.md). Use the existing Make
-commands; do not implement an alternative Git merge procedure.
+commands; do not implement an alternative Git merge procedure. The
+[merge-branch](../merge-branch/SKILL.md) skill is another entry point to this
+workflow. The helper uses `--no-ff --no-commit` in an isolated checkout; preserve
+ancestry and duplicate-merge detection rather than substituting a squash merge.
 
-Inspect the source branch and current local and remote `master` before writing
+Inspect staged, unstaged, and untracked work and preserve it. Inspect the source branch and current local and remote `master` before writing
 notes. Summarize the final integrated user-visible behavior, including migrations,
 using source, tests, and documentation as evidence. Account for changes already
-on master; do not turn intermediate commits or abandoned APIs into release notes.
+on master, including incoming history such as `git log master..SOURCE`; do not turn intermediate commits or abandoned APIs into release notes.
 Resolve conflicts as a separate source-branch change before retrying preparation.
 
 Write category files (`added.md`, `changed.md`, `fixed.md`, `removed.md`,
@@ -27,6 +30,10 @@ only to prepare or review. When the user has requested the merge, run
 so a separate rehearsal is unnecessary. Substitute `NO_NOTES_REASON='reason'`
 for `NOTES` when applicable. Respect existing authorization; a review request
 does not authorize merging. Neither command pushes or creates a release tag.
+
+Validation uses `make check-typecheck` and `[tool.project-checks]` for the
+configured level, scope, and required/advisory behavior. Report advisory errors
+and unavailable checks as well as blocking failures.
 
 On failure, report the retained preparation checkout and the cause. Resolve the
 cause before retrying; do not reset user work, force-update master, or bypass

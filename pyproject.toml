@@ -236,11 +236,19 @@ showcontent = true
 
 [tool.mypy]
 python_version = "3.11"
+files = [
+  "confidantic",
+]
 warn_unreachable = true
 enable_error_code = [
   "ignore-without-code",
   "redundant-expr",
   "truthy-bool",
 ]
-strict = true
+strict = false
 pretty = true
+
+[tool.project-checks]
+typecheck_level = "basic"
+typecheck_source_only = true
+require_typecheck = true

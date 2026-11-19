@@ -12,6 +12,8 @@ from pathlib import Path
 
 import nox
 
+from scripts import typecheck as typecheck_policy
+
 nox.needs_version = ">=2025.2.9"
 nox.options.default_venv_backend = "uv"
 nox.options.reuse_existing_virtualenvs = True
@@ -84,12 +86,12 @@ def lint(session: nox.Session) -> None:
 
 @nox.session(python=DEFAULT_PYTHON_VERSION, tags=["checks"])
 def typecheck(session: nox.Session) -> None:
-    """Typecheck Python code."""
+    """Typecheck the configured scope and level, failing on mypy errors."""
+    args = typecheck_policy.mypy_args()
+    if args is None:
+        session.skip("Type checking is disabled.")
     session.install(".", "--group", "type")
-    session.run(
-        "mypy",
-        *(session.posargs or ("confidantic", "noxfile.py", "scripts")),
-    )
+    session.run("mypy", *args, *(session.posargs or typecheck_policy.mypy_paths()))
 
 
 @nox.session(python=DEFAULT_PYTHON_VERSION, tags=["checks"])

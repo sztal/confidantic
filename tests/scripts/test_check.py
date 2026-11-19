@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 
 from scripts import check
 
@@ -34,4 +35,18 @@ def test_lint_precedes_tests_and_changes_stop_validation(
         check.source_checks(repository)
         assert commands[0][-1] == "lint"
         assert commands[1] == ["uv", "run", "pytest"]
+        assert commands[2] == ["make", "check-typecheck"]
         assert commands[-1][-1] == "docs"
+
+
+def test_ci_honors_the_same_typecheck_policy_after_lint() -> None:
+    root = Path(__file__).resolve().parents[2]
+    workflow = yaml.safe_load((root / ".github/workflows/checks.yaml").read_text())
+    job = workflow["jobs"]["checks"]
+    assert job["needs"] == "lint"
+    policy_step = next(
+        step for step in job["steps"] if step.get("run") == "make check-typecheck"
+    )
+    assert not policy_step.get("continue-on-error", False)
+    assert not job.get("continue-on-error", False)
+    assert any(step.get("run") == "git diff --exit-code" for step in job["steps"])

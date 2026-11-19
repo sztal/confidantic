@@ -1,48 +1,50 @@
 ---
 name: create-wiki
-description: Create durable architecture, design, investigation, or technical reference pages under wiki/.
-argument-hint: Topic and relevant source files, decisions, or validation results
+description: Create verified concept, architecture, API, or tutorial pages within the existing wiki structure.
+argument-hint: Topic, audience, and relevant sources or decisions
 ---
 
 # Create Wiki Pages
 
-Create brief, informative Markdown notes for this repository. Derive the page
-topic and scope from the user's request; ask one focused question only when the
-topic or intended audience is not clear enough to write a useful note.
+Create concise Markdown documentation for the requested topic and audience.
+Inspect relevant source, tests, configuration, agent guidance, and related pages
+before asserting facts. Use `confidantic/`, `tests/`, `docs/`, and `examples/` as
+project evidence. Distinguish verified facts from assumptions and open questions.
 
-Never create a wiki page to track a bug or task-session progress. Confirmed,
-unresolved source defects belong only in `../../../BUGS.md`; use a testing or
-bug-fixing workflow for those records.
+## Structure and scope
 
-The repository's durable code references are `confidantic/` for the package,
-`tests/` for behavior, `docs/` for published documentation, and `examples/`
-for runnable guides. Verify claims against those paths and `pyproject.toml`
-rather than inferring them.
+Preserve the existing handbook organization:
 
-## Workflow
+- `wiki/`: handbook overview and navigation.
+- `wiki/concepts/`: observable behavior and package concepts.
+- `wiki/architecture/`: design and developer implementation notes.
+- `wiki/api/`: references mirroring the package modules.
+- `wiki/examples/`: practical guides linked to runnable scripts in `examples/`.
 
-1. Read the existing wiki page closest to the topic, when one exists, and the
-   source files most directly relevant to the request.
-1. Identify the note's purpose, intended reader, key decisions or facts, and
-   any validation or follow-up work worth recording.
-1. Choose a concise, descriptive lowercase filename using hyphens. Create the
-   page only in `wiki/` or one of its subdirectories. Never create wiki content
-   elsewhere in the repository.
-1. Write a short GitHub-flavored Markdown page. Use `Goal`, `Decisions and findings`, `Validation`, and `Follow-up` when they fit. Omit empty sections
-   and add focused headings when the topic calls for them.
-1. Prefer plain prose and lists. Include links to relevant local files when
-   useful. Use tables, Mermaid diagrams, reference-style links, or math only
-   when they materially improve clarity; do not add them as decoration.
-1. Verify the file is valid Markdown, concise, factually supported by the
-   supplied context or inspected sources, and located under `wiki/`.
+Create only pages needed for the request. Use descriptive lowercase, hyphenated
+filenames, preserve related navigation, and link to local evidence. Avoid copying
+large source excerpts. Use tables or diagrams only when they clarify the topic.
+For workflow notes, follow the existing ancestry-preserving merge helper and
+[release guide](../../../docs/releasing.md). Notes are consolidated at integration
+into `master`; Towncrier assembles them during release preparation.
 
-## Quality Bar
+## Examples and validation
 
-- Capture the topic and the information a future contributor needs to act on.
-- Distinguish confirmed facts from assumptions, open questions, and follow-up.
-- Keep unresolved source defects in `BUGS.md`, never in wiki content.
-- Avoid copying large source excerpts, changelog entries, or implementation
-  narration.
-- Use ASCII unless the subject requires other characters.
-- Do not modify production code, tests, or documentation outside `wiki/` as
-  part of this skill.
+Preserve existing runnable guides and smoke coverage in
+`tests/integration/test_examples.py`. Wiki Markdown is not in the default pytest
+or documentation-build paths. Do not claim ordinary fenced code is tested by
+pytest's doctest support.
+
+When creating executable examples, normally ask whether to configure their
+validation unless the user already specified it. If authorized, prefer extending
+the existing runnable-script and smoke-test approach. Configure wiki doctest
+discovery only when explicitly needed, preserving existing discovery and using
+examples the runner actually executes. Verify representative collection and
+execution. If setup is declined or unavailable, leave it unchanged and report
+the limitation.
+
+Verify facts, links, and Markdown. Run Nox lint before any pytest checks for
+approved example changes, plus applicable documentation checks. Report failures
+or unavailable checks. Keep changes within `wiki/`, except for an authorized
+example-testing setup. Never use wiki pages as a bug backlog or session log;
+report confirmed defects for [BUGS.md](../../../BUGS.md).

@@ -1,4 +1,5 @@
-.PHONY: help clean build wheel install test coverage coverage-html lint format docs docs-serve init nox check check-dist merge-check merge release-notes release publish
+.PHONY: help clean build wheel install test coverage coverage-html lint format typecheck docs docs-serve init nox check check-dist merge-check merge release-notes release publish
+.PHONY: check-typecheck _typecheck
 
 # Export user input as data, never interpolate it into shell source.
 export BRANCH NOTES NO_NOTES_REASON VERSION TAG
@@ -14,10 +15,13 @@ help:
 	@echo "  wheel          Build wheel only"
 	@echo "  install        Install the package with development dependencies"
 	@echo "  test           Run the pytest suite"
+	@echo "  nox            Run the supported-Python test matrix (human contributors)"
 	@echo "  coverage       Run tests with a terminal coverage report"
 	@echo "  coverage-html  Run tests with an HTML coverage report"
 	@echo "  lint           Run pre-commit checks"
 	@echo "  format         Format Python files with Ruff"
+	@echo "  typecheck      Run configured mypy checks; propagate failures"
+	@echo "  check-typecheck  Run mypy checks with the required/advisory policy"
 	@echo "  docs           Build documentation into site/ (clean and strict)"
 	@echo "  docs-serve     Preview documentation with automatic reload"
 	@echo "  check          Lint, test, typecheck, docs, build, and check distributions"
@@ -67,6 +71,15 @@ lint:
 
 format:
 	uv run ruff format .
+
+typecheck:
+	uv run python -m scripts.typecheck
+
+check-typecheck:
+	uv run python -m scripts.typecheck --policy
+
+_typecheck:
+	uv run noxfile.py -s typecheck
 
 docs:
 	uv run noxfile.py -s docs

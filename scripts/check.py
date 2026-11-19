@@ -15,7 +15,7 @@ def source_checks(directory: Path) -> None:
     commands = (
         ["uv", "run", "noxfile.py", "-s", "lint"],
         ["uv", "run", "pytest"],
-        ["uv", "run", "noxfile.py", "-s", "typecheck"],
+        ["make", "check-typecheck"],
         ["uv", "run", "noxfile.py", "-s", "docs"],
     )
     for command in commands:

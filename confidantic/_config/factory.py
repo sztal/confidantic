@@ -335,9 +335,7 @@ class Factory(BaseConfig, Generic[T]):
         """
         return cast(Factory[U], cls.model_from(source, __name__=__name__)(**kwargs))
 
-    def model_resolve(  # type: ignore[override]
-        self,
-    ) -> T:
+    def model_resolve(self) -> T:
         """Create the target object from the validated configuration values.
 
         Traversal starts from ``factory_fields``; additional fields and extras

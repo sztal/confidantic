@@ -11,9 +11,20 @@ version if the request does not identify one; do not infer a release bump from
 commit messages. Use `master`, and fully qualified refs when working with tags:
 a branch named `v0.0.0` can coexist with a tag of the same name.
 
+Inspect staged, unstaged, and untracked work, existing local/remote tags, release
+scripts, and CI events before choosing a stage. Preserve existing work and
+verify prerequisites using the existing helpers. Follow
+[build-package](../build-package/SKILL.md) for artifact inspection.
+
 Use `make build`, `make check-dist`, and `make check` for validation. Ordinary
 builds can have development versions, but release artifacts must match their tag.
 `make release-notes VERSION=1.2.0` previews notes without modifying tracked files.
+
+Shared validation uses `make check-typecheck` and `[tool.project-checks]`;
+required failures block preparation, while advisory failures must be reported.
+Inspect rehearsal implementation before running it: the current dry run uses
+an independent checkout and refs, retains failures for recovery, and leaves
+caller files and refs unchanged.
 
 For an authorized local release preparation, run `make release VERSION=1.2.0`
 on clean master. Candidate versions such as `1.2.0rc1` keep pending fragments;

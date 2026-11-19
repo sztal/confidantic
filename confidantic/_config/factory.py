@@ -318,8 +318,10 @@ class Factory(BaseConfig, Generic[T]):
         define the generated fields. Unannotated parameters are omitted by
         default; ``*args`` and ``**kwargs`` are always omitted. Positional-only
         parameters that would become fields are rejected because resolution
-        calls the constructor by keyword. An
-        omitted unannotated required parameter can consequently cause a
+        calls the constructor by keyword. A field named ``instance`` is also
+        rejected because it would hide the factory's construction method.
+        Exclude these parameters and supply them to :meth:`instance` instead.
+        An omitted unannotated required parameter can consequently cause a
         constructor ``TypeError`` at resolution time.
 
         When ``source`` is an instance, attributes with matching parameter names
@@ -389,8 +391,12 @@ class Factory(BaseConfig, Generic[T]):
         ------
         TypeError
             If constructor arguments accompany an instance, the target is
-            incompatible with a specialized factory, or an annotated parameter
-            is positional-only. Constructor and annotation errors propagate.
+            incompatible with a specialized factory, a selected field is
+            positional-only or named ``instance``, or a selector is invalid.
+            Constructor and annotation errors propagate.
+        ValueError
+            If both field selectors are supplied, a selector names an unknown
+            constructor parameter, or selection excludes an inherited model field.
         NameError
             If a field annotation contains an unresolved name and __strict__ is True.
         """

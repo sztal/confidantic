@@ -133,6 +133,35 @@ def test_configurable_copying_and_reconfiguration_follow_config_semantics() -> N
     assert widget.config.name == "aliased"
 
 
+@pytest.mark.parametrize("method", ["copy", "deepcopy"])
+def test_configurable_shared_updates_and_constructor_state(method: str) -> None:
+    """Shared updates do not refresh derived state; copies update after construction."""
+
+    class ComponentConfig(InstanceConfig):
+        name: str = "default"
+
+    class Component(Configurable):
+        Config = ComponentConfig
+
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            super().__init__(*args, **kwargs)
+            self.initial_name = self.config.name
+
+    config = ComponentConfig(name="original")
+    first, second = Component(config), Component(config)
+    first.reconfigure(name="shared")
+
+    assert second.config is config
+    assert second.config.name == "shared"
+    assert first.initial_name == second.initial_name == "original"
+
+    updated = getattr(first, method)(name="copied")
+    assert updated.config is not config
+    assert updated.config.name == "copied"
+    assert updated.initial_name == "shared"
+    assert first.config.name == second.config.name == "shared"
+
+
 def test_configurable_equality_and_hash_follow_the_configuration() -> None:
     """Equal objects with hashable configurations compare and hash equally."""
     first = HashableWidget(name="same")

@@ -131,6 +131,50 @@ def test_make_can_evaluate_values_without_a_pydantic_handler() -> None:
     assert value == {"items": [{"answer": 42}]}
 
 
+def test_make_keeps_nested_data_and_call_results_unevaluated() -> None:
+    """Only call mappings are evaluated, once per occurrence."""
+    calls: list[str] = []
+
+    def ordinary_callable() -> None:
+        raise AssertionError("ordinary data must not be called")
+
+    def build() -> dict[str, object]:
+        calls.append("called")
+        return {"@call": ordinary_callable}
+
+    directive = {"@call": build}
+    value = {
+        ordinary_callable: [ordinary_callable, "builtins:list", directive, directive]
+    }
+
+    result = make(value)
+
+    assert calls == ["called", "called"]
+    assert result[ordinary_callable] == [
+        ordinary_callable,
+        "builtins:list",
+        {"@call": ordinary_callable},
+        {"@call": ordinary_callable},
+    ]
+    assert value[ordinary_callable][2] is directive
+
+
+def test_make_propagates_call_failure_without_running_handler() -> None:
+    """A failed directive stops evaluation before the final handler runs."""
+    calls: list[str] = []
+
+    def fail() -> None:
+        raise RuntimeError("directive failed")
+
+    def handler(value: object) -> object:
+        calls.append("handler")
+        return value
+
+    with pytest.raises(RuntimeError, match="directive failed"):
+        make([{"@call": fail}], handler=handler)
+    assert calls == []
+
+
 @pytest.mark.parametrize(
     ("value", "expected"),
     [("builtins:list", []), (lambda: 42, 42)],

@@ -156,5 +156,22 @@ table rows; nested values retain their own representations, and `Field(exclude=T
 controls serialization rather than display. Repr filtering is not a general
 secrecy guarantee.
 
+This executable example checks both methods without depending on table layout:
+
+```pycon
+>>> from pydantic import Field
+>>> from confidantic import BaseConfig
+>>> class DisplayConfig(BaseConfig):
+...     name: str = "orders"
+...     internal_label: str = Field("internal", repr=False)
+>>> config = DisplayConfig()
+>>> for render in (DisplayConfig.model_info, config.info):
+...     assert "internal_label" not in render(output="string")
+...     assert "internal_label" in render(output="string", respect_field_repr=False)
+>>> config.model_dump()["internal_label"]
+'internal'
+
+```
+
 For plain Python data, `model_dump()` needs no display extra. To find an input's
 origin, use [source provenance](sources.md#explain-a-values-origin).

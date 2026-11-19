@@ -3,6 +3,10 @@
 Suppose your application already has a class with an annotated constructor. A
 [Factory][confidantic.Factory] derives a configuration model from those parameters,
 so you can validate inputs before constructing the object.
+For the library boundaries, see
+[Confidantic and Pydantic](../getting-started/confidantic-vs-pydantic.md).
+The runnable [factory.py](https://github.com/sztal/confidantic/blob/master/examples/factory.py)
+demonstrates generation, templates, partial configuration, and runtime overrides.
 
 ## Generate, validate, then construct
 
@@ -43,11 +47,12 @@ Supplying an invalid port fails during configuration validation. Construction ca
 still fail later if the target constructor raises an application-specific error.
 The generated configuration uses the same settings behavior as `BaseConfig`.
 
-Annotated positional-or-keyword and keyword-only parameters become fields.
+With default strict generation (`__strict__=True`), annotated positional-or-keyword
+and keyword-only parameters become fields.
 Unannotated and variadic parameters are omitted; annotated positional-only
 parameters are rejected. An omitted required argument can therefore fail when
 the target is finally constructed. Annotate the constructor inputs you want to
-configure.
+configure, or use the annotation policies below.
 
 ## Control annotation resolution
 

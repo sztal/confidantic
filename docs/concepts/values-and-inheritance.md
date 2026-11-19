@@ -6,6 +6,8 @@ inputs before Pydantic validates them.
 
 Two questions explain the result: **which configuration class supplied the value?**
 and **which source within that class supplied it?**
+The [Pydantic comparison](../getting-started/confidantic-vs-pydantic.md#inheritance-determines-source-priority)
+explains how these rules add to upstream settings behavior.
 
 ## Sources within one class
 

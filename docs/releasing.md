@@ -3,12 +3,17 @@
 Confidantic uses `master` for integration and annotated Git tags for package
 versions. Hatchling and `uv-dynamic-versioning` derive the version; there is no
 version field to bump. `confidantic.__version__` reads installed package metadata.
+Start with [contributor setup and checks](contributing.md); use
+[agent workflows](agent-skills.md) to select the requested integration or release
+stage. The [release-package skill](https://github.com/sztal/confidantic/blob/master/.github/skills/release-package/SKILL.md)
+follows the procedures on this page.
 
 ## Development and merge notes
 
 Develop features and fixes without adding changelog fragments. When a branch is
 ready to merge, summarize the final changes relative to the integrated master.
-The `merge-to-master` skill can write these summaries. Exclude abandoned APIs,
+The [merge-to-master skill](https://github.com/sztal/confidantic/blob/master/.github/skills/merge-to-master/SKILL.md)
+can write these summaries. Exclude abandoned APIs,
 intermediate fixes to unreleased features, and changes already on master.
 
 Put nonempty category files in a directory outside the checkout, for example

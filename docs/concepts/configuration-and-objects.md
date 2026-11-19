@@ -20,6 +20,9 @@ Use the smallest abstraction that fits the task:
 | Design an object that explicitly owns a configuration       | `InstanceConfig` and `Configurable` |
 | Retrieve settings within a deliberate request or task scope | `BaseContext`                       |
 
+For choosing between the underlying libraries, read
+[Confidantic, Pydantic, and Pydantic Settings](../getting-started/confidantic-vs-pydantic.md).
+
 ## Factories and templates
 
 A factory describes a construction that will happen later. The target class

@@ -37,6 +37,8 @@ Ordinary Pydantic constraints, aliases, validators, and serialization are availa
 Use [BaseModel][pydantic.BaseModel] for data that should not consult settings sources;
 use `BaseConfig` for application settings. Source values are assembled before your
 model validators run, so those validators see merged inputs.
+See [Confidantic versus Pydantic](../getting-started/confidantic-vs-pydantic.md) for a
+comparison with both `BaseModel` and Pydantic Settings `BaseSettings`.
 
 ## Frozen configuration
 

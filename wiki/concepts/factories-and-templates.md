@@ -18,11 +18,27 @@ constructor arguments are supplied. Passing arguments first constructs a templat
 Passing an existing instance uses it directly as the source of defaults. Required
 parameters stay required unless a template supplies their values.
 
-Annotated positional-or-keyword and keyword-only parameters become fields.
-Unannotated and variadic parameters are omitted; annotated positional-only parameters
-are rejected. An omitted required constructor parameter can therefore fail later
-when the target is called. `instance_from` is a shortcut for generation followed by
-configuration instantiation; its keywords are configuration inputs.
+By default, annotated positional-or-keyword and keyword-only parameters become
+fields; unannotated and variadic parameters are omitted. `__types_namespace__`
+supplies names needed to resolve annotations. `__strict__=False` includes
+unannotated parameters and falls back to `Any` for fields with unresolved names,
+retaining defaults and requiredness. This policy is separate from validation
+strictness; malformed annotations and unsupported schemas still fail.
+
+Selected positional-only parameters are rejected. An omitted required parameter
+can fail later when the target is called. `instance_from` is a shortcut for
+generation followed by configuration instantiation; its keywords, apart from
+generation options, are configuration inputs. See the
+[annotation guide](../examples/advanced/factory-annotations.md).
+
+## Partial configuration
+
+Root-only `__include__` and `__exclude__` selectors choose constructor fields by
+name sets or predicates. Use one selector, and supply missing required inputs at
+`instance()` time. Excluded fields do not appear in the schema or CLI; their
+defaults come from the constructor rather than a captured template. Selection
+does not propagate to recursively generated factories. See
+[partial factory examples](../examples/factories.md#keep-runtime-inputs-outside-configuration).
 
 ## Recursive templates and explicit resolution
 
@@ -32,8 +48,9 @@ It does not search individual collection elements or invent values for required
 fields. Generated nested annotations expose dependency fields to validation and CLI.
 
 `model_resolve()` always resolves supported nested factory values, regardless of
-whether generation used `__recursive__`. Both Factory and BaseConfig preserve their root model and produce a validated
-model with resolved target annotations. `Factory.instance()` constructs the target.
+whether generation used `__recursive__`. Both Factory and BaseConfig preserve
+their root model; when factories are found, resolution produces a validated model
+with resolved target annotations. `Factory.instance()` constructs the target.
 Repeated factory occurrences construct separately, cyclic traversed values fail,
 and arbitrary object attributes are not traversed.
 

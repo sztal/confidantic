@@ -29,8 +29,17 @@ A specialized Factory enforces target compatibility before delegating to
 importable module attribute.
 
 `instance_from(source, **kwargs)` generates a model and instantiates it with those
-configuration inputs. They are subject to normal settings precedence. Recursive
-generation and constructor arguments use `model_from` followed by instantiation.
+configuration inputs, subject to normal settings precedence. It also accepts
+the annotation and field-selection generation options below. Recursive generation
+and constructor arguments use `model_from` followed by instantiation.
+
+Both methods accept `__types_namespace__` to supply annotation names and
+`__strict__` to control unresolved or missing annotations. Default strict
+generation omits unannotated parameters and rejects unresolved names; permissive
+generation uses `Any` for those fields. Generated models retain this policy for
+rebuilds and target conversions. These options are independent of strict/lax
+validation described above. See the
+[annotation guide](../../examples/advanced/factory-annotations.md).
 
 `instance(*args, **kwargs)` delegates to [\_factory_resolution](_factory_resolution.md)
 under CLI suppression. Runtime bindings override configured `factory_fields` before

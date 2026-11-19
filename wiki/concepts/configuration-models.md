@@ -41,8 +41,11 @@ They are different from unchecked `model_copy(update=...)`. Do not mutate an obj
 while relying on its hash as a dictionary key or set member.
 
 `model_info()` describes declared fields; `info()` displays stored values. Both need
-Rich in all output modes. Source provenance is available separately through
-`model_field_sources`.
+Rich in all output modes. Both omit top-level fields marked `Field(repr=False)`;
+pass `respect_field_repr=False` to include those rows. This does not change
+serialization or nested representations and is not a secrecy guarantee. See
+[display examples](../examples/defining-config.md#control-display-rows).
+Source provenance is available separately through `model_field_sources`.
 
 Continue with [defining configuration](../examples/defining-config.md),
 [BaseConfig internals](../api/_config/base.md), or [all concepts](README.md).

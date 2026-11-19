@@ -18,6 +18,8 @@ a smaller set of advanced recipes. Every guide links to an executable script.
 
 ## Understand its behavior
 
+For the boundaries between the libraries, read
+[Confidantic versus Pydantic](concepts/confidantic-vs-pydantic.md).
 Read [configuration models](concepts/configuration-models.md),
 [sources and inheritance](concepts/sources-and-inheritance.md), and
 [nested configuration](concepts/nested-configuration.md) first.
@@ -26,6 +28,10 @@ The [architecture index](architecture/README.md) follows the settings and factor
 lifecycles and identifies the lifetime of internal state.
 
 ## Modify its implementation
+
+The [developer guide](dev/README.md) covers setup,
+[contribution checks](dev/contributing.md), [agent skills](dev/agent-skills.md),
+and [merging and releases](dev/releasing.md).
 
 Begin with the [package map](architecture/package-map.md), then locate the owning
 module in the [implementation reference](api/README.md). Each module page links
@@ -43,6 +49,8 @@ Concepts describe observable rules, architecture explains cooperating components
 and API pages explain implementation responsibilities. Runnable guides live in
 [examples](../examples/); their smoke coverage lives in
 [the integration tests](../tests/integration/test_examples.py).
+Supplemental snippets in wiki guides are labelled separately from script excerpts
+and are not automatically covered by those smoke tests.
 The wiki is repository Markdown and is not included in the published documentation
 build or default Markdown doctest paths. Check links and advertised commands when
 editing it. Confirmed unresolved defects belong only in [BUGS.md](../BUGS.md).

@@ -25,6 +25,9 @@ sharing that instance observe the change, but constructors and derived-cache set
 do not run again. `copy(**updates)` constructs a new runtime object from copied
 configuration, then applies updates; constructor-derived state may still reflect
 the earlier configuration. Design resource refresh explicitly in the runtime class.
+The same ordering applies to `deepcopy(**updates)`. The
+[shared-update example](../examples/configurable-objects.md#observe-shared-updates-and-constructor-state)
+demonstrates both variants and the retained constructor snapshot.
 
 Equality and hashing are based on configuration, not arbitrary resources. Pickle
 restoration installs configuration without calling the constructor. For portable

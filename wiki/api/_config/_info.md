@@ -9,7 +9,11 @@ the module lazily and translate a missing Rich dependency into an installation h
 One renderer retains a model class and presentation options for one display call.
 `build_table()` iterates canonical declared fields in model order. It can include
 types, supplied current values, defaults, and descriptions. It omits extras and
-computed fields. Values use Python representations, not serialization dumps.
+computed fields. With default `respect_field_repr=True`, it also omits top-level
+fields whose `repr` flag is false. Passing false includes those rows; it does not
+change nested representations. `Field(exclude=True)` affects serialization instead.
+Values use Python representations, not serialization dumps; display filtering is
+not a general secrecy guarantee.
 
 Required fields have a marker; default factories display a name and are never
 called. Descriptions and names use Rich Text so markup-like field content is

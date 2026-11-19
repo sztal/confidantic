@@ -52,6 +52,9 @@ Existing `@call` keys and ambiguous serialized constructor names raise errors.
 Format methods delegate to [\_formats](_formats.md), or `tomllib` for TOML loading.
 Display methods import [\_info](_info.md) lazily. `info()` displays stored values;
 it does not display provenance or evaluate serializers. All display modes need Rich.
+Both `info()` and `model_info()` omit `Field(repr=False)` rows by default;
+`respect_field_repr=False` includes them. This affects top-level rows only,
+independently of serialization exclusions and nested representations.
 
 ## When changing this module
 

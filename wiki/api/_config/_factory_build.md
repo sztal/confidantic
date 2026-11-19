@@ -8,10 +8,21 @@ not builder instances.
 ## Constructor inspection
 
 `build()` combines module namespaces along the target's MRO with constructor globals
-before evaluating type hints with extras retained. This supports inherited constructors
+and then explicit `__types_namespace__` entries, which take precedence. It evaluates
+annotations per parameter with extras retained, supporting inherited constructors
 whose annotations name types in their defining module. Signature order determines
-field order. Unannotated parameters and variadic arguments are omitted; annotated
-positional-only parameters raise TypeError because resolution passes keywords.
+field order; return and variadic annotations do not participate.
+
+Default `__strict__=True` omits unannotated parameters and raises on unresolved
+names. With `__strict__=False`, unannotated parameters and fields whose annotation
+raises `NameError` use `Any`, retaining defaults and requiredness. The whole field
+falls back, so `list[Missing]` becomes `Any`. Other annotation/schema errors still
+propagate. Selected positional-only parameters raise `TypeError`.
+
+The explicit namespace mapping is shallow-copied. Generated models retain the
+annotation policy for schema rebuilds and target conversions, and recursive
+generation passes it to nested builders. This is separate from Pydantic validation
+strictness. See [annotation examples](../../examples/advanced/factory-annotations.md).
 
 Root-only `__include__` / `__exclude__` selectors filter names before annotation
 resolution or inspect resolved annotations before recursive conversion. Name sets

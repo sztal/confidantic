@@ -343,3 +343,53 @@ def test_unavailable_module_preserves_descriptions_with_extraction(
         """,
         consumer,
     )
+
+
+@pytest.mark.parametrize("strict", [False, True])
+def test_factory_annotation_policy_survives_process_transfer(
+    tmp_path: Path, strict: bool
+) -> None:
+    """Generated annotation policy survives serialization without generic-cache leakage."""
+    run_python(
+        """
+        from pathlib import Path
+        import cloudpickle
+        from confidantic import Factory
+
+        class Target:
+            def __init__(self, value: "Missing" = 1, extra=None):
+                self.value, self.extra = value, extra
+
+        namespace = {"Missing": int} if STRICT else {}
+        Config = Factory.model_from(Target, __strict__=STRICT, __types_namespace__=namespace)
+        assert Config.__pydantic_complete__
+        namespace["Missing"] = str
+        Path("policy.pkl").write_bytes(cloudpickle.dumps((Config, Target, Factory[Target])))
+        """.replace("STRICT", repr(strict)),
+        tmp_path,
+    )
+    run_python(
+        """
+        from pathlib import Path
+        import cloudpickle
+        from pydantic import TypeAdapter
+        from confidantic import Factory
+
+        Config, Target, specialized = cloudpickle.loads(Path("policy.pkl").read_bytes())
+        Config.model_rebuild(force=True)
+        assert issubclass(Config, specialized)
+        expected = 2 if STRICT else "2"
+        assert Config(value="2").model_resolve().value == expected
+        assert TypeAdapter(Config).validate_python(Target(expected)).model_resolve().value == expected
+        assert Config._factory_strict is STRICT
+        assert Config._factory_types_namespace == ({"Missing": int} if STRICT else {})
+        try:
+            Factory.model_from(Target)
+        except NameError:
+            pass
+        else:
+            raise AssertionError("Generation policy leaked to the generic base")
+        assert "type" in Config.model_json_schema()["properties"]["value"] if STRICT else "type" not in Config.model_json_schema()["properties"]["value"]
+        """.replace("STRICT", repr(strict)),
+        tmp_path,
+    )

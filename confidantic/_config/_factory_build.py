@@ -8,11 +8,17 @@ copied-default templates, never the builder itself.
 from __future__ import annotations
 
 import sys
-from collections.abc import Callable, MutableMapping, MutableSequence, MutableSet
+from collections.abc import (
+    Callable,
+    Mapping,
+    MutableMapping,
+    MutableSequence,
+    MutableSet,
+)
 from functools import reduce
 from inspect import Parameter, signature
 from operator import or_
-from types import UnionType
+from types import SimpleNamespace, UnionType
 from typing import (
     Annotated,
     Any,
@@ -46,6 +52,10 @@ class _FactoryModelBuilder:
     recursive_selector
         Type hint or predicate selecting concrete defaults for nested generation.
         ``None`` leaves their annotations and defaults unchanged.
+    strict
+        Reject unresolved annotations; otherwise use Any and include untyped fields.
+    types_namespace
+        Explicit names taking precedence over automatic annotation lookup.
 
     Notes
     -----
@@ -62,11 +72,17 @@ class _FactoryModelBuilder:
         *,
         instance: object | None,
         recursive_selector: type[Any] | Callable[[Any], bool] | None,
+        strict: bool = True,
+        types_namespace: Mapping[str, Any] | None = None,
     ) -> None:
         self.factory_type = factory_type
         self.target = target
         self.instance = instance
         self.recursive_selector = recursive_selector
+        self.strict = strict
+        self.types_namespace = (
+            dict(types_namespace) if types_namespace is not None else {}
+        )
 
     def build(self, *, name: str | None = None) -> type[Factory[Any]]:
         """Inspect the constructor and generate a class with ordered fields.
@@ -96,17 +112,28 @@ class _FactoryModelBuilder:
             if module is not None:
                 namespace.update(vars(module))
         namespace.update(getattr(init, "__globals__", {}))
-        annotations = get_type_hints(
-            init, globalns=namespace, localns=namespace, include_extras=True
-        )
+        namespace.update(self.types_namespace)
+        # Distinct locals force cached ForwardRefs to re-evaluate on Python 3.11-3.13.
+        local_namespace = namespace.copy()
+        if sys.version_info >= (3, 14):
+            from annotationlib import Format
+
+            parameters = signature(init, annotation_format=Format.FORWARDREF).parameters
+        else:
+            parameters = signature(init).parameters
         fields: dict[str, tuple[Any, Any]] = {}
 
-        for index, (field_name, parameter) in enumerate(
-            signature(init).parameters.items()
-        ):
+        for index, (field_name, parameter) in enumerate(parameters.items()):
             if index == 0 and field_name in {"self", "cls"}:
                 continue
-            if field_name not in annotations:
+            if parameter.kind in {Parameter.VAR_POSITIONAL, Parameter.VAR_KEYWORD}:
+                continue
+            raw_annotation = (
+                Parameter.empty
+                if getattr(init, "__no_type_check__", False)
+                else parameter.annotation
+            )
+            if raw_annotation is Parameter.empty and self.strict:
                 continue
             if parameter.kind is Parameter.POSITIONAL_ONLY:
                 msg = (
@@ -114,13 +141,33 @@ class _FactoryModelBuilder:
                     "is positional-only"
                 )
                 raise TypeError(msg)
-            if parameter.kind in {Parameter.VAR_POSITIONAL, Parameter.VAR_KEYWORD}:
-                continue
+
+            annotation = Any
+            if raw_annotation is not Parameter.empty:
+                # Resolve only this field, without evaluating return/variadic hints
+                # or discarding valid fields when another name is unavailable.
+                hint = SimpleNamespace(
+                    __annotations__={field_name: raw_annotation},
+                    __type_params__=getattr(init, "__type_params__", ()),
+                )
+                try:
+                    annotation = get_type_hints(
+                        hint,
+                        globalns=namespace,
+                        localns=local_namespace,
+                        include_extras=True,
+                    )[field_name]
+                except NameError as error:
+                    if self.strict:
+                        msg = (
+                            f"{self.target.__qualname__}.__init__ parameter "
+                            f"{field_name!r}: {error}"
+                        )
+                        raise NameError(msg, name=error.name) from error
 
             default = parameter.default
             if self.instance is not None and hasattr(self.instance, field_name):
                 default = getattr(self.instance, field_name)
-            annotation = annotations[field_name]
             if (
                 self.recursive_selector is not None
                 and default is not Parameter.empty
@@ -128,7 +175,10 @@ class _FactoryModelBuilder:
             ):
                 # A nested target need not match the specialized outer factory.
                 factory_type = Factory.model_from(
-                    default, __recursive__=self.recursive_selector
+                    default,
+                    __recursive__=self.recursive_selector,
+                    __strict__=self.strict,
+                    __types_namespace__=self.types_namespace,
                 )
                 annotation = self.replace_annotation(annotation, default, factory_type)
                 default = factory_type()
@@ -157,6 +207,11 @@ class _FactoryModelBuilder:
         )
         model.factory_target = self.target
         model.factory_fields = tuple(fields)
+        model._factory_strict = self.strict
+        model._factory_types_namespace = self.types_namespace
+        # Generic bases are deferred so their cached schema never captures a
+        # call's policy. Concrete factories still report schema errors eagerly.
+        model.model_rebuild(force=True)
         return model
 
     def replace_annotation(

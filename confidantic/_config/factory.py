@@ -19,6 +19,7 @@ from typing import (
 )
 
 from pydantic import GetCoreSchemaHandler
+from pydantic._internal._mock_val_ser import MockValSer
 from pydantic_core import (
     CoreSchema,
     PydanticCustomError,
@@ -26,6 +27,7 @@ from pydantic_core import (
 )
 
 from confidantic._config._cli import _CliSettings
+from confidantic._config._options import ConfigModelDict
 from confidantic._config._settings import wrap_settings_schema
 from confidantic._config.base import BaseConfig
 
@@ -65,6 +67,22 @@ def _serialize_factory(value: Any, handler: Any) -> Any:
     return handler(value)
 
 
+class _DeferredFactorySchema(MockValSer[Any]):
+    """Keep Pydantic's deferred validator/serializer pickleable.
+
+    Pickle probes __setstate__ before restoring slots. The upstream proxy would
+    attempt a rebuild with its own slots still missing and recurse indefinitely.
+    All actual validator/serializer accesses retain Pydantic's lazy rebuilding.
+    """
+
+    __slots__ = ()
+
+    def __getattr__(self, name: str) -> Any:
+        if name == "__setstate__":
+            raise AttributeError(name)
+        return super().__getattr__(name)
+
+
 class Factory(BaseConfig, Generic[T]):
     """Configuration generated from a target type's constructor.
 
@@ -94,6 +112,29 @@ class Factory(BaseConfig, Generic[T]):
 
     factory_target: ClassVar[type[T]]
     factory_fields: ClassVar[tuple[str, ...]] = ()
+    model_config: ClassVar[ConfigModelDict] = ConfigModelDict(defer_build=True)
+
+    _factory_strict: ClassVar[bool] = True
+    _factory_types_namespace: ClassVar[Mapping[str, Any] | None] = None
+
+    @classmethod
+    def __pydantic_init_subclass__(cls, **kwargs: Any) -> None:
+        """Preserve deferred generic bases when generated classes are serialized."""
+        super().__pydantic_init_subclass__(**kwargs)
+        for kind in ("validator", "serializer"):
+            attribute = f"__pydantic_{kind}__"
+            deferred = cls.__dict__.get(attribute)
+            if isinstance(deferred, MockValSer):
+                setattr(
+                    cls,
+                    attribute,
+                    _DeferredFactorySchema(
+                        deferred._error_message,
+                        code=deferred._code,
+                        val_or_ser=kind,
+                        attempt_rebuild=deferred._attempt_rebuild,
+                    ),
+                )
 
     @classmethod
     def __get_pydantic_core_schema__(
@@ -169,8 +210,16 @@ class Factory(BaseConfig, Generic[T]):
                 if target is not None and not issubclass(value_target, target):
                     raise TypeError
                 if isinstance(value, type):
-                    return Factory.model_from(value)
-                return Factory.model_from(value)()
+                    return Factory.model_from(
+                        value,
+                        __strict__=cls._factory_strict,
+                        __types_namespace__=cls._factory_types_namespace,
+                    )
+                return Factory.model_from(
+                    value,
+                    __strict__=cls._factory_strict,
+                    __types_namespace__=cls._factory_types_namespace,
+                )()
             except (TypeError, ValueError) as error:
                 raise PydanticCustomError(
                     "factory",
@@ -201,6 +250,8 @@ class Factory(BaseConfig, Generic[T]):
         *args: Any,
         __name__: str | None = None,
         __recursive__: type[Any] | Callable[[Any], bool] | None = None,
+        __strict__: bool = True,
+        __types_namespace__: Mapping[str, Any] | None = None,
         **kwargs: Any,
     ) -> type[Factory[U]]: ...
 
@@ -212,6 +263,8 @@ class Factory(BaseConfig, Generic[T]):
         *,
         __name__: str | None = None,
         __recursive__: type[Any] | Callable[[Any], bool] | None = None,
+        __strict__: bool = True,
+        __types_namespace__: Mapping[str, Any] | None = None,
     ) -> type[Factory[U]]: ...
 
     @classmethod
@@ -221,14 +274,17 @@ class Factory(BaseConfig, Generic[T]):
         *args: Any,
         __name__: str | None = None,
         __recursive__: type[Any] | Callable[[Any], bool] | None = None,
+        __strict__: bool = True,
+        __types_namespace__: Mapping[str, Any] | None = None,
         **kwargs: Any,
     ) -> Any:
         """Create a concrete factory config from a target type or instance.
 
         Annotated positional-or-keyword and keyword-only constructor parameters
-        define the generated fields. Unannotated parameters, ``*args``, and
-        ``**kwargs`` are omitted. Annotated positional-only parameters are
-        rejected because resolution calls the constructor by keyword. An
+        define the generated fields. Unannotated parameters are omitted by
+        default; ``*args`` and ``**kwargs`` are always omitted. Positional-only
+        parameters that would become fields are rejected because resolution
+        calls the constructor by keyword. An
         omitted unannotated required parameter can consequently cause a
         constructor ``TypeError`` at resolution time.
 
@@ -260,6 +316,19 @@ class Factory(BaseConfig, Generic[T]):
             Callable typing forms, including ``typing.Optional[T]``,
             ``Annotated[T, ...]``, and ``NewType``, use type matching without
             invoking their constructors.
+        __strict__
+            Whether unresolved annotation names raise NameError. If False,
+            unresolved annotations and unannotated parameters become Any fields,
+            without type validation or conversion. A partially unresolved
+            annotation becomes Any as a whole. Defaults and requiredness are
+            preserved. Malformed annotations and schema errors still propagate.
+            This controls annotation resolution, not Pydantic validation strictness.
+        __types_namespace__
+            Names taking precedence over automatic constructor annotation lookup.
+            The mapping is shallow-copied; already evaluated type objects are
+            unchanged. Both generation options apply recursively and are retained
+            by generated models for validation-time target conversion and rebuilds.
+            New explicit model_from calls use their own supplied options or defaults.
         *args, **kwargs
             Arguments used to construct ``source`` when it is a type. The
             resulting instance values become generated defaults. With no
@@ -278,6 +347,8 @@ class Factory(BaseConfig, Generic[T]):
             If constructor arguments accompany an instance, the target is
             incompatible with a specialized factory, or an annotated parameter
             is positional-only. Constructor and annotation errors propagate.
+        NameError
+            If a field annotation contains an unresolved name and __strict__ is True.
         """
         if isinstance(source, type):
             target = source
@@ -304,11 +375,19 @@ class Factory(BaseConfig, Generic[T]):
             target,
             instance=instance,
             recursive_selector=__recursive__,
+            strict=__strict__,
+            types_namespace=__types_namespace__,
         ).build(name=__name__)
 
     @classmethod
     def instance_from(
-        cls, source: type[U] | U, *, __name__: str | None = None, **kwargs: Any
+        cls,
+        source: type[U] | U,
+        *,
+        __name__: str | None = None,
+        __strict__: bool = True,
+        __types_namespace__: Mapping[str, Any] | None = None,
+        **kwargs: Any,
     ) -> Factory[U]:
         """Create a new factory config instance from a source.
 
@@ -324,6 +403,12 @@ class Factory(BaseConfig, Generic[T]):
             Target type or instance used to generate the configuration model.
         __name__
             Optional generated model name.
+        __strict__
+            Annotation-resolution policy passed to model_from, independent of
+            Pydantic validation strictness. False includes untyped parameters
+            and replaces unresolved field annotations with Any.
+        __types_namespace__
+            Explicit annotation names passed to model_from with highest priority.
         **kwargs
             Values for the generated fields. Unspecified fields use their
             defaults after consulting configured settings sources.
@@ -333,9 +418,17 @@ class Factory(BaseConfig, Generic[T]):
         Factory[U]
             New factory config instance.
         """
-        return cast(Factory[U], cls.model_from(source, __name__=__name__)(**kwargs))
+        return cast(
+            Factory[U],
+            cls.model_from(
+                source,
+                __name__=__name__,
+                __strict__=__strict__,
+                __types_namespace__=__types_namespace__,
+            )(**kwargs),
+        )
 
-    def model_resolve(self) -> T:
+    def model_resolve(self) -> T:  # type: ignore[override]
         """Create the target object from the validated configuration values.
 
         Traversal starts from ``factory_fields``; additional fields and extras

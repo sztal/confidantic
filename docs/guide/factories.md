@@ -49,6 +49,74 @@ parameters are rejected. An omitted required argument can therefore fail when
 the target is finally constructed. Annotate the constructor inputs you want to
 configure.
 
+## Control annotation resolution
+
+Factory generation resolves constructor annotations at runtime. A type imported
+only inside `if TYPE_CHECKING:` may therefore be unavailable even when calling
+the constructor directly works. Supply missing names with `__types_namespace__`:
+
+```python
+from pathlib import Path
+
+from confidantic import Factory
+
+
+class Exporter:
+    def __init__(self, destination: "OutputPath", label=None):
+        self.destination = destination
+        self.label = label
+
+
+ExporterConfig = Factory.model_from(
+    Exporter, __types_namespace__={"OutputPath": Path}
+)
+exporter = ExporterConfig(destination="output").model_resolve()
+assert exporter.destination == Path("output")
+```
+
+Explicit names take precedence over automatic lookup in the constructor's globals
+and its target's inheritance hierarchy. Other names still use automatic lookup.
+The mapping is shallow-copied without modifying the target module. It resolves
+symbolic names; it does not replace type objects already stored in annotations.
+
+Alternatively, opt into permissive generation with `__strict__=False`:
+
+```python
+config = Factory.instance_from(
+    Exporter, __strict__=False, destination="output", label="daily"
+)
+exporter = config.model_resolve()
+assert exporter.destination == "output"
+assert exporter.label == "daily"
+```
+
+| Constructor parameter                      | `__strict__=True` (default) | `__strict__=False` |
+| ------------------------------------------ | --------------------------- | ------------------ |
+| Resolvable annotation                      | Use its type                | Use its type       |
+| Unresolved annotation name                 | Raise `NameError`           | Use `Any`          |
+| No annotation                              | Omit parameter              | Include as `Any`   |
+| Malformed annotation or unsupported schema | Raise                       | Raise              |
+
+Fallback applies to the entire field: unresolved `list[Missing]` becomes `Any`,
+not `list[Any]`. Such fields retain defaults and requiredness, but perform no
+type validation or conversion. Valid annotations on other fields still apply.
+This `__strict__` option controls annotation resolution, independently of
+Pydantic's validation strictness. Permissive fallback emits no warning.
+
+Both options are available on `model_from()` and `instance_from()` and can be
+combined. They are generation arguments, not constructor arguments or field
+inputs. `model_from(..., __recursive__=...)` passes them to nested generation;
+matching defaults can still become nested factories even when their original
+annotation falls back to `Any`. Return annotations and variadic parameters are
+ignored. Positional-only parameters that would become fields are rejected.
+
+Generated models retain their own policy for schema rebuilds, subclasses, and
+validation-time conversion of target classes or instances. Later changes to the
+supplied namespace mapping do not change that policy. New explicit `model_from()`
+calls use their supplied options or the defaults above; plain `Factory[Target]`
+annotations likewise use default strict resolution. Use the generated model as
+the field type when its custom policy is needed.
+
 ## Use an object as a template
 
 Continuing with the `Service` class above:

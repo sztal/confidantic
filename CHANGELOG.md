@@ -9,6 +9,20 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/).
 
 <!-- towncrier release notes start -->
 
+## [0.2.0](https://github.com/sztal/confidantic/tree/v0.2.0) - 2026-11-20
+
+### Added
+
+- - Added factory annotation controls `__types_namespace__` and `__strict__`, including permissive handling of unresolved or missing annotations.
+  - Added factory field selection with `__include__` and `__exclude__` and support for runtime constructor arguments in `Factory.instance()`.
+
+### Changed
+
+- - Factory construction now uses `instance()` instead of `model_resolve()`. The latter preserves the root configuration and resolves nested factories, as on `BaseConfig`; factory instances are no longer callable.
+  - Configuration display now hides top-level fields marked `repr=False` by default. Pass `respect_field_repr=False` to include them.
+  - Python 3.13 is now the minimum supported version; Python 3.11 and 3.12 support has been removed. The tested versions are 3.13, 3.14, and 3.15.
+
+
 ## [0.1.0](https://github.com/sztal/confidantic/tree/v0.1.0) - 2026-11-05
 
 ### Removed

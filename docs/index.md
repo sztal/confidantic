@@ -15,21 +15,15 @@ Confidantic helps you give a Python application clear, validated settings. Defin
 fields once, supply values from Python, environment variables, or a command line,
 and get useful errors when an input is wrong.
 
-```python
-from confidantic import BaseConfig
-
-
-class AppConfig(BaseConfig):
-    name: str = "orders"
-    retries: int = 3
-
-
-config = AppConfig(retries=5)
-print(config.model_dump())
-```
-
-```text
+```pycon
+>>> from confidantic import BaseConfig
+>>> class AppConfig(BaseConfig):
+...     name: str = "orders"
+...     retries: int = 3
+>>> config = AppConfig(retries=5)
+>>> print(config.model_dump())
 {'name': 'orders', 'retries': 5}
+
 ```
 
 It builds on [Pydantic models][pydantic.BaseModel] and

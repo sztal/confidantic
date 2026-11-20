@@ -3,23 +3,17 @@
 A configuration document is useful for saving values or exchanging them with
 another program. Start with a known model class and a plain document:
 
-```python
-from confidantic import BaseConfig
-
-
-class AppConfig(BaseConfig):
-    name: str = "orders"
-    retries: int = 3
-
-
-config = AppConfig(retries=5)
-text = config.model_dump_json()
-restored = AppConfig.model_validate_json(text)
-print(restored.model_dump())
-```
-
-```text
+```pycon
+>>> from confidantic import BaseConfig
+>>> class AppConfig(BaseConfig):
+...     name: str = "orders"
+...     retries: int = 3
+>>> config = AppConfig(retries=5)
+>>> text = config.model_dump_json()
+>>> restored = AppConfig.model_validate_json(text)
+>>> print(restored.model_dump())
 {'name': 'orders', 'retries': 5}
+
 ```
 
 `model_dump()` returns Python values; `model_dump_json()` returns JSON text.
@@ -41,12 +35,14 @@ pip install "confidantic[toml]"
 Both methods accept model-dump filtering, context, and serialization options
 and return a string. Ordinary documents can be loaded directly:
 
-```python
-yaml_text = config.model_dump_yaml()
-toml_text = config.model_dump_toml(exclude_none=True)
+```pycon
+>>> yaml_text = config.model_dump_yaml()
+>>> toml_text = config.model_dump_toml(exclude_none=True)
+>>> loaded_yaml = AppConfig.model_validate_yaml(yaml_text)
+>>> loaded_toml = AppConfig.model_validate_toml(toml_text)
+>>> loaded_yaml.model_dump() == loaded_toml.model_dump() == config.model_dump()
+True
 
-loaded_yaml = AppConfig.model_validate_yaml(yaml_text)
-loaded_toml = AppConfig.model_validate_toml(toml_text)
 ```
 
 YAML uses block formatting and preserves model field order, including a leading

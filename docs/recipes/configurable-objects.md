@@ -5,35 +5,25 @@ class and want it to retain explicit, validated settings. Use
 [Factory](../guide/factories.md) when you want to derive settings from an existing
 constructor instead. This recipe needs only core Confidantic.
 
-```python
-from confidantic.configurable import Configurable, InstanceConfig
-
-
-class ServiceConfig(InstanceConfig):
-    host: str = "localhost"
-    port: int = 8000
-
-
-class Service(Configurable):
-    """A service that reads its address from retained configuration."""
-
-    Config = ServiceConfig
-
-    def address(self) -> str:
-        """Return the configured address."""
-        return f"{self.config.host}:{self.config.port}"
-
-
-config = ServiceConfig(host="127.0.0.1", port=8080)
-service = config.to_parent()
-updated = service.copy(port=8081)
-print(service.address())
-print(updated.address())
-```
-
-```text
+```pycon
+>>> from confidantic.configurable import Configurable, InstanceConfig
+>>> class ServiceConfig(InstanceConfig):
+...     host: str = "localhost"
+...     port: int = 8000
+>>> class Service(Configurable):
+...     """A service that reads its address from retained configuration."""
+...     Config = ServiceConfig
+...     def address(self) -> str:
+...         """Return the configured address."""
+...         return f"{self.config.host}:{self.config.port}"
+>>> config = ServiceConfig(host="127.0.0.1", port=8080)
+>>> service = config.to_parent()
+>>> updated = service.copy(port=8081)
+>>> print(service.address())
 127.0.0.1:8080
+>>> print(updated.address())
 127.0.0.1:8081
+
 ```
 
 The direct `Config = ServiceConfig` declaration associates that configuration with
@@ -109,10 +99,12 @@ sees the intended values. Neither path refreshes resources on existing objects.
 
 Continuing with the initial `Service` example:
 
-```python
-text = service.config.model_dump_json()
-restored = ServiceConfig.model_validate_json(text).to_parent()
-print(restored.address())
+```pycon
+>>> text = service.config.model_dump_json()
+>>> restored = ServiceConfig.model_validate_json(text).to_parent()
+>>> print(restored.address())
+127.0.0.1:8080
+
 ```
 
 This prints `127.0.0.1:8080` and constructs a new runtime object. Keep handles and

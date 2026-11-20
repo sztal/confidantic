@@ -13,26 +13,19 @@ demonstrates generation, templates, partial configuration, and runtime overrides
 This complete example uses a dataclass, whose generated constructor accepts
 `host` and `port`:
 
-```python
-from dataclasses import dataclass
-
-from confidantic import Factory
-
-
-@dataclass
-class Service:
-    host: str
-    port: int = 8000
-
-
-ServiceConfig = Factory.model_from(Service)
-config = ServiceConfig(host="api.example.com", port=8080)
-service = config.instance()
-print(service)
-```
-
-```text
+```pycon
+>>> from dataclasses import dataclass
+>>> from confidantic import Factory
+>>> @dataclass
+... class Service:
+...     host: str
+...     port: int = 8000
+>>> ServiceConfig = Factory.model_from(Service)
+>>> config = ServiceConfig(host="api.example.com", port=8080)
+>>> service = config.instance()
+>>> print(service)
 Service(host='api.example.com', port=8080)
+
 ```
 
 There are three separate steps:
@@ -60,23 +53,20 @@ Factory generation resolves constructor annotations at runtime. A type imported
 only inside `if TYPE_CHECKING:` may therefore be unavailable even when calling
 the constructor directly works. Supply missing names with `__types_namespace__`:
 
-```python
-from pathlib import Path
+```pycon
+>>> from pathlib import Path
+>>> from confidantic import Factory
+>>> class Exporter:
+...     def __init__(self, destination: "OutputPath", label=None):
+...         self.destination = destination
+...         self.label = label
+>>> ExporterConfig = Factory.model_from(
+...     Exporter, __types_namespace__={"OutputPath": Path}
+... )
+>>> exporter = ExporterConfig(destination="output").instance()
+>>> exporter.destination == Path("output")
+True
 
-from confidantic import Factory
-
-
-class Exporter:
-    def __init__(self, destination: "OutputPath", label=None):
-        self.destination = destination
-        self.label = label
-
-
-ExporterConfig = Factory.model_from(
-    Exporter, __types_namespace__={"OutputPath": Path}
-)
-exporter = ExporterConfig(destination="output").instance()
-assert exporter.destination == Path("output")
 ```
 
 Explicit names take precedence over automatic lookup in the constructor's globals
@@ -86,13 +76,14 @@ symbolic names; it does not replace type objects already stored in annotations.
 
 Alternatively, opt into permissive generation with `__strict__=False`:
 
-```python
-config = Factory.instance_from(
-    Exporter, __strict__=False, destination="output", label="daily"
-)
-exporter = config.instance()
-assert exporter.destination == "output"
-assert exporter.label == "daily"
+```pycon
+>>> config = Factory.instance_from(
+...     Exporter, __strict__=False, destination="output", label="daily"
+... )
+>>> exporter = config.instance()
+>>> exporter.destination, exporter.label
+('output', 'daily')
+
 ```
 
 | Constructor parameter                      | `__strict__=True` (default) | `__strict__=False` |
@@ -126,17 +117,15 @@ the field type when its custom policy is needed.
 
 Continuing with the `Service` class above:
 
-```python
-template = Service("template.example.com", 9000)
-TemplateConfig = Factory.model_from(template)
-config = TemplateConfig(port=9001)
-print(config.instance())
-print(template)
-```
-
-```text
+```pycon
+>>> template = Service("template.example.com", 9000)
+>>> TemplateConfig = Factory.model_from(template)
+>>> config = TemplateConfig(port=9001)
+>>> print(config.instance())
 Service(host='template.example.com', port=9001)
+>>> print(template)
 Service(host='template.example.com', port=9000)
+
 ```
 
 The template supplies concrete defaults through its matching attributes. Overrides
@@ -175,11 +164,13 @@ Select the parameters that belong in configuration using `__include__` or
 `__exclude__`. The other parameters come from `instance()` arguments or constructor
 defaults. For example, using the `Service` above:
 
-```python
-PortConfig = Factory.model_from(Service, __exclude__={"host"})
-config = PortConfig(port=9000)
-service = config.instance("runtime.example.com")
-assert service == Service("runtime.example.com", 9000)
+```pycon
+>>> PortConfig = Factory.model_from(Service, __exclude__={"host"})
+>>> config = PortConfig(port=9000)
+>>> service = config.instance("runtime.example.com")
+>>> service == Service("runtime.example.com", 9000)
+True
+
 ```
 
 `host` is absent from the schema and CLI, so creating the configuration does not
@@ -189,12 +180,13 @@ excluded parameter uses its constructor default rather than a template attribute
 Both selectors accept sets or frozensets of names, predicates of a field name,
 or predicates of `(resolved annotation, field name)`:
 
-```python
-PortConfig = Factory.model_from(Service, __include__={"port"})
-PortConfig = Factory.model_from(Service, __include__=lambda name: name == "port")
-PortConfig = Factory.model_from(
-    Service, __include__=lambda field_type, name: field_type is int
-)
+```pycon
+>>> PortConfig = Factory.model_from(Service, __include__={"port"})
+>>> PortConfig = Factory.model_from(Service, __include__=lambda name: name == "port")
+>>> PortConfig = Factory.model_from(
+...     Service, __include__=lambda field_type, name: field_type is int
+... )
+
 ```
 
 Do not supply both selectors. Unknown names are errors. Empty inclusion generates
@@ -213,9 +205,11 @@ excluded so it cannot hide the construction method. Supply it with
 
 The `instance_from` shortcut accepts the same selectors:
 
-```python
-config = Factory.instance_from(Service, __include__={"port"}, port=9000)
-assert config.instance(host="runtime.example.com").port == 9000
+```pycon
+>>> config = Factory.instance_from(Service, __include__={"port"}, port=9000)
+>>> config.instance(host="runtime.example.com").port
+9000
+
 ```
 
 ## Runtime overrides and validation
@@ -229,11 +223,15 @@ The original configuration is unchanged.
 Runtime values receive no additional configuration-field validation or settings
 lookup. Ordinary Python constructor annotations do not validate values:
 
-```python
-config = Factory.instance_from(Service, host="localhost")
-assert config.instance(port="9000").port == "9000"
-assert config.copy(port="9000").instance().port == 9000
-assert config.port == 8000
+```pycon
+>>> config = Factory.instance_from(Service, host="localhost")
+>>> config.instance(port="9000").port
+'9000'
+>>> config.copy(port="9000").instance().port
+9000
+>>> config.port
+8000
+
 ```
 
 Nested factories, models, and containers still undergo the normal recursive
@@ -254,12 +252,16 @@ Replace target construction via `factory.model_resolve()` with `factory.instance
 meaning on both `Factory` and `BaseConfig`: return a model copy with nested factories
 constructed, preserving the root model. It may still construct nested dependencies.
 
-```python
-config = Factory.instance_from(Service, host="localhost")
-prepared = config.model_resolve(name="PreparedService")
-assert isinstance(prepared, Factory)
-assert prepared.instance() == config.instance()
-assert not callable(config)
+```pycon
+>>> config = Factory.instance_from(Service, host="localhost")
+>>> prepared = config.model_resolve(name="PreparedService")
+>>> isinstance(prepared, Factory)
+True
+>>> prepared.instance() == config.instance()
+True
+>>> callable(config)
+False
+
 ```
 
 Keep `app_config.model_resolve()` calls that resolve factories inside an outer

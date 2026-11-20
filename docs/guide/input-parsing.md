@@ -6,22 +6,16 @@ add that parsing to ordinary typed fields.
 
 ## Lists and mappings
 
-```python
-from confidantic import BaseConfig
-from confidantic.annotations import CommaDelimited, Map
-
-
-class WorkerConfig(BaseConfig):
-    ports: CommaDelimited[list[int]]
-    limits: Map[dict[str, int]]
-
-
-config = WorkerConfig(ports="8000,9000", limits="workers=4,retries=3")
-print(config.model_dump())
-```
-
-```text
+```pycon
+>>> from confidantic import BaseConfig
+>>> from confidantic.annotations import CommaDelimited, Map
+>>> class WorkerConfig(BaseConfig):
+...     ports: CommaDelimited[list[int]]
+...     limits: Map[dict[str, int]]
+>>> config = WorkerConfig(ports="8000,9000", limits="workers=4,retries=3")
+>>> print(config.model_dump())
 {'ports': [8000, 9000], 'limits': {'workers': 4, 'retries': 3}}
+
 ```
 
 These annotations also work with Pydantic's `BaseModel` and `TypeAdapter`.

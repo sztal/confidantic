@@ -4,22 +4,16 @@ A configuration class describes the values your application needs. A configurati
 instance holds those values after validation. Start with
 [BaseConfig][confidantic.BaseConfig] and ordinary Python type annotations:
 
-```python
-from confidantic import BaseConfig
-from pydantic import Field
-
-
-class AppConfig(BaseConfig):
-    name: str
-    retries: int = Field(default=3, ge=0)
-
-
-config = AppConfig(name="orders", retries=5)
-print(config.model_dump())
-```
-
-```text
+```pycon
+>>> from confidantic import BaseConfig
+>>> from pydantic import Field
+>>> class AppConfig(BaseConfig):
+...     name: str
+...     retries: int = Field(default=3, ge=0)
+>>> config = AppConfig(name="orders", retries=5)
+>>> print(config.model_dump())
 {'name': 'orders', 'retries': 5}
+
 ```
 
 `name` has no default, so it is required. `retries` defaults to `3`, and `ge=0`
@@ -46,16 +40,15 @@ comparison with both `BaseModel` and Pydantic Settings `BaseSettings`.
 reassigned after validation. Create a modified copy with `copy`; supplied
 updates are validated as normal model input:
 
-```python
-from confidantic import BaseConfig
+```pycon
+>>> from confidantic import BaseConfig
+>>> class AppConfig(BaseConfig):
+...     retries: int = 3
+>>> config = AppConfig()
+>>> updated = config.copy(retries=5)
+>>> config.retries, updated.retries
+(3, 5)
 
-
-class AppConfig(BaseConfig):
-	retries: int = 3
-
-
-config = AppConfig()
-updated = config.copy(retries=5)
 ```
 
 `copy()` is shallow and `deepcopy()` recursively copies field values. Both
@@ -71,8 +64,11 @@ depth. `mutate()` retains existing private state.
 Use `mutate()` to apply validated updates to the same instance, including a
 frozen configuration:
 
-```python
-config.mutate(retries=5)
+```pycon
+>>> _ = config.mutate(retries=5)
+>>> config.retries
+5
+
 ```
 
 Take care when mutating a frozen configuration: changing its fields may
@@ -83,14 +79,16 @@ Pydantic's frozen behavior is shallow: mutable values stored in fields are not
 recursively frozen. A subclass that intentionally requires field reassignment
 can opt out:
 
-```python
-from confidantic import BaseConfig, ConfigModelDict
+```pycon
+>>> from confidantic import BaseConfig, ConfigModelDict
+>>> class MutableAppConfig(BaseConfig):
+...     model_config = ConfigModelDict(frozen=False)
+...     retries: int = 3
+>>> mutable = MutableAppConfig()
+>>> mutable.retries = 5
+>>> mutable.retries
+5
 
-
-class MutableAppConfig(BaseConfig):
-	model_config = ConfigModelDict(frozen=False)
-
-	retries: int = 3
 ```
 
 Pydantic's `model_copy(update=...)` does not validate updates. Choose Confidantic's

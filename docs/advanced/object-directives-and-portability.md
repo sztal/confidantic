@@ -20,29 +20,24 @@ supports directives; the YAML example additionally needs the `yaml` extra.
 
 This complete example uses an importable standard-library target:
 
-```python
-from fractions import Fraction
-
-from pydantic import TypeAdapter
-
-from confidantic.annotations import Call, Import, Make
-
-fraction_type = TypeAdapter(Import[type[Fraction]]).validate_python("fractions:Fraction")
-value = TypeAdapter(Call[Fraction]).validate_python(
-    {"@call": "fractions:Fraction", "@args": [1, 2]}
-)
-values = TypeAdapter(Make[list[Fraction]]).validate_python(
-    [{"@call": "fractions:Fraction", "@args": [1, 3]}]
-)
-print(fraction_type.__name__)
-print(value)
-print(values[0])
-```
-
-```text
+```pycon
+>>> from fractions import Fraction
+>>> from pydantic import TypeAdapter
+>>> from confidantic.annotations import Call, Import, Make
+>>> fraction_type = TypeAdapter(Import[type[Fraction]]).validate_python("fractions:Fraction")
+>>> value = TypeAdapter(Call[Fraction]).validate_python(
+...     {"@call": "fractions:Fraction", "@args": [1, 2]}
+... )
+>>> values = TypeAdapter(Make[list[Fraction]]).validate_python(
+...     [{"@call": "fractions:Fraction", "@args": [1, 3]}]
+... )
+>>> print(fraction_type.__name__)
 Fraction
+>>> print(value)
 1/2
+>>> print(values[0])
 1/3
+
 ```
 
 `Call` leaves nested arguments untouched. `Make` visits mapping values, lists,

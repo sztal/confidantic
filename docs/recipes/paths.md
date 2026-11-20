@@ -4,32 +4,25 @@
 root. [ExtensiblePath][confidantic.paths.ExtensiblePath] adds convenient path joining.
 This recipe needs only core Confidantic and creates no application directories.
 
-```python
-from pathlib import Path
-from tempfile import TemporaryDirectory
-
-from confidantic.paths import BasePaths, ExtensiblePath
-
-
-class Paths(BasePaths):
-    data: ExtensiblePath = ExtensiblePath("data")
-    cache: ExtensiblePath = ExtensiblePath("@data/cache")
-
-
-with TemporaryDirectory() as directory:
-    root = Path(directory).resolve()
-    paths = Paths(root=root)
-    print(paths.cache.relative_to(root).as_posix())
-    print(paths.data("items.json").relative_to(root).as_posix())
-    print(paths("report.txt").relative_to(root).as_posix())
-    print(paths.data.exists())
-```
-
-```text
+```pycon
+>>> from pathlib import Path
+>>> from tempfile import TemporaryDirectory
+>>> from confidantic.paths import BasePaths, ExtensiblePath
+>>> class Paths(BasePaths):
+...     data: ExtensiblePath = ExtensiblePath("data")
+...     cache: ExtensiblePath = ExtensiblePath("@data/cache")
+>>> with TemporaryDirectory() as directory:
+...     root = Path(directory).resolve()
+...     paths = Paths(root=root)
+...     print(paths.cache.relative_to(root).as_posix())
+...     print(paths.data("items.json").relative_to(root).as_posix())
+...     print(paths("report.txt").relative_to(root).as_posix())
+...     print(paths.data.exists())
 data/cache
 data/items.json
 report.txt
 False
+
 ```
 
 `data` joins the root. The `@data` anchor makes `cache` relative to the earlier
@@ -46,11 +39,14 @@ replace earlier segments.
 
 Within the temporary-directory block above, these operations have different effects:
 
-```python
-moved = paths.copy(root=root / "next")
-relocated = moved.copy(data="data", cache="@data/cache")
-print(moved.cache == paths.cache)
-print(relocated.cache.relative_to(root).as_posix())
+```pycon
+>>> moved = paths.copy(root=root / "next")
+>>> relocated = moved.copy(data="data", cache="@data/cache")
+>>> print(moved.cache == paths.cache)
+True
+>>> print(relocated.cache.relative_to(root).as_posix())
+next/data/cache
+
 ```
 
 They print `True` and `next/data/cache`. Stored paths are already absolute, so a

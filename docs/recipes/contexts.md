@@ -4,32 +4,24 @@ Sometimes several functions need request settings, but passing them through ever
 call would be awkward. [BaseContext][confidantic.context.BaseContext] provides an
 explicit activation scope. This recipe needs only core Confidantic.
 
-```python
-from confidantic.context import BaseContext
-
-
-class RequestContext(BaseContext):
-    request_id: str = "default"
-    debug: bool = False
-
-
-def describe_request() -> str:
-    """Read settings for the active request."""
-    current = RequestContext.current()
-    return f"{current.request_id}: debug={current.debug}"
-
-
-print(describe_request())
-request = RequestContext(request_id="request-42", debug=True)
-with RequestContext.temporary(request):
-    print(describe_request())
-print(describe_request())
-```
-
-```text
+```pycon
+>>> from confidantic.context import BaseContext
+>>> class RequestContext(BaseContext):
+...     request_id: str = "default"
+...     debug: bool = False
+>>> def describe_request() -> str:
+...     """Read settings for the active request."""
+...     current = RequestContext.current()
+...     return f"{current.request_id}: debug={current.debug}"
+>>> print(describe_request())
 default: debug=False
+>>> request = RequestContext(request_id="request-42", debug=True)
+>>> with RequestContext.temporary(request):
+...     print(describe_request())
 request-42: debug=True
+>>> print(describe_request())
 default: debug=False
+
 ```
 
 Constructing `request` validates it but does not activate it. The `with` block
@@ -42,10 +34,12 @@ execution context. Prefer `temporary()` when the desired lifetime has a clear ex
 Activation checks the instance's class and retains it by reference; it does not
 revalidate all fields. A validated copy is useful for changing selected settings:
 
-```python
-current = RequestContext.current()
-with RequestContext.temporary(current.copy(debug=True)):
-    print(describe_request())
+```pycon
+>>> current = RequestContext.current()
+>>> with RequestContext.temporary(current.copy(debug=True)):
+...     print(describe_request())
+default: debug=True
+
 ```
 
 After the first example, this prints `default: debug=True` inside the block and

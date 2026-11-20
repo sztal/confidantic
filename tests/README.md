@@ -32,9 +32,10 @@ uv run pytest
 ```
 
 To focus on one area, pass its path to pytest, for example
-`uv run pytest tests/_config/test_nested.py`. The full run also collects package
-and documentation doctests. Example coverage is listed in
-`integration/test_examples.py`.
+`uv run pytest tests/_config/test_nested.py`. The full run collects package and
+documentation doctests. Python examples formatted as interactive `pycon` fences
+with `>>>` prompts run as doctests; ordinary Python and console fences do not.
+Runnable script coverage is listed in `integration/test_examples.py`.
 
 For coverage statistics, use a fresh temporary `COVERAGE_FILE` with `make coverage`
 after linting. This avoids stale paths after moving files without erasing another

@@ -29,13 +29,31 @@ A specialized Factory enforces target compatibility before delegating to
 importable module attribute.
 
 `instance_from(source, **kwargs)` generates a model and instantiates it with those
-configuration inputs. They are subject to normal settings precedence. Recursive
-generation and constructor arguments use `model_from` followed by instantiation.
+configuration inputs, subject to normal settings precedence. It also accepts
+the annotation and field-selection generation options below. Recursive generation
+and constructor arguments use `model_from` followed by instantiation.
 
-`model_resolve()` delegates to [\_factory_resolution](_factory_resolution.md) under
-CLI suppression. Only `factory_fields` are forwarded as constructor keyword arguments;
-additional fields on a Factory subclass are excluded. Every call can execute target
-constructors. Updates must be made before resolution.
+Both methods accept `__types_namespace__` to supply annotation names and
+`__strict__` to control unresolved or missing annotations. Default strict
+generation omits unannotated parameters and rejects unresolved names; permissive
+generation uses `Any` for those fields. Generated models retain this policy for
+rebuilds and target conversions. These options are independent of strict/lax
+validation described above. See the
+[annotation guide](../../examples/advanced/factory-annotations.md).
+
+`instance(*args, **kwargs)` delegates to [\_factory_resolution](_factory_resolution.md)
+under CLI suppression. Runtime bindings override configured `factory_fields` before
+recursive traversal. Additional model fields are excluded. Runtime values receive
+no additional field validation; use `copy(...).instance()` for validated updates.
+
+`model_resolve()` is inherited from BaseConfig and preserves the root model while
+constructing nested factories. Factory instances remain non-callable, including
+when supplied to `Make[Factory[T]]` or `Call[Factory[T]]` validation.
+
+`__include__` and `__exclude__` select root constructor fields using name sets,
+name predicates, or (resolved annotation, name) predicates. They are mutually
+exclusive, persist through target conversions, and do not propagate recursively.
+Excluded required inputs must be supplied to `instance()`.
 
 ## Serialization and preservation rules
 

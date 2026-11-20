@@ -1,0 +1,2 @@
+- Added factory annotation controls `__types_namespace__` and `__strict__`, including permissive handling of unresolved or missing annotations.
+- Added factory field selection with `__include__` and `__exclude__` and support for runtime constructor arguments in `Factory.instance()`.

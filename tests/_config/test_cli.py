@@ -70,7 +70,7 @@ def test_model_resolve_disables_cli_parsing(
 
     monkeypatch.setattr(sys, "argv", ["factory.py", "--value=17"])
 
-    assert Factory.model_from(Target)().model_resolve().config.value == 1
+    assert Factory.model_from(Target)().instance().config.value == 1
 
 
 @pytest.mark.parametrize("entry", ["base", "factory"])
@@ -90,7 +90,7 @@ def test_factory_resolution_restores_cli_after_nested_construction(
 
     class Target:
         def __init__(self) -> None:
-            Factory.instance_from(InnerTarget).model_resolve()
+            Factory.instance_from(InnerTarget).instance()
             observed.append(CliConfig().value)
             if target_fails:
                 raise RuntimeError("Target failed")
@@ -100,11 +100,12 @@ def test_factory_resolution_restores_cli_after_nested_construction(
 
     factory = Factory.instance_from(Target)
     config = Container(target=factory) if entry == "base" else factory
+    construct = config.model_resolve if entry == "base" else config.instance
     if target_fails:
         with pytest.raises(RuntimeError, match="Target failed"):
-            config.model_resolve()
+            construct()
     else:
-        config.model_resolve()
+        construct()
 
     assert observed == [1, 1]
     assert CliConfig().value == 9
@@ -121,7 +122,7 @@ def test_factory_cli_help_policy_preserves_nested_options(
 
     annotation = Config.model_fields["target"].annotation
     config = Config(_cli_parse_args=["--target.value", "7"])
-    assert config.target.model_resolve().value == 7
+    assert config.target.instance().value == 7
     assert Config.model_fields["target"].annotation is annotation
 
     if help_enabled:
@@ -131,7 +132,7 @@ def test_factory_cli_help_policy_preserves_nested_options(
         assert "--target.value" in capsys.readouterr().out
     else:
         config = Config(_cli_parse_args=["--help", "--target.value", "8"])
-        assert config.target.model_resolve().value == 8
+        assert config.target.instance().value == 8
         assert capsys.readouterr().out == ""
 
 
@@ -153,7 +154,7 @@ def test_factory_cli_imports_constrained_class_arguments() -> None:
             "tests._config.factory_targets:DerivedTarget",
         ]
     )
-    assert config.target.model_resolve().dependency is DerivedTarget
+    assert config.target.instance().dependency is DerivedTarget
     with pytest.raises(ValidationError, match="subclass of SimpleTarget"):
         Config(_cli_parse_args=["--target.dependency", "builtins:dict"])
 

@@ -3,12 +3,17 @@
 Confidantic uses `master` for integration and annotated Git tags for package
 versions. Hatchling and `uv-dynamic-versioning` derive the version; there is no
 version field to bump. `confidantic.__version__` reads installed package metadata.
+Start with [contributor setup and checks](contributing.md); use
+[agent workflows](agent-skills.md) to select the requested integration or release
+stage. The [release-package skill](https://github.com/sztal/confidantic/blob/master/.github/skills/release-package/SKILL.md)
+follows the procedures on this page.
 
 ## Development and merge notes
 
 Develop features and fixes without adding changelog fragments. When a branch is
 ready to merge, summarize the final changes relative to the integrated master.
-The `merge-to-master` skill can write these summaries. Exclude abandoned APIs,
+The [merge-to-master skill](https://github.com/sztal/confidantic/blob/master/.github/skills/merge-to-master/SKILL.md)
+can write these summaries. Exclude abandoned APIs,
 intermediate fixes to unreleased features, and changes already on master.
 
 Put nonempty category files in a directory outside the checkout, for example
@@ -51,9 +56,35 @@ profile, and rebuilds and installs the sdist outside Git. `TAG=v1.2.0` additiona
 requires an annotated tag at the current commit and matching artifact versions.
 Development versions are allowed only when no release tag is requested.
 
-`check` runs Nox lint before direct pytest, followed by typecheck, docs, build,
-and distribution checks. It never invokes the local multi-Python Nox matrix.
+`check` runs Nox lint before direct pytest, followed by `make check-typecheck`,
+docs, build, and distribution checks. It never invokes the local multi-Python Nox matrix.
 Checks that rewrite files fail preparation so the changes can be reviewed.
+
+### Type-checking policy
+
+The `[tool.project-checks]` table in `pyproject.toml` configures the same policy
+for local checks, CI, merge preparation, and release preparation:
+
+```toml
+[tool.project-checks]
+typecheck_level = "basic"
+typecheck_source_only = true
+require_typecheck = true
+```
+
+`basic` uses non-strict mypy with the existing explicit diagnostics in
+`[tool.mypy]`. `strict` additionally enables strict checks; `none` skips mypy.
+Source-only checking targets `confidantic/`. Setting `typecheck_source_only`
+to false explicitly includes `tests/`, `scripts/`, and `noxfile.py`.
+
+`make typecheck` runs the configured level and scope and propagates errors even
+when `require_typecheck` is false. `make check-typecheck` applies that setting:
+errors block validation by default; setting it to false reports failures as
+advisory and continues. Invalid settings always fail. `_typecheck` is the internal
+Nox execution target. Direct `uv run noxfile.py -s typecheck` also uses the shared
+level and scope and propagates errors; explicit Nox positional arguments can
+override the target paths. Both direct and policy-aware commands skip mypy when
+disabled. These settings do not change pytest strictness or strict docs builds.
 
 ## Build and publish documentation
 

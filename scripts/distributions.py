@@ -109,7 +109,7 @@ def inspect_distributions(directory: Path, tag: str | None = None) -> tuple[Path
     for info in (wheel_metadata, source_metadata):
         if info["Name"] != "confidantic" or info["Version"] != str(wheel_version):
             raise ValueError("Distribution metadata does not match its filename")
-        if info["Requires-Python"] != ">=3.11" or info["License-Expression"] != "MIT":
+        if info["Requires-Python"] != ">=3.13" or info["License-Expression"] != "MIT":
             raise ValueError("Distribution Python or license metadata is incorrect")
     if sorted(wheel_metadata.get_all("Requires-Dist", [])) != sorted(
         source_metadata.get_all("Requires-Dist", [])

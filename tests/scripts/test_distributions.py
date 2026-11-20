@@ -13,11 +13,15 @@ from scripts import distributions
 
 
 def artifacts(
-    directory: Path, version: str = "1.2.3", *, typed: bool = True
+    directory: Path,
+    version: str = "1.2.3",
+    *,
+    typed: bool = True,
+    requires_python: str = ">=3.13",
 ) -> tuple[Path, Path]:
     """Write small but structurally valid distributions for metadata checks."""
     directory.mkdir(exist_ok=True)
-    info = f"Metadata-Version: 2.4\nName: confidantic\nVersion: {version}\nRequires-Python: >=3.11\nLicense-Expression: MIT\nRequires-Dist: pydantic>=2.14\n\nDescription\n"
+    info = f"Metadata-Version: 2.4\nName: confidantic\nVersion: {version}\nRequires-Python: {requires_python}\nLicense-Expression: MIT\nRequires-Dist: pydantic>=2.14\n\nDescription\n"
     wheel = directory / f"confidantic-{version}-py3-none-any.whl"
     with zipfile.ZipFile(wheel, "w") as archive:
         archive.writestr(f"confidantic-{version}.dist-info/METADATA", info)
@@ -53,6 +57,12 @@ def test_development_build_is_not_release(tmp_path: Path) -> None:
     distributions.inspect_distributions(tmp_path)
     with pytest.raises(ValueError, match="does not match"):
         distributions.inspect_distributions(tmp_path, "v1.2.3")
+
+
+def test_distribution_rejects_old_python_requirement(tmp_path: Path) -> None:
+    artifacts(tmp_path, requires_python=">=3.11")
+    with pytest.raises(ValueError, match="Python or license metadata"):
+        distributions.inspect_distributions(tmp_path)
 
 
 @pytest.mark.parametrize(

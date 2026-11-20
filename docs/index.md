@@ -15,21 +15,15 @@ Confidantic helps you give a Python application clear, validated settings. Defin
 fields once, supply values from Python, environment variables, or a command line,
 and get useful errors when an input is wrong.
 
-```python
-from confidantic import BaseConfig
-
-
-class AppConfig(BaseConfig):
-    name: str = "orders"
-    retries: int = 3
-
-
-config = AppConfig(retries=5)
-print(config.model_dump())
-```
-
-```text
+```pycon
+>>> from confidantic import BaseConfig
+>>> class AppConfig(BaseConfig):
+...     name: str = "orders"
+...     retries: int = 3
+>>> config = AppConfig(retries=5)
+>>> print(config.model_dump())
 {'name': 'orders', 'retries': 5}
+
 ```
 
 It builds on [Pydantic models][pydantic.BaseModel] and
@@ -42,6 +36,8 @@ when your application needs them.
 
 - **New to Confidantic?** [Install it](getting-started/installation.md), then
     [configure your first application](getting-started/first-application.md).
+- **Already using Pydantic?** Compare
+    [Pydantic, Pydantic Settings, and Confidantic](getting-started/confidantic-vs-pydantic.md).
 - **Working on an application?** Learn about [input sources](guide/sources.md),
     [command-line options](guide/cli.md), and [nested settings](guide/nested-settings.md).
 - **Building objects from configuration?** Start with [factories](guide/factories.md)
@@ -49,10 +45,12 @@ when your application needs them.
 - **Want to understand the design?** Read the [concepts](concepts/values-and-inheritance.md)
     and [architecture overview](architecture/overview.md).
 - **Looking up a name or option?** Use the [reference](reference/index.md).
+- **Contributing?** Follow [setup and checks](contributing.md),
+    [agent workflows](agent-skills.md), and [merging and releasing](releasing.md).
 
 ## Installation
 
-The core package requires Python 3.11 or later. See
+The core package requires Python 3.13 or later. See
 [installation and optional extras](getting-started/installation.md).
 
 ## Frozen configuration

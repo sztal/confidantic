@@ -387,3 +387,29 @@ def test_make_preserves_nested_constructed_values() -> None:
     )
 
     assert settings.parent.child == Child(value=42)
+
+
+@pytest.mark.parametrize("annotation", [Make, Call], ids=["make", "call"])
+def test_directive_factory_values_remain_lazy(annotation: Any) -> None:
+    """Repeated validation retains configs without constructing their targets."""
+    from confidantic import Factory
+
+    calls: list[int] = []
+
+    class Target:
+        def __init__(self, value: int = 1) -> None:
+            calls.append(value)
+            self.value = value + 1
+
+    config = Factory.instance_from(Target, value=3)
+    adapter = TypeAdapter(annotation[Factory[Target]])
+    assert adapter.validate_python(config) is config
+    assert adapter.validate_python(config) is config
+    generated = adapter.validate_python(
+        {"@call": Factory.instance_from, "source": Target, "value": 4}
+    )
+    assert isinstance(generated, Factory)
+    assert generated.value == 4
+    assert calls == []
+    assert config.instance().value == 4
+    assert calls == [3]

@@ -12,6 +12,7 @@ nav = [
   { "Getting started" = [
     { "Installation" = "getting-started/installation.md" },
     { "First application" = "getting-started/first-application.md" },
+    { "Confidantic versus Pydantic" = "getting-started/confidantic-vs-pydantic.md" },
   ] },
   { "User guide" = [
     { "Settings and updates" = "guide/settings.md" },
@@ -51,6 +52,8 @@ nav = [
     { "Annotations" = "reference/annotations.md" },
   ] },
   { "Project" = [
+    { "Contributing" = "contributing.md" },
+    { "Agent workflows" = "agent-skills.md" },
     { "Release notes" = "changelog.md" },
     { "Merging and releasing" = "releasing.md" },
     { "License" = "license.md" },

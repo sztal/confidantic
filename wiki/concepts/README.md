@@ -4,6 +4,9 @@ Read the first three pages together: they establish what a configuration is,
 where its inputs come from, and how nested values are combined. Later pages
 describe independent capabilities that build on those rules.
 
+For an overview of the library boundaries, see
+[Confidantic versus Pydantic](confidantic-vs-pydantic.md).
+
 1. [Configuration models](configuration-models.md): validation, options, freezing,
    copying, and explicit mutation.
 1. [Sources and inheritance](sources-and-inheritance.md): precedence and provenance.

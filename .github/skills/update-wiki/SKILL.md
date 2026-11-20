@@ -17,7 +17,9 @@ workflow for those records.
 Use `confidantic/` as the package source, `tests/` as the behavioral reference,
 `docs/` as the published documentation surface, and `examples/` for runnable
 guides. Check `pyproject.toml`, `.python-version`, and `zensical.toml` for
-supported Python versions and tool configuration.
+supported Python versions and tool configuration. Preserve the current
+`concepts/`, `architecture/`, `api/`, and `examples/` sections and guide links to
+runnable scripts; do not reorganize pages to match a generic template.
 
 ## Workflow
 
@@ -43,8 +45,12 @@ supported Python versions and tool configuration.
 
 - Honor the requested update without rewriting unrelated content.
 - Do not leave obsolete paths, commands, APIs, or project claims in the page.
-- Remove bug-backlog content after ensuring it is recorded in `BUGS.md`.
+- Report misplaced defect records for `BUGS.md` before removing wiki backlog
+  content; confirm the records are preserved before removal. Do not modify the
+  ledger as part of this wiki-only workflow.
 - Distinguish verified facts from assumptions, questions, and pending work.
 - Do not add decorative advanced Markdown features or copy large source
   excerpts.
+- Check links and advertised commands. The wiki is not collected by default
+  pytest or the docs build; report example-testing limitations accurately.
 - Do not modify files outside `wiki/` as part of this skill.

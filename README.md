@@ -38,7 +38,8 @@ for a step-by-step introduction.
 
 ## Installation
 
-Confidantic requires Python 3.11 or later. Install with pip:
+Confidantic requires Python 3.13 or later. CI tests Python 3.13, 3.14, and 3.15.
+Install with pip:
 
 ```console
 python -m pip install confidantic
@@ -146,7 +147,7 @@ class Service:
 
 ServiceConfig = Factory.model_from(Service)
 config = ServiceConfig(host="api.example.com", port=8080)
-service = config.model_resolve()
+service = config.instance()
 print(service)
 ```
 
@@ -155,7 +156,7 @@ Service(host='api.example.com', port=8080)
 ```
 
 `model_from()` generates a configuration class, instantiating it validates the
-inputs, and `model_resolve()` constructs the service. See the
+inputs, and `instance()` constructs the service. See the
 [factory guide](https://sztal.github.io/confidantic/guide/factories/).
 
 ### Templates
@@ -167,7 +168,7 @@ and `Factory` from the preceding example:
 template = Service("api.example.com", 8000)
 TemplateConfig = Factory.model_from(template)
 config = TemplateConfig(port=9000)
-service = config.model_resolve()
+service = config.instance()
 print(service)
 print(template)
 ```
@@ -232,9 +233,16 @@ this order so formatting happens before tests:
 ```console
 uv run noxfile.py -s lint
 uv run pytest
-uv run noxfile.py -s typecheck
+make typecheck
 make docs
 ```
+
+Type checking defaults to non-strict mypy over `confidantic/` only. Configure
+the level, scope, and required/advisory policy in `[tool.project-checks]` in
+`pyproject.toml`. `make typecheck` propagates failures; `make check-typecheck`
+honors the policy and is used by CI and shared merge/release validation. Both
+skip mypy when the level is `none`. `make test` runs direct pytest;
+`make nox` runs the supported-Python matrix for human contributors.
 
 `make docs` builds the documentation into `site/`. Use `make docs-serve` for a
 local preview that reloads when you edit the Markdown sources.

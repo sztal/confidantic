@@ -1,6 +1,5 @@
 """Rich presentation loaded only when configuration information is requested."""
 
-from collections.abc import Mapping
 from io import StringIO
 from typing import Any, Literal, get_origin
 
@@ -16,7 +15,7 @@ from rich.text import Text
 class _InfoRenderer:
     """Build and render tables for one model with shared presentation options.
 
-    The model supplies ordered field metadata. Optional values are the caller's
+    The model supplies ordered field metadata. An optional instance supplies
     stored Python values; rendering neither serializes them nor runs factories.
 
     Parameters
@@ -30,6 +29,8 @@ class _InfoRenderer:
     colors
         Whether to style cells and request terminal output when rendering. Rich
         still applies its environment controls to the final output.
+    respect_field_repr
+        Whether to omit fields configured with ``repr=False``.
     """
 
     def __init__(
@@ -39,16 +40,18 @@ class _InfoRenderer:
         header: bool,
         describe: bool,
         colors: bool,
+        respect_field_repr: bool,
     ) -> None:
         self._model = model
         self._header = header
         self._describe = describe
         self._colors = colors
+        self._respect_field_repr = respect_field_repr
 
     def build_table(
         self,
         *,
-        values: Mapping[str, Any] | None = None,
+        instance: BaseModel | None = None,
         types: bool,
         defaults: bool,
     ) -> Table:
@@ -56,9 +59,9 @@ class _InfoRenderer:
 
         Parameters
         ----------
-        values
-            Stored values keyed by every canonical field name, or None to omit
-            the value column. Values are displayed with their Python representations.
+        instance
+            Model instance supplying stored values, or None to omit the value
+            column. Values are displayed with their Python representations.
         types
             Whether to display field annotations.
         defaults
@@ -82,7 +85,7 @@ class _InfoRenderer:
         table.add_column("Option", style="cyan" if colors else None, no_wrap=True)
         if types:
             table.add_column("Type", style="magenta" if colors else None)
-        if values is not None:
+        if instance is not None:
             table.add_column("Value")
         if defaults:
             table.add_column("Default")
@@ -90,6 +93,8 @@ class _InfoRenderer:
             table.add_column("Description")
 
         for field_name, field in self._model.model_fields.items():
+            if self._respect_field_repr and not field.repr:
+                continue
             cells: list[Any] = [Text(field_name)]
             if types:
                 annotation = field.annotation
@@ -100,8 +105,10 @@ class _InfoRenderer:
                 else:
                     annotation_name = str(annotation).removeprefix("typing.")
                 cells.append(Text(annotation_name))
-            if values is not None:
-                cells.append(Pretty(values[field_name], highlighter=highlighter))
+            if instance is not None:
+                cells.append(
+                    Pretty(getattr(instance, field_name), highlighter=highlighter)
+                )
             if defaults:
                 default: Text | Pretty
                 if field.is_required():

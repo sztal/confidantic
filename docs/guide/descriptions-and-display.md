@@ -4,21 +4,14 @@ Field descriptions help people understand command-line help and configuration
 reports. Start with an explicit description when you want the intent beside the
 field definition:
 
-```python
-from pydantic import Field
-
-from confidantic import BaseConfig
-
-
-class AppConfig(BaseConfig):
-    retries: int = Field(3, description="Number of retry attempts.")
-
-
-print(AppConfig.model_fields["retries"].description)
-```
-
-```text
+```pycon
+>>> from pydantic import Field
+>>> from confidantic import BaseConfig
+>>> class AppConfig(BaseConfig):
+...     retries: int = Field(3, description="Number of retry attempts.")
+>>> print(AppConfig.model_fields["retries"].description)
 Number of retry attempts.
+
 ```
 
 ## Field documentation
@@ -39,38 +32,38 @@ subclass's NumPy or Google `Attributes`
 section to replace the entire section with effective model field names and descriptions.
 The format is detected automatically, and text outside the section is preserved:
 
-```python
-from confidantic import BaseConfig
-from pydantic import Field
+```pycon
+>>> from confidantic import BaseConfig
+>>> from pydantic import Field
+>>> class AppConfig(BaseConfig):
+...     """Application configuration.
+...
+...     Attributes
+...     ----------
+...     @attrs
+...     """
+...     retries: int = Field(3, description="Number of retry attempts.")
+>>> "Number of retry attempts." in AppConfig.__doc__
+True
 
-
-class AppConfig(BaseConfig):
-	"""Application configuration.
-
-	Attributes
-	----------
-	@attrs
-	"""
-
-	retries: int = Field(3, description="Number of retry attempts.")
 ```
 
 Google sections accept either `@attrs` or `@attrs:`:
 
-```python
-from confidantic import BaseConfig, ConfigModelDict
-from pydantic import Field
+```pycon
+>>> from confidantic import BaseConfig, ConfigModelDict
+>>> from pydantic import Field
+>>> class AppConfig(BaseConfig):
+...     """Application configuration.
+...
+...     Attributes:
+...         @attrs
+...     """
+...     model_config = ConfigModelDict(docstring_style="google")
+...     retries: int = Field(3, description="Number of retry attempts.")
+>>> "Number of retry attempts." in AppConfig.__doc__
+True
 
-
-class AppConfig(BaseConfig):
-    """Application configuration.
-
-    Attributes:
-        @attrs
-    """
-
-    model_config = ConfigModelDict(docstring_style="google")
-    retries: int = Field(3, description="Number of retry attempts.")
 ```
 
 `docstring_style` accepts `"numpy"`, `"google"`, or `None` (the default, for
@@ -96,21 +89,21 @@ and does not convert docstrings.
 Set `docstring_set_attributes_section=False` to retain an `@attrs` marker
 without replacing it:
 
-```python
-from confidantic import BaseConfig, ConfigModelDict
+```pycon
+>>> from confidantic import BaseConfig, ConfigModelDict
+>>> class AppConfig(BaseConfig):
+...     """Application configuration.
+...
+...     Attributes
+...     ----------
+...     @attrs
+...     """
+...     model_config = ConfigModelDict(
+...         docstring_set_attributes_section=False,
+...     )
+>>> "@attrs" in AppConfig.__doc__
+True
 
-
-class AppConfig(BaseConfig):
-	"""Application configuration.
-
-	Attributes
-	----------
-	@attrs
-	"""
-
-	model_config = ConfigModelDict(
-		docstring_set_attributes_section=False,
-	)
 ```
 
 Explicit `Field(description=...)` descriptions take precedence over extracted
@@ -149,6 +142,29 @@ config.info()
 The table shows `name` as `orders` and `retries` as `5`; its layout adapts to the
 terminal. `model_info()` describes declared fields rather than one instance's
 stored values. The table output uses [rich.table.Table][].
+
+Both methods omit top-level fields declared with `Field(repr=False)` by default.
+Pass `respect_field_repr=False` to include those fields. This option only controls
+table rows; nested values retain their own representations, and `Field(exclude=True)`
+controls serialization rather than display. Repr filtering is not a general
+secrecy guarantee.
+
+This executable example checks both methods without depending on table layout:
+
+```pycon
+>>> from pydantic import Field
+>>> from confidantic import BaseConfig
+>>> class DisplayConfig(BaseConfig):
+...     name: str = "orders"
+...     internal_label: str = Field("internal", repr=False)
+>>> config = DisplayConfig()
+>>> for render in (DisplayConfig.model_info, config.info):
+...     assert "internal_label" not in render(output="string")
+...     assert "internal_label" in render(output="string", respect_field_repr=False)
+>>> config.model_dump()["internal_label"]
+'internal'
+
+```
 
 For plain Python data, `model_dump()` needs no display extra. To find an input's
 origin, use [source provenance](sources.md#explain-a-values-origin).

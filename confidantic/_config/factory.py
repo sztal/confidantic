@@ -7,18 +7,22 @@ lazily so their collaborators can refer to the fully defined ``Factory`` class.
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Callable, Mapping
 from copy import deepcopy
+from inspect import Signature, getattr_static, signature
 from typing import (
     Any,
     ClassVar,
     Generic,
+    TypeAlias,
     TypeVar,
     cast,
     overload,
 )
 
 from pydantic import GetCoreSchemaHandler
+from pydantic._internal._mock_val_ser import MockValSer
 from pydantic_core import (
     CoreSchema,
     PydanticCustomError,
@@ -26,6 +30,7 @@ from pydantic_core import (
 )
 
 from confidantic._config._cli import _CliSettings
+from confidantic._config._options import ConfigModelDict
 from confidantic._config._settings import wrap_settings_schema
 from confidantic._config.base import BaseConfig
 
@@ -33,6 +38,24 @@ __all__ = ("Factory",)
 
 T = TypeVar("T")
 U = TypeVar("U")
+_FieldSelector: TypeAlias = (
+    set[str] | frozenset[str] | Callable[[str], bool] | Callable[[Any, str], bool]
+)
+
+
+def _constructor_signature(target: type[Any]) -> Signature:
+    """Inspect constructor parameters without evaluating unresolved annotations."""
+    if sys.version_info >= (3, 14):
+        from annotationlib import Format
+
+        result = signature(target.__init__, annotation_format=Format.FORWARDREF)
+    else:
+        result = signature(target.__init__)
+    parameters = list(result.parameters.values())
+    descriptor = getattr_static(target, "__init__")
+    if parameters and not isinstance(descriptor, (staticmethod, classmethod)):
+        parameters.pop(0)
+    return result.replace(parameters=parameters)
 
 
 def _factory_target(factory_type: type[Any]) -> type[Any] | None:
@@ -65,12 +88,29 @@ def _serialize_factory(value: Any, handler: Any) -> Any:
     return handler(value)
 
 
+class _DeferredFactorySchema(MockValSer[Any]):
+    """Keep Pydantic's deferred validator/serializer pickleable.
+
+    Pickle probes __setstate__ before restoring slots. The upstream proxy would
+    attempt a rebuild with its own slots still missing and recurse indefinitely.
+    All actual validator/serializer accesses retain Pydantic's lazy rebuilding.
+    """
+
+    __slots__ = ()
+
+    def __getattr__(self, name: str) -> Any:
+        if name == "__setstate__":
+            raise AttributeError(name)
+        return super().__getattr__(name)
+
+
 class Factory(BaseConfig, Generic[T]):
     """Configuration generated from a target type's constructor.
 
     Concrete subclasses are created with :meth:`model_from`. Their fields
     correspond to annotated constructor parameters and validated instances can
-    create the target object by calling :meth:`model_resolve`.
+    create the target object by calling :meth:`instance`. Inherited
+    :meth:`model_resolve` preserves the root model and resolves nested factories.
 
     In lax validation, Pydantic fields convert compatible target instances to
     generated factory instances and target classes to generated factory classes.
@@ -84,9 +124,9 @@ class Factory(BaseConfig, Generic[T]):
     factory_target
         Target class constructed during resolution.
     factory_fields
-        Constructor field names forwarded as keyword arguments during
-        resolution. Additional fields declared on a factory subclass are not
-        forwarded to the target by :meth:`model_resolve`. Make serialization
+        Configured constructor field names used during construction.
+        Additional fields declared on a factory subclass are not
+        forwarded to the target by :meth:`instance`. Make serialization
         includes only constructor fields and uses their canonical keyword names.
         Serialization filters and field serializers still apply; ambiguous
         serialized constructor keys raise an error.
@@ -94,6 +134,31 @@ class Factory(BaseConfig, Generic[T]):
 
     factory_target: ClassVar[type[T]]
     factory_fields: ClassVar[tuple[str, ...]] = ()
+    model_config: ClassVar[ConfigModelDict] = ConfigModelDict(defer_build=True)
+
+    _factory_strict: ClassVar[bool] = True
+    _factory_types_namespace: ClassVar[Mapping[str, Any] | None] = None
+    _factory_include: ClassVar[_FieldSelector | None] = None
+    _factory_exclude: ClassVar[_FieldSelector | None] = None
+
+    @classmethod
+    def __pydantic_init_subclass__(cls, **kwargs: Any) -> None:
+        """Preserve deferred generic bases when generated classes are serialized."""
+        super().__pydantic_init_subclass__(**kwargs)
+        for kind in ("validator", "serializer"):
+            attribute = f"__pydantic_{kind}__"
+            deferred = cls.__dict__.get(attribute)
+            if isinstance(deferred, MockValSer):
+                setattr(
+                    cls,
+                    attribute,
+                    _DeferredFactorySchema(
+                        deferred._error_message,
+                        code=deferred._code,
+                        val_or_ser=kind,
+                        attempt_rebuild=deferred._attempt_rebuild,
+                    ),
+                )
 
     @classmethod
     def __get_pydantic_core_schema__(
@@ -169,8 +234,20 @@ class Factory(BaseConfig, Generic[T]):
                 if target is not None and not issubclass(value_target, target):
                     raise TypeError
                 if isinstance(value, type):
-                    return Factory.model_from(value)
-                return Factory.model_from(value)()
+                    return Factory.model_from(
+                        value,
+                        __strict__=cls._factory_strict,
+                        __types_namespace__=cls._factory_types_namespace,
+                        __include__=cls._factory_include,
+                        __exclude__=cls._factory_exclude,
+                    )
+                return Factory.model_from(
+                    value,
+                    __strict__=cls._factory_strict,
+                    __types_namespace__=cls._factory_types_namespace,
+                    __include__=cls._factory_include,
+                    __exclude__=cls._factory_exclude,
+                )()
             except (TypeError, ValueError) as error:
                 raise PydanticCustomError(
                     "factory",
@@ -201,6 +278,10 @@ class Factory(BaseConfig, Generic[T]):
         *args: Any,
         __name__: str | None = None,
         __recursive__: type[Any] | Callable[[Any], bool] | None = None,
+        __strict__: bool = True,
+        __types_namespace__: Mapping[str, Any] | None = None,
+        __include__: _FieldSelector | None = None,
+        __exclude__: _FieldSelector | None = None,
         **kwargs: Any,
     ) -> type[Factory[U]]: ...
 
@@ -212,6 +293,10 @@ class Factory(BaseConfig, Generic[T]):
         *,
         __name__: str | None = None,
         __recursive__: type[Any] | Callable[[Any], bool] | None = None,
+        __strict__: bool = True,
+        __types_namespace__: Mapping[str, Any] | None = None,
+        __include__: _FieldSelector | None = None,
+        __exclude__: _FieldSelector | None = None,
     ) -> type[Factory[U]]: ...
 
     @classmethod
@@ -221,15 +306,22 @@ class Factory(BaseConfig, Generic[T]):
         *args: Any,
         __name__: str | None = None,
         __recursive__: type[Any] | Callable[[Any], bool] | None = None,
+        __strict__: bool = True,
+        __types_namespace__: Mapping[str, Any] | None = None,
+        __include__: _FieldSelector | None = None,
+        __exclude__: _FieldSelector | None = None,
         **kwargs: Any,
     ) -> Any:
         """Create a concrete factory config from a target type or instance.
 
         Annotated positional-or-keyword and keyword-only constructor parameters
-        define the generated fields. Unannotated parameters, ``*args``, and
-        ``**kwargs`` are omitted. Annotated positional-only parameters are
-        rejected because resolution calls the constructor by keyword. An
-        omitted unannotated required parameter can consequently cause a
+        define the generated fields. Unannotated parameters are omitted by
+        default; ``*args`` and ``**kwargs`` are always omitted. Positional-only
+        parameters that would become fields are rejected because resolution
+        calls the constructor by keyword. A field named ``instance`` is also
+        rejected because it would hide the factory's construction method.
+        Exclude these parameters and supply them to :meth:`instance` instead.
+        An omitted unannotated required parameter can consequently cause a
         constructor ``TypeError`` at resolution time.
 
         When ``source`` is an instance, attributes with matching parameter names
@@ -260,6 +352,29 @@ class Factory(BaseConfig, Generic[T]):
             Callable typing forms, including ``typing.Optional[T]``,
             ``Annotated[T, ...]``, and ``NewType``, use type matching without
             invoking their constructors.
+        __strict__
+            Whether unresolved annotation names raise NameError. If False,
+            unresolved annotations and unannotated parameters become Any fields,
+            without type validation or conversion. A partially unresolved
+            annotation becomes Any as a whole. Defaults and requiredness are
+            preserved. Malformed annotations and schema errors still propagate.
+            This controls annotation resolution, not Pydantic validation strictness.
+        __types_namespace__
+            Names taking precedence over automatic constructor annotation lookup.
+            The mapping is shallow-copied; already evaluated type objects are
+            unchanged. Both generation options apply recursively and are retained
+            by generated models for validation-time target conversion and rebuilds.
+            New explicit model_from calls use their own supplied options or defaults.
+        __include__, __exclude__
+            Mutually exclusive root constructor field selectors: a set or
+            frozenset of names, a predicate of the name, or a predicate of
+            (resolved annotation, name). Names are filtered before annotation
+            resolution; typed predicates run before recursive default conversion.
+            Predicates must accept unambiguously one or two positional arguments,
+            without variadics. Exceptions propagate. Selection does not change
+            annotation eligibility and does not propagate through __recursive__.
+            Excluded inputs are supplied at instance() time or use constructor
+            defaults. Sets are copied and policies survive target conversions.
         *args, **kwargs
             Arguments used to construct ``source`` when it is a type. The
             resulting instance values become generated defaults. With no
@@ -276,8 +391,14 @@ class Factory(BaseConfig, Generic[T]):
         ------
         TypeError
             If constructor arguments accompany an instance, the target is
-            incompatible with a specialized factory, or an annotated parameter
-            is positional-only. Constructor and annotation errors propagate.
+            incompatible with a specialized factory, a selected field is
+            positional-only or named ``instance``, or a selector is invalid.
+            Constructor and annotation errors propagate.
+        ValueError
+            If both field selectors are supplied, a selector names an unknown
+            constructor parameter, or selection excludes an inherited model field.
+        NameError
+            If a field annotation contains an unresolved name and __strict__ is True.
         """
         if isinstance(source, type):
             target = source
@@ -304,11 +425,23 @@ class Factory(BaseConfig, Generic[T]):
             target,
             instance=instance,
             recursive_selector=__recursive__,
+            strict=__strict__,
+            types_namespace=__types_namespace__,
+            include=__include__,
+            exclude=__exclude__,
         ).build(name=__name__)
 
     @classmethod
     def instance_from(
-        cls, source: type[U] | U, *, __name__: str | None = None, **kwargs: Any
+        cls,
+        source: type[U] | U,
+        *,
+        __name__: str | None = None,
+        __strict__: bool = True,
+        __types_namespace__: Mapping[str, Any] | None = None,
+        __include__: _FieldSelector | None = None,
+        __exclude__: _FieldSelector | None = None,
+        **kwargs: Any,
     ) -> Factory[U]:
         """Create a new factory config instance from a source.
 
@@ -324,6 +457,15 @@ class Factory(BaseConfig, Generic[T]):
             Target type or instance used to generate the configuration model.
         __name__
             Optional generated model name.
+        __strict__
+            Annotation-resolution policy passed to model_from, independent of
+            Pydantic validation strictness. False includes untyped parameters
+            and replaces unresolved field annotations with Any.
+        __types_namespace__
+            Explicit annotation names passed to model_from with highest priority.
+        __include__, __exclude__
+            Root constructor field selectors passed to model_from. Excluded
+            parameters can be supplied later to instance().
         **kwargs
             Values for the generated fields. Unspecified fields use their
             defaults after consulting configured settings sources.
@@ -333,11 +475,19 @@ class Factory(BaseConfig, Generic[T]):
         Factory[U]
             New factory config instance.
         """
-        return cast(Factory[U], cls.model_from(source, __name__=__name__)(**kwargs))
+        return cast(
+            Factory[U],
+            cls.model_from(
+                source,
+                __name__=__name__,
+                __strict__=__strict__,
+                __types_namespace__=__types_namespace__,
+                __include__=__include__,
+                __exclude__=__exclude__,
+            )(**kwargs),
+        )
 
-    def model_resolve(  # type: ignore[override]
-        self,
-    ) -> T:
+    def instance(self, /, *args: Any, **kwargs: Any) -> T:
         """Create the target object from the validated configuration values.
 
         Traversal starts from ``factory_fields``; additional fields and extras
@@ -348,11 +498,24 @@ class Factory(BaseConfig, Generic[T]):
         Mappings become dictionaries and nested Pydantic models are rebuilt and
         validated. Other objects are passed through unchanged.
 
-        Only ``factory_fields`` are passed to the target, as keyword arguments.
+        Configured ``factory_fields`` are merged with runtime arguments, which
+        take precedence without additional field validation or settings lookup.
+        Positional arguments follow the original constructor signature. Missing
+        required parameters and invalid bindings raise TypeError before nested
+        factories are constructed. Omitted parameters use constructor defaults.
+        Use ``config.copy(...).instance()`` for validated configuration updates.
+
         Each call invokes the target constructor; instance identity is subject
         to that constructor's behavior. CLI parsing is disabled throughout
         resolution, including configuration models constructed by the target;
         other settings sources remain active.
+
+        Parameters
+        ----------
+        *args, **kwargs
+            Runtime constructor inputs, overriding configured values. Overrides
+            apply only to this target, not to nested factories. Supported nested
+            values still undergo recursive resolution. The config is unchanged.
 
         Returns
         -------
@@ -361,6 +524,9 @@ class Factory(BaseConfig, Generic[T]):
 
         Raises
         ------
+        TypeError
+            If runtime arguments cannot bind to the target constructor or a
+            required constructor parameter is missing.
         ValueError
             If recursive traversal encounters a cycle. Nested validation and
             target constructor errors also propagate.
@@ -379,4 +545,4 @@ class Factory(BaseConfig, Generic[T]):
         from confidantic._config._factory_resolution import _FactoryResolver
 
         with _CliSettings.suppress():
-            return cast(T, _FactoryResolver().resolve(self))
+            return cast(T, _FactoryResolver().instance(self, args, kwargs))

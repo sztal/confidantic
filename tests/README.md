@@ -4,13 +4,13 @@ The test layout follows the source layout. Private source module names omit thei
 leading underscore after the `test_` prefix: `_config/_settings.py` maps to
 `tests/_config/test_settings.py`.
 
-| Source or behavior                                                                  | Test location                       |
-| ----------------------------------------------------------------------------------- | ----------------------------------- |
-| `confidantic/__init__.py`                                                           | `test_init.py`                      |
-| `confidantic/annotations.py`, `context.py`, `paths.py`, and other top-level modules | Corresponding `test_<module>.py`    |
-| `confidantic/_config/`                                                              | Corresponding modules in `_config/` |
-| Fresh-process imports, optional dependencies, serialization, and runnable examples  | `integration/`                      |
-| Repository maintenance scripts                                                      | Corresponding modules in `scripts/` |
+| Source or behavior                                                                      | Test location                       |
+| --------------------------------------------------------------------------------------- | ----------------------------------- |
+| `src/confidantic/__init__.py`                                                           | `test_init.py`                      |
+| `src/confidantic/annotations.py`, `context.py`, `paths.py`, and other top-level modules | Corresponding `test_<module>.py`    |
+| `src/confidantic/_config/`                                                              | Corresponding modules in `_config/` |
+| Fresh-process imports, optional dependencies, serialization, and runnable examples      | `integration/`                      |
+| Repository maintenance scripts                                                          | Corresponding modules in `scripts/` |
 
 Place regressions beside the behavior they protect, rather than in a separate
 audit or regression module. Tests for private modules should exercise observable

@@ -4,9 +4,9 @@
 
 - Distribution: `confidantic`
 - Import package: `confidantic`
-- Source directory: `confidantic/`
+- Source directory: `src/confidantic/`
 - Tests: `tests/`
-- Test layout mirrors `confidantic/`: top-level module tests live directly in
+- Test layout mirrors `src/confidantic/`: top-level module tests live directly in
   `tests/`, and configuration internals live in `tests/_config/`. Cross-module
   subprocess and example checks live in `tests/integration/`; maintenance-script
   tests live in `tests/scripts/`. See `tests/README.md` for placement conventions.
@@ -22,7 +22,10 @@
 
 Configuration and CLIs for Python projects based on Pydantic and Pydantic Settings.
 The package requires Python 3.13 or later; the repository's default interpreter
-is read from `.python-version` (currently Python 3.15).
+is read from `.python-version` (currently Python 3.15). Ruff and mypy target
+Python 3.13 so changes remain compatible with the minimum supported version.
+The Copier answer targets 3.13; retain the local `.python-version` override
+when updating from the template.
 
 The package root re-exports `BaseConfig`, `ClassDefaultsSource`,
 `ConfigModelDict`, `Factory`, and `__version__`. `Factory`
@@ -31,10 +34,10 @@ Both `Factory` and `BaseConfig` use the inherited `model_resolve` to preserve th
 root configuration and resolve nested factory values. Root-only `__include__`
 and `__exclude__` selectors support partial factories with runtime inputs. Other
 core public APIs live in
-`confidantic/annotations.py`, `confidantic/configurable.py`,
-`confidantic/context.py`, `confidantic/logging.py`, `confidantic/paths.py`,
-`confidantic/types.py`, and `confidantic/utils.py`. Internal configuration
-primitives live in `confidantic/_config/`, which contains base and factory
+`src/confidantic/annotations.py`, `src/confidantic/configurable.py`,
+`src/confidantic/context.py`, `src/confidantic/logging.py`, `src/confidantic/paths.py`,
+`src/confidantic/types.py`, and `src/confidantic/utils.py`. Internal configuration
+primitives live in `src/confidantic/_config/`, which contains base and factory
 configuration and is re-exported where appropriate by the package root.
 
 ## Working conventions
@@ -62,6 +65,7 @@ Ordinary development and bug-fixing tasks do not add Towncrier fragments. Use th
 documentation-only and internal merges record a no-notes reason. The
 `release-package` skill assembles these notes when preparing a final release.
 Package versions come from annotated Git tags, never a static version field.
+Hatchling and `hatch-vcs` ignore lightweight tags when deriving versions.
 See `docs/releasing.md` for commands, setup, and recovery.
 
 ## Project records
@@ -100,7 +104,7 @@ Defaults are basic, source-only, and required. `make typecheck` propagates error
 `make check-typecheck` honors `require_typecheck` in shared local and CI checks.
 Both skip mypy when the level is `none`. The Nox session uses the same level and
 scope, accepts explicit positional overrides, and propagates errors. Source-only
-checking includes `confidantic/`; broader checking is opt-in and includes tests,
+checking includes `src/confidantic/`; broader checking is opt-in and includes tests,
 scripts, and `noxfile.py`. Existing explicit mypy diagnostics remain enabled in
 basic mode. Report unavailable or failing checks rather than assuming success.
 
@@ -132,7 +136,7 @@ uv run noxfile.py -s docs
 ```
 
 Pytest is configured to collect tests and doctests from `docs/`,
-`confidantic/`, `tests/`, and `README.md`. Documentation builds use
+`src/confidantic/`, `tests/`, and `README.md`. Documentation builds use
 `zensical.toml` and require the `docs` dependency group.
 
 ## Documentation

@@ -11,7 +11,7 @@ source before changing code. Resolve entries one at a time. Remove entries
 proven stale or already fixed rather than restoring obsolete behavior.
 
 Make the smallest focused source change and add a regression test that fails
-before the fix and passes afterward. Source lives under `confidantic/`; place
+before the fix and passes afterward. Source lives under `src/confidantic/`; place
 regressions according to `tests/README.md`. Do not mix unrelated refactors or
 test-audit work into a fix. Release notes are consolidated when merging into
 `master`; do not create fragments during individual fixes.

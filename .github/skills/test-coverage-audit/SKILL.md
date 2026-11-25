@@ -19,7 +19,7 @@ after package files move or disappear, which can cause `No source for code`.
 Prioritize branches, validation, error paths, and public behavior. Avoid adding
 tests only to execute trivial lines.
 
-Use `confidantic/` as the source package and `tests/` as the behavioral test
+Use `src/confidantic/` as the source package and `tests/` as the behavioral test
 surface. Example scripts are under `examples/`; check `tests/integration/test_examples.py`
 to see which are covered by smoke tests.
 
@@ -29,7 +29,7 @@ evidence, affected behavior, and expected behavior. Do not fix it during a cover
 never track it in `wiki/`.
 
 Run `uv run noxfile.py -s lint` before `uv run pytest` after test changes;
-pre-commit can modify files. Pytest collects `confidantic/`, `tests/`, `docs/`,
+pre-commit can modify files. Pytest collects `src/confidantic/`, `tests/`, `docs/`,
 and `README.md`. Reserve `make nox`, `nox -s tests`, or
 `uv run noxfile.py -s tests` for humans; `make test` runs direct pytest.
 

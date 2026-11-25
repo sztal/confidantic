@@ -39,8 +39,8 @@ do not replace the helper with a squash merge or bypass validation.
 
 ## Prepare a release locally
 
-Versions come from annotated Git tags through Hatchling and
-`uv-dynamic-versioning`; never edit a static version field. Use canonical
+Versions come from annotated Git tags through Hatchling and `hatch-vcs`;
+lightweight tags are ignored. Never edit a static version field. Use canonical
 `X.Y.Z`, optionally followed by `aN`, `bN`, or `rcN`, advancing existing local and
 remote release tags. On clean master containing remote master:
 

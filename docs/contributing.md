@@ -20,12 +20,19 @@ uv sync --group dev --group docs --extra all
 ```
 
 `uv python install` reads `.python-version`, currently 3.15. The package supports
-Python 3.13 and later. Dependency groups and tool settings live in
+Python 3.13 and later; Ruff and mypy target 3.13 to preserve that compatibility.
+Dependency groups and tool settings live in
 [pyproject.toml](https://github.com/sztal/confidantic/blob/master/pyproject.toml).
+
+The Copier template ties the tool targets to its default interpreter. This
+project saves the 3.13 target for Ruff and mypy but overrides `.python-version`
+to 3.15. Preserve that override, the project's dependencies, and its merge and
+release safeguards when updating the template. Review update conflicts before
+accepting changes to project-specific settings.
 
 ## Place code and tests
 
-The package lives in `confidantic/`, with configuration internals under `_config/`.
+The package lives in `src/confidantic/`, with configuration internals under `_config/`.
 Follow the [architecture overview](architecture/overview.md) to find the owning
 component. Use type hints, double-quoted strings, and NumPy-style docstrings.
 

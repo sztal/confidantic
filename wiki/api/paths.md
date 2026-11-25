@@ -33,7 +33,7 @@ When editing this module, preserve processing order, typed extras, no filesystem
 creation, and validation-before-canonicalization behavior. BasePaths subclasses
 extend the path fields; they do not provide a deferred dependency graph.
 
-Evidence: [source](../../confidantic/paths.py) and
+Evidence: [source](../../src/confidantic/paths.py) and
 [path tests](../../tests/test_paths.py).
 See [configuration models](../concepts/configuration-models.md),
 [the path guide](../examples/paths.md), and [all modules](README.md).

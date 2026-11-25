@@ -1,8 +1,9 @@
 # Merging and releasing
 
 Confidantic uses `master` for integration and annotated Git tags for package
-versions. Hatchling and `uv-dynamic-versioning` derive the version; there is no
-version field to bump. `confidantic.__version__` reads installed package metadata.
+versions. Hatchling and `hatch-vcs` derive the version from matching annotated
+tags; lightweight tags are ignored. There is no version field to bump.
+`confidantic.__version__` reads installed package metadata.
 Start with [contributor setup and checks](contributing.md); use
 [agent workflows](agent-skills.md) to select the requested integration or release
 stage. The [release-package skill](https://github.com/sztal/confidantic/blob/master/.github/skills/release-package/SKILL.md)
@@ -74,7 +75,7 @@ require_typecheck = true
 
 `basic` uses non-strict mypy with the existing explicit diagnostics in
 `[tool.mypy]`. `strict` additionally enables strict checks; `none` skips mypy.
-Source-only checking targets `confidantic/`. Setting `typecheck_source_only`
+Source-only checking targets `src/confidantic/`. Setting `typecheck_source_only`
 to false explicitly includes `tests/`, `scripts/`, and `noxfile.py`.
 
 `make typecheck` runs the configured level and scope and propagates errors even

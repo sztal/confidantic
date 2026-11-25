@@ -23,7 +23,7 @@ Do not base equality or hashing on iteration order, and retain reconstruction
 through the public constructor. There is no shared cache or registry. Subclasses
 that change constructor requirements must account for the reduction protocol.
 
-Evidence: [source](../../confidantic/types.py) and
+Evidence: [source](../../src/confidantic/types.py) and
 [mapping tests](../../tests/test_types.py).
 See [configuration models](../concepts/configuration-models.md) for related
 freezing semantics and [defining configuration](../examples/defining-config.md)

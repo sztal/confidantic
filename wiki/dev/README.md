@@ -23,7 +23,7 @@ versions, and check settings live in [pyproject.toml](../../pyproject.toml).
 
 | Location               | Responsibility                                                       |
 | ---------------------- | -------------------------------------------------------------------- |
-| `confidantic/`         | Public modules; configuration internals under `_config/`             |
+| `src/confidantic/`     | Public modules; configuration internals under `_config/`             |
 | `tests/`               | Mirrored unit tests, subprocess integration checks, and script tests |
 | `examples/`            | Runnable guides linked from the wiki                                 |
 | `docs/`                | Published documentation built with Zensical                          |

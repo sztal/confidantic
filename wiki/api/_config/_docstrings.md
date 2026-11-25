@@ -37,7 +37,7 @@ validation before imports, and independent post-composition verification. Keep a
 scan state local to the call. Do not rewrite the entire docstring through a parser;
 that would alter unrelated layout and content.
 
-Evidence: [source](../../../confidantic/_config/_docstrings.py) and
+Evidence: [source](../../../src/confidantic/_config/_docstrings.py) and
 [docstring tests](../../../tests/_config/test_docstrings.py).
 See [configuration models](../../concepts/configuration-models.md),
 [logging's marked docstring](../../examples/logging.md), and [the index](README.md).

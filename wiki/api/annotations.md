@@ -39,7 +39,7 @@ the set of accepted runtime types. When editing annotations, preserve validator
 ordering, ordinary-input behavior, and the distinctions between top-level and
 nested directives. Errors from imports and called code must remain visible.
 
-Evidence: [source](../../confidantic/annotations.py) and
+Evidence: [source](../../src/confidantic/annotations.py) and
 [annotation tests](../../tests/test_annotations.py).
 Read [input annotations](../concepts/input-annotations.md), run
 [smart annotations](../examples/smart-annotations.md), or return to

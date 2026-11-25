@@ -64,7 +64,7 @@ constructors retain upstream limitations. Nested reconstruction has a separate
 option-forwarding limitation recorded in [BUGS.md](../../../BUGS.md). Keep transient
 state out of model classes and callbacks so dynamic classes remain serializable.
 
-Evidence: [source](../../../confidantic/_config/base.py),
+Evidence: [source](../../../src/confidantic/_config/base.py),
 [copy/serialization tests](../../../tests/_config/test_base.py),
 [settings tests](../../../tests/_config/test_settings.py), and
 [process tests](../../../tests/integration/test_serialization.py).

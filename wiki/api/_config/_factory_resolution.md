@@ -52,7 +52,7 @@ and constructor exceptions propagate; the model-type cache is per call and need 
 survive errors. Preserve type identity reuse within a call, separate construction of
 repeated values, and container normalization when changing the implementation.
 
-Evidence: [source](../../../confidantic/_config/_factory_resolution.py),
+Evidence: [source](../../../src/confidantic/_config/_factory_resolution.py),
 [resolution tests](../../../tests/_config/test_factory_resolution.py), and
 [CLI suppression tests](../../../tests/_config/test_cli.py).
 See [factory concepts](../../concepts/factories-and-templates.md),

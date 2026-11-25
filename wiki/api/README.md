@@ -1,6 +1,6 @@
 # Implementation reference
 
-Each page maps directly to a Python module: replace `confidantic/` with `wiki/api/`
+Each page maps directly to a Python module: replace `src/confidantic/` with `wiki/api/`
 and `.py` with `.md`. Private paths identify implementation ownership; they do not
 make every symbol in those modules private. Start with
 [the package map](../architecture/package-map.md) for cross-module relationships.

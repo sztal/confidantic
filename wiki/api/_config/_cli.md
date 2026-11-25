@@ -35,7 +35,7 @@ Preserve caller-supplied parsers, copied field metadata, and signature-based opt
 forwarding when editing this module. Parser errors keep upstream exit/exception
 policy. Changes to suppression need nested-construction and restoration checks.
 
-Evidence: [source](../../../confidantic/_config/_cli.py) and
+Evidence: [source](../../../src/confidantic/_config/_cli.py) and
 [CLI tests](../../../tests/_config/test_cli.py).
 Read [CLI concepts](../../concepts/clis.md),
 [dynamic template CLIs](../../examples/advanced/dynamic-template-clis.md), and

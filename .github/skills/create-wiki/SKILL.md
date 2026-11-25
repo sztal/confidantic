@@ -8,7 +8,7 @@ argument-hint: Topic, audience, and relevant sources or decisions
 
 Create concise Markdown documentation for the requested topic and audience.
 Inspect relevant source, tests, configuration, agent guidance, and related pages
-before asserting facts. Use `confidantic/`, `tests/`, `docs/`, and `examples/` as
+before asserting facts. Use `src/confidantic/`, `tests/`, `docs/`, and `examples/` as
 project evidence. Distinguish verified facts from assumptions and open questions.
 
 ## Structure and scope

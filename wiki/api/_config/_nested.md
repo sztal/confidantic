@@ -37,7 +37,7 @@ alias handling, and discriminated replacement. Do not move baseline maps onto mo
 classes or capture them in generated callbacks. Observable behavior is exercised
 through BaseConfig even though ownership is here.
 
-Evidence: [source](../../../confidantic/_config/_nested.py) and
+Evidence: [source](../../../src/confidantic/_config/_nested.py) and
 [nested tests](../../../tests/_config/test_nested.py).
 See [nested configuration](../../concepts/nested-configuration.md),
 [its guide](../../examples/nested-config.md), and [the index](README.md).

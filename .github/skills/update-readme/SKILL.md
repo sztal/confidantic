@@ -35,7 +35,7 @@ include:
    releasing are separate actions and that publication requires authorization.
 
 Confidantic's public API spans the package exports and documented modules in
-`docs/reference/api.md`; verify those against `confidantic/`. Preserve runnable
+`docs/reference/api.md`; verify those against `src/confidantic/`. Preserve runnable
 scripts in `examples/` and their integration coverage. Document setup with uv,
 the interpreter selected by `.python-version`, and Python 3.13 package support.
 Explain `make typecheck` versus policy-aware `make check-typecheck`, using

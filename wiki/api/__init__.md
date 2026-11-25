@@ -24,7 +24,7 @@ Keep re-export identity and `__all__` aligned, preserve metadata-derived version
 and check imports in a fresh interpreter. Prefer extending an owning module before
 widening the root namespace; importing from a private file is not a new public API.
 
-Evidence: [source](../../confidantic/__init__.py),
+Evidence: [source](../../src/confidantic/__init__.py),
 [export tests](../../tests/test_init.py), and
 [optional-dependency tests](../../tests/integration/test_optional_dependencies.py).
 Continue with [configuration models](../concepts/configuration-models.md) and

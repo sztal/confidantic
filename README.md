@@ -237,7 +237,7 @@ make typecheck
 make docs
 ```
 
-Type checking defaults to non-strict mypy over `confidantic/` only. Configure
+Type checking defaults to non-strict mypy over `src/confidantic/` only. Configure
 the level, scope, and required/advisory policy in `[tool.project-checks]` in
 `pyproject.toml`. `make typecheck` propagates failures; `make check-typecheck`
 honors the policy and is used by CI and shared merge/release validation. Both

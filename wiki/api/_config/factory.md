@@ -67,7 +67,7 @@ generated classes are automatically importable. Factory fields are not revalidat
 before target calls: unchecked construction/copying can carry invalid scalar values.
 Constructor errors and traversal-cycle errors propagate.
 
-Evidence: [source](../../../confidantic/_config/factory.py),
+Evidence: [source](../../../src/confidantic/_config/factory.py),
 [public factory tests](../../../tests/_config/test_factory.py), and
 [serialization tests](../../../tests/integration/test_serialization.py).
 See [factory concepts](../../concepts/factories-and-templates.md),

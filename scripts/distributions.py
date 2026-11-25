@@ -18,10 +18,19 @@ from scripts._repository import clean, git, tag_version, verify_tag
 from scripts.check_optional_dependencies import check_wheel
 
 
+def reject_version_overrides() -> None:
+    """Reject setuptools-scm version overrides for package artifacts."""
+    if any(
+        name == "SETUPTOOLS_SCM_PRETEND_VERSION"
+        or name.startswith("SETUPTOOLS_SCM_PRETEND_VERSION_FOR_")
+        for name in os.environ
+    ):
+        raise ValueError("Version overrides are not allowed for package artifacts")
+
+
 def build(project: Path) -> None:
     """Replace the distribution directory only after a successful fresh build."""
-    if os.environ.get("UV_DYNAMIC_VERSIONING_BYPASS"):
-        raise ValueError("Version overrides are not allowed for package builds")
+    reject_version_overrides()
     destination = project / "dist"
     if destination.is_symlink():
         raise ValueError("Distribution directory must not be a symlink")
@@ -60,8 +69,8 @@ def metadata(path: Path) -> Message:
                 "pyproject.toml",
                 "README.md",
                 "LICENSE",
-                "confidantic/__init__.py",
-                "confidantic/py.typed",
+                "src/confidantic/__init__.py",
+                "src/confidantic/py.typed",
             )
         }
         if not required.issubset(names):
@@ -120,8 +129,7 @@ def inspect_distributions(directory: Path, tag: str | None = None) -> tuple[Path
 
 def check_distributions(project: Path, tag: str | None = None) -> None:
     """Check metadata, rebuild the sdist outside Git, and smoke-test exact wheels."""
-    if os.environ.get("UV_DYNAMIC_VERSIONING_BYPASS"):
-        raise ValueError("Version overrides are not allowed for distribution checks")
+    reject_version_overrides()
     if tag:
         clean(project)
         commit = verify_tag(project, tag, "HEAD")

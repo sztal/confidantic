@@ -1,7 +1,10 @@
 # Changes here will be overwritten by Copier. Do not edit manually.
-_commit: 19792dc
+_commit: v0.2.1
 _src_path: gh:sztal/python-package-template
+annotated_tags_only: true
+changelog: true
 code_of_conduct: false
+distribution_name: confidantic
 doctest:
 - docstrings
 - docs
@@ -11,13 +14,25 @@ features:
 - tasks
 - docs
 - doctest
+github_actions: true
 github_user: sztal
 install: uv pip
+integration_branch: master
 license: MIT
-package_layout: flat
+minimum_python: '3.13'
+nox: true
+package_layout: src
+package_manager: uv
+package_type: standard
 project_description: Configuration and CLIs for Python projects based on Pydantic
     and Pydantic Settings.
 project_name: Confidantic
-target_python: py314
+public_github: true
+pypi_publish: true
+pytest_testmon: 'no'
+require_typecheck: true
+target_python: py313
+typecheck_level: basic
+typecheck_source_only: true
 user_email: stalaga@protonmail.com
 user_name: Szymon Talaga

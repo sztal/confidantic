@@ -26,7 +26,7 @@ custom headings, and class-qualified conversion of ParseError to ValueError.
 Unexpected dependency failures propagate. There is no global parser cache; backend
 objects are scoped to individual generation requests.
 
-Evidence: [source](../../../confidantic/_config/_docstring_backend.py) and
+Evidence: [source](../../../src/confidantic/_config/_docstring_backend.py) and
 [backend tests](../../../tests/_config/test_docstring_backend.py).
 See [configuration models](../../concepts/configuration-models.md),
 [the marked logging example](../../examples/logging.md), and [the index](README.md).

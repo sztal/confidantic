@@ -14,7 +14,7 @@ Never add or retain bug-backlog entries in wiki pages. Confirmed, unresolved
 source defects belong only in `../../../BUGS.md`; use a testing or bug-fixing
 workflow for those records.
 
-Use `confidantic/` as the package source, `tests/` as the behavioral reference,
+Use `src/confidantic/` as the package source, `tests/` as the behavioral reference,
 `docs/` as the published documentation surface, and `examples/` for runnable
 guides. Check `pyproject.toml`, `.python-version`, and `zensical.toml` for
 supported Python versions and tool configuration. Preserve the current

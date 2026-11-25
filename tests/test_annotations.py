@@ -1,12 +1,22 @@
 """Tests for public annotation helpers."""
 
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
+from enum import Enum
 from pathlib import Path
 from typing import Annotated, Any
 
 import pytest
-from pydantic import BaseModel, DirectoryPath, FilePath, TypeAdapter, ValidationError
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    DirectoryPath,
+    Field,
+    FilePath,
+    TypeAdapter,
+    ValidationError,
+)
+from pydantic_settings import ForceDecode, NoDecode
 from pytest import MonkeyPatch, raises
 
 from confidantic import BaseConfig
@@ -15,6 +25,9 @@ from confidantic.annotations import (
     Call,
     CommaDelimited,
     Delimited,
+    FromJson,
+    FromToml,
+    FromYaml,
     Import,
     Make,
     Map,
@@ -23,6 +36,168 @@ from confidantic.annotations import (
     WhitespaceDelimited,
     get_proper_args,
 )
+from tests._config.models import PolymorphicChildConfig, PolymorphicConfig
+
+
+@pytest.mark.parametrize(
+    ("annotation", "contents"),
+    [
+        (FromJson, '{"name": "example", "count": 4}'),
+        (FromYaml, "name: example\ncount: 4\n"),
+        (FromToml, 'name = "example"\ncount = 4\n'),
+    ],
+)
+def test_file_annotations_read_mappings_and_validate_models(
+    annotation: Any, contents: str, tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """File annotations resolve relative paths and validate parsed values."""
+    path = tmp_path / "config"
+    path.write_text(contents, encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    assert TypeAdapter(annotation).validate_python(path.name) == {
+        "name": "example",
+        "count": 4,
+    }
+    adapter = TypeAdapter(annotation[PolymorphicChildConfig])
+    assert adapter.validate_python(path) == PolymorphicChildConfig(
+        name="example", count=4
+    )
+    value = PolymorphicChildConfig(name="direct", count=8)
+    assert adapter.validate_python(value) is value
+    assert adapter.validate_python({"name": "direct", "count": 8}) == value
+
+
+@pytest.mark.parametrize(
+    "annotation", [FromJson, FromYaml, FromToml], ids=["json", "yaml", "toml"]
+)
+def test_file_annotations_compose_with_make(annotation: Any, tmp_path: Path) -> None:
+    """A file is read before its root and nested Make directives are evaluated."""
+    config = PolymorphicChildConfig(name="example", count=7)
+    if annotation is FromJson:
+        contents = config.model_dump_json(context={"make": True})
+    elif annotation is FromYaml:
+        contents = config.model_dump_yaml(context={"make": True})
+    else:
+        contents = config.model_dump_toml(context={"make": True})
+    path = tmp_path / "config"
+    path.write_text(contents, encoding="utf-8")
+    raw = TypeAdapter(annotation).validate_python(path)
+    assert raw["@call"] == "tests._config.models:PolymorphicChildConfig"
+    adapter = TypeAdapter(Make[annotation[PolymorphicConfig]])
+    for value in (path, str(path), raw, config):
+        result = adapter.validate_python(value)
+        assert type(result) is PolymorphicChildConfig
+        assert result == config
+
+
+@pytest.mark.parametrize(
+    ("annotation", "contents"),
+    [(FromJson, "[1, 2]"), (FromYaml, "- 1\n- 2\n"), (FromToml, "invalid = [")],
+)
+def test_file_annotations_report_invalid_files(
+    annotation: Any, contents: str, tmp_path: Path
+) -> None:
+    """Missing, malformed, and non-mapping files identify the input path."""
+    path = tmp_path / "bad-config"
+    adapter = TypeAdapter(annotation)
+    with raises(ValidationError, match="bad-config"):
+        adapter.validate_python(path)
+    path.write_text(contents, encoding="utf-8")
+    with raises(ValidationError, match="bad-config"):
+        adapter.validate_python(path)
+
+
+@pytest.mark.parametrize(
+    ("annotation", "contents"),
+    [
+        (FromJson, '{"name":'),
+        (FromYaml, "name: ["),
+        (FromToml, "name = ["),
+    ],
+)
+def test_file_annotations_report_malformed_documents(
+    annotation: Any, contents: str, tmp_path: Path
+) -> None:
+    """Each parser reports a malformed document with its source path."""
+    path = tmp_path / "malformed"
+    path.write_text(contents, encoding="utf-8")
+    with raises(ValidationError, match="malformed"):
+        TypeAdapter(annotation).validate_python(path)
+
+
+def test_make_file_annotation_composes_with_other_validators(tmp_path: Path) -> None:
+    """Additional validation metadata does not prevent file loading before Make."""
+    config = PolymorphicChildConfig(name="child", count=5)
+    path = tmp_path / "config.json"
+    path.write_text(config.model_dump_json(context={"make": True}), encoding="utf-8")
+    adapter = TypeAdapter(
+        Make[
+            Annotated[FromJson[PolymorphicConfig], AfterValidator(lambda value: value)]
+        ]
+    )
+    assert type(adapter.validate_python(path)) is PolymorphicChildConfig
+
+
+def test_make_file_annotation_resolves_nested_directives(tmp_path: Path) -> None:
+    """Nested directives in the loaded mapping are evaluated before validation."""
+    path = tmp_path / "config.json"
+    path.write_text(
+        '{"child": {"@call": "builtins:dict", "count": 5}}', encoding="utf-8"
+    )
+    result = TypeAdapter(Make[FromJson[dict[str, dict[str, int]]]]).validate_python(
+        path
+    )
+    assert result == {"child": {"count": 5}}
+
+
+def test_file_annotation_validates_pydantic_default(tmp_path: Path) -> None:
+    """Ordinary Pydantic models can opt in to validating path defaults."""
+    path = tmp_path / "config.json"
+    path.write_text('{"name": "example", "count": 1}', encoding="utf-8")
+
+    class Model(BaseModel):
+        item: FromJson[PolymorphicChildConfig] = Field(
+            default=str(path), validate_default=True
+        )
+
+    assert Model().item == PolymorphicChildConfig(name="example", count=1)
+
+
+@pytest.mark.parametrize(
+    "annotation", [FromJson, FromYaml, FromToml], ids=["json", "yaml", "toml"]
+)
+def test_file_annotations_settings_sources_and_defaults(
+    annotation: Any, tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """Settings accept file defaults, environment values, and whole CLI paths."""
+    from confidantic import ConfigModelDict
+
+    config = PolymorphicChildConfig(name="default", count=7)
+    alternate = PolymorphicChildConfig(name="alternate", count=9)
+    dump = {
+        FromJson: "model_dump_json",
+        FromYaml: "model_dump_yaml",
+        FromToml: "model_dump_toml",
+    }[annotation]
+    default_path = tmp_path / "default"
+    alternate_path = tmp_path / "alternate"
+    for path, value in ((default_path, config), (alternate_path, alternate)):
+        path.write_text(getattr(value, dump)(context={"make": True}), encoding="utf-8")
+
+    class Settings(BaseConfig):
+        model_config = ConfigModelDict(env_prefix="FILE_TEST_")
+        item: Make[annotation[PolymorphicConfig]] = Field(default=str(default_path))
+
+    assert Settings().item == config
+    monkeypatch.setenv("FILE_TEST_ITEM", str(alternate_path))
+    assert Settings().item == alternate
+    assert Settings(_cli_parse_args=["--item", str(default_path)]).item == config
+    monkeypatch.delenv("FILE_TEST_ITEM")
+    nested = Settings(_cli_parse_args=["--item.name", "override"])
+    assert type(nested.item) is PolymorphicConfig
+    assert nested.item.name == "override"
+    default_path.unlink()
+    assert Settings(item=alternate).item == alternate
 
 
 def test_absolute_path_annotation_accepts_path_values() -> None:
@@ -235,6 +410,207 @@ def test_map_annotations_parse_environment_and_dotenv_values(
     dotenv_path = tmp_path / ".env"
     dotenv_path.write_text("DICT_LIKE_VALUES=first=1,second=2\n", encoding="utf-8")
     assert Settings(_env_file=dotenv_path).values == {"first": 1, "second": 2}
+
+
+class _UnionColor(Enum):
+    RED = "red"
+    BLUE = "blue"
+
+
+type _FloatListAlias = CommaDelimited[list[float]]
+
+
+@pytest.mark.parametrize(
+    ("annotation", "default", "arguments", "expected"),
+    [
+        (float | CommaDelimited[tuple[float, float]], 0.0, ["--value=0.1"], 0.1),
+        (
+            float | CommaDelimited[tuple[float, float]],
+            0.0,
+            ["--value=0.1,0.2"],
+            (0.1, 0.2),
+        ),
+        (
+            float | CommaDelimited[tuple[float, float]],
+            0.0,
+            ["--value=[0.1,0.2]"],
+            (0.1, 0.2),
+        ),
+        (float | CommaDelimited[tuple[float, ...]], 0.0, ["--value=0.1"], 0.1),
+        (
+            float | CommaDelimited[tuple[float, ...]],
+            0.0,
+            ["--value=0.1,0.2"],
+            (0.1, 0.2),
+        ),
+        (float | CommaDelimited[list[float]], 0.0, ["--value=0.1"], 0.1),
+        (float | CommaDelimited[list[float]], 0.0, ["--value=0.1,0.2"], [0.1, 0.2]),
+        (float | CommaDelimited[list[float]], 0.0, ["--value=[0.1,0.2]"], [0.1, 0.2]),
+        (
+            float | CommaDelimited[list[float]],
+            0.0,
+            ["--value", "0.1", "--value", "0.2"],
+            [0.1, 0.2],
+        ),
+        (float | CommaDelimited[set[float]], 0.0, ["--value=0.1"], 0.1),
+        (float | CommaDelimited[set[float]], 0.0, ["--value=0.1,0.2"], {0.1, 0.2}),
+        (float | CommaDelimited[Sequence[float]], 0.0, ["--value=0.1"], 0.1),
+        (
+            float | CommaDelimited[Sequence[float]],
+            0.0,
+            ["--value=0.1,0.2"],
+            [0.1, 0.2],
+        ),
+        (float | SemiColonDelimited[list[float]], 0.0, ["--value=0.1"], 0.1),
+        (
+            float | SemiColonDelimited[list[float]],
+            0.0,
+            ["--value=0.1;0.2"],
+            [0.1, 0.2],
+        ),
+        (float | WhitespaceDelimited[list[float]], 0.0, ["--value=0.1"], 0.1),
+        (
+            float | WhitespaceDelimited[list[float]],
+            0.0,
+            ["--value=0.1 0.2"],
+            [0.1, 0.2],
+        ),
+        (float | Delimited("|")[list[float]], 0.0, ["--value=0.1"], 0.1),
+        (float | Delimited("|")[list[float]], 0.0, ["--value=0.1|0.2"], [0.1, 0.2]),
+        (CommaDelimited[list[float]] | None, None, ["--value=null"], None),
+        (CommaDelimited[list[float]] | None, None, ["--value=0.1,0.2"], [0.1, 0.2]),
+        (float | CommaDelimited[list[float]] | None, None, ["--value=null"], None),
+        (float | CommaDelimited[list[float]] | None, None, ["--value=0.1"], 0.1),
+        (
+            float | CommaDelimited[list[float]] | None,
+            None,
+            ["--value=0.1,0.2"],
+            [0.1, 0.2],
+        ),
+        (str | CommaDelimited[tuple[str, str]], "a", ["--value=1"], "1"),
+        (
+            Path | CommaDelimited[tuple[Path, Path]],
+            Path("."),
+            ["--value=123"],
+            Path("123"),
+        ),
+        (
+            _UnionColor | CommaDelimited[tuple[_UnionColor, _UnionColor]],
+            _UnionColor.RED,
+            ["--value=RED"],
+            _UnionColor.RED,
+        ),
+        (
+            _UnionColor | CommaDelimited[tuple[_UnionColor, _UnionColor]],
+            _UnionColor.RED,
+            ["--value=red,blue"],
+            (_UnionColor.RED, _UnionColor.BLUE),
+        ),
+        (float | Map[dict[str, float]], 0.0, ["--value=0.1"], 0.1),
+        (
+            float | Map[dict[str, float]],
+            0.0,
+            ["--value=a=1 b=2"],
+            {"a": 1.0, "b": 2.0},
+        ),
+        (Map[dict[str, float]] | None, None, ["--value=null"], None),
+        (
+            Map[dict[str, float]] | None,
+            None,
+            ["--value=a=1 b=2"],
+            {"a": 1.0, "b": 2.0},
+        ),
+        (float | _FloatListAlias, 0.0, ["--value=0.1"], 0.1),
+        (float | _FloatListAlias, 0.0, ["--value=0.1,0.2"], [0.1, 0.2]),
+    ],
+)
+def test_delimited_and_map_unions_preserve_scalar_and_delimited_cli_inputs(
+    annotation: Any,
+    default: Any,
+    arguments: list[str],
+    expected: Any,
+) -> None:
+    """Unions mixing scalars or None with Delimited/Map skip premature JSON decoding."""
+    settings_cls: Any = type(
+        "Settings",
+        (BaseConfig,),
+        {"__annotations__": {"value": annotation}, "value": default},
+        cli_parse_args=True,
+    )
+
+    result = settings_cls(_cli_parse_args=arguments)
+    assert result.value == expected
+    assert type(result.value) is type(expected)
+
+
+def test_delimited_unions_preserve_scalar_values_from_env_and_dotenv(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Environment and dotenv sources keep raw strings for scalar+Delimited unions."""
+
+    class Settings(BaseConfig, env_prefix="UNION_"):
+        text: str | CommaDelimited[tuple[str, str]] = "a"
+        color: _UnionColor | CommaDelimited[tuple[_UnionColor, _UnionColor]] = (
+            _UnionColor.RED
+        )
+
+    monkeypatch.setenv("UNION_TEXT", "1")
+    monkeypatch.setenv("UNION_COLOR", "RED")
+    from_env = Settings()
+    assert from_env.text == "1"
+    assert from_env.color is _UnionColor.RED
+
+    monkeypatch.delenv("UNION_TEXT")
+    monkeypatch.delenv("UNION_COLOR")
+    dotenv_path = tmp_path / ".env"
+    dotenv_path.write_text("UNION_TEXT=1\nUNION_COLOR=red,blue\n", encoding="utf-8")
+    from_dotenv = Settings(_env_file=dotenv_path)
+    assert from_dotenv.text == "1"
+    assert from_dotenv.color == (_UnionColor.RED, _UnionColor.BLUE)
+
+
+def test_union_no_decode_preserves_mixed_complex_branches_and_force_decode(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Non-NoDecode complex branches and explicit ForceDecode retain JSON decoding."""
+
+    class Sub(BaseModel):
+        x: int = 1
+
+    class Settings(BaseConfig, cli_parse_args=True, env_prefix="MIXED_"):
+        sub_union: Sub | CommaDelimited[tuple[int, int]] = Sub()
+        dict_union: dict[str, int] | CommaDelimited[list[int]] = Field(
+            default_factory=dict
+        )
+        forced: Annotated[float | CommaDelimited[list[float]], ForceDecode] = 0.0
+
+    assert NoDecode not in Settings.model_fields["sub_union"].metadata
+    assert NoDecode not in Settings.model_fields["dict_union"].metadata
+    assert NoDecode not in Settings.model_fields["forced"].metadata
+
+    monkeypatch.setenv("MIXED_SUB_UNION", '{"x": 2}')
+    assert Settings(_cli_parse_args=[]).sub_union == Sub(x=2)
+    monkeypatch.setenv("MIXED_SUB_UNION", "1,2")
+    assert Settings(_cli_parse_args=[]).sub_union == (1, 2)
+    monkeypatch.delenv("MIXED_SUB_UNION")
+
+    assert Settings(_cli_parse_args=['--dict-union={"x": 2}']).dict_union == {"x": 2}
+    assert Settings(_cli_parse_args=["--dict-union=1,2"]).dict_union == [1, 2]
+    assert Settings(_cli_parse_args=["--forced=0.1"]).forced == [0.1]
+
+
+def test_union_no_decode_applies_after_forward_ref_model_rebuild() -> None:
+    """Forward-referenced union fields gain NoDecode when model_rebuild completes them."""
+
+    class Settings(BaseConfig, cli_parse_args=True):
+        value: "float | DeferredFloatList" = 0.0
+
+    DeferredFloatList = CommaDelimited[list[float]]
+    Settings.model_rebuild()
+
+    assert Settings(_cli_parse_args=["--value=0.1"]).value == 0.1
+    assert Settings(_cli_parse_args=["--value=0.1,0.2"]).value == [0.1, 0.2]
 
 
 def test_import_resolves_import_strings_and_serializes_objects() -> None:

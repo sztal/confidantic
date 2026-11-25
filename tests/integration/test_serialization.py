@@ -7,6 +7,52 @@ import pytest
 from tests.helpers import run_python
 
 
+@pytest.mark.parametrize(
+    ("annotation", "dump"),
+    [
+        ("FromJson", "model_dump_json"),
+        ("FromYaml", "model_dump_yaml"),
+        ("FromToml", "model_dump_toml"),
+    ],
+)
+def test_file_directives_round_trip_between_processes(
+    annotation: str, dump: str, tmp_path: Path
+) -> None:
+    """Separate producer and consumer processes preserve an importable subtype."""
+    (tmp_path / "models.py").write_text(
+        "from confidantic import BaseConfig\n"
+        "class Component(BaseConfig):\n"
+        "    name: str\n"
+        "class Child(Component):\n"
+        "    count: int\n",
+        encoding="utf-8",
+    )
+    run_python(
+        f"""
+        from pathlib import Path
+        from models import Child
+        config = Child(name="worker", count=7)
+        Path("config").write_text(config.{dump}(context={{"make": True}}), encoding="utf-8")
+        """,
+        tmp_path,
+    )
+    run_python(
+        f"""
+        import warnings
+        from confidantic import BaseConfig
+        from confidantic.annotations import Make, {annotation}
+        from models import Component, Child
+        class Settings(BaseConfig):
+            component: Make[{annotation}[Component]] = "config"
+        warnings.simplefilter("error")
+        component = Settings().component
+        assert type(component) is Child
+        assert component.model_dump() == {{"name": "worker", "count": 7}}
+        """,
+        tmp_path,
+    )
+
+
 def test_dynamic_configs_round_trip_in_fresh_interpreter(tmp_path: Path) -> None:
     """Data and validators survive transfer without copying ambient activation."""
     run_python(

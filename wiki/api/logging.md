@@ -30,7 +30,7 @@ to callers. Subclasses customize settings and sources; applications can inspect
 or adapt the dictionary before applying it. Use isolated processes for tests that
 alter logging state.
 
-Evidence: [source](../../confidantic/logging.py) and
+Evidence: [source](../../src/confidantic/logging.py) and
 [logging tests](../../tests/test_logging.py).
 See [configuration models](../concepts/configuration-models.md),
 [logging examples](../examples/logging.md), and [all modules](README.md).

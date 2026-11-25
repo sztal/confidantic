@@ -31,7 +31,7 @@ or extra fields would change the current display contract and needs deliberate
 public API work. Keep optional dependency handling at the public operation boundary;
 do not import this module during ordinary model creation.
 
-Evidence: [source](../../../confidantic/_config/_info.py) and
+Evidence: [source](../../../src/confidantic/_config/_info.py) and
 [display tests](../../../tests/_config/test_info.py).
 See [configuration models](../../concepts/configuration-models.md),
 [the CLI display example](../../examples/clis.md), and [the index](README.md).

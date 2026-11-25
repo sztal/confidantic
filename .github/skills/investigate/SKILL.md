@@ -20,7 +20,7 @@ or session log.
 
 Run `uv run noxfile.py -s lint` before focused `uv run pytest` reproductions;
 if lint changes files, report that and review the changes before proceeding.
-Pytest collects `confidantic/`, `docs/`, `tests/`, and `README.md`.
+Pytest collects `src/confidantic/`, `docs/`, `tests/`, and `README.md`.
 Check `tests/integration/test_examples.py` for smoke-tested scripts in `examples/`.
 Report unavailable or failing checks. `make test` runs direct pytest; the Nox
 Python matrix (`make nox` or the `tests` session) is reserved for humans.

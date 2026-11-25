@@ -82,13 +82,13 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Set up the test suite
         run: >-
-          uv run --python 3.14 noxfile.py
+          uv run noxfile.py
           --install-only
           --error-on-missing-interpreters
           --session tests-${{ matrix.python_version }}
       - name: Run the test suite
         run: >-
-          uv run --python 3.14 noxfile.py
+          uv run noxfile.py
           --no-install
           --session tests-${{ matrix.python_version }}
         env:

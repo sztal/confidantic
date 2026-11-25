@@ -1,4 +1,4 @@
-# Read and write configuration files
+# Round-trip configuration documents and files
 
 A configuration document is useful for saving values or exchanging them with
 another program. Start with a known model class and a plain document:
@@ -20,6 +20,28 @@ another program. Start with a known model class and a plain document:
 To use a file, write that text with `Path.write_text(..., encoding="utf-8")` and
 pass `Path.read_text(encoding="utf-8")` to the loader. Loading still validates
 values against the model.
+
+| Representation | Serialize                  | Validate as a known class             |
+| -------------- | -------------------------- | ------------------------------------- |
+| Python values  | `config.model_dump()`      | `AppConfig.model_validate(values)`    |
+| JSON text      | `config.model_dump_json()` | `AppConfig.model_validate_json(text)` |
+| YAML text      | `config.model_dump_yaml()` | `AppConfig.model_validate_yaml(text)` |
+| TOML text      | `config.model_dump_toml()` | `AppConfig.model_validate_toml(text)` |
+
+For example, continuing with `config` and `AppConfig`, a JSON file round trip is:
+
+```python
+from pathlib import Path
+
+path = Path("config.json")
+path.write_text(config.model_dump_json(), encoding="utf-8")
+restored = AppConfig.model_validate_json(path.read_text(encoding="utf-8"))
+assert restored.model_dump() == config.model_dump()
+```
+
+Compare dumped field values when checking a round trip. Model equality can also
+reflect private state, such as whether values came from defaults or initializer
+inputs. Dumping a model does not promise to preserve that source information.
 
 ## YAML and TOML
 
@@ -71,6 +93,81 @@ a baseline instance's concrete subclass.
 The loaders do not evaluate a root `@call` directive. For trusted documents that
 choose constructors, parse the document and validate it through `Make` as shown
 in [object directives and portability](../advanced/object-directives-and-portability.md#make-directives).
+
+## File-backed fields
+
+`FromJson`, `FromYaml`, and `FromToml` read UTF-8 files during field validation.
+Without a type argument, each returns a mapping; a parameter such as
+`FromYaml[AppConfig]` validates the file's mapping as that type. Use
+`Make[FromYaml[AppConfig]]` to evaluate its directives first. YAML requires
+`confidantic[yaml]`; JSON and TOML reading require no extra. All three require a
+mapping at the document root. Strings and path-like values name files relative
+to the current working directory; existing mappings and instances are also accepted.
+
+For a portable subtype round trip, define the configuration classes in an
+importable module available to both processes and write the producer's instance:
+
+```python
+from pathlib import Path
+
+path = Path("component.yaml")
+path.write_text(
+    component.model_dump_yaml(context={"make": True}, serialize_as_any=True),
+    encoding="utf-8",
+)
+```
+
+Then the consumer can use that file as a default:
+
+```python
+from confidantic import BaseConfig
+from confidantic.annotations import FromYaml, Make
+from my_application import Component
+
+
+class Settings(BaseConfig):
+    component: Make[FromYaml[Component]] = "component.yaml"  # type: ignore[assignment]
+
+
+component = Settings().component
+```
+
+Mypy needs the targeted ignore because the input default is a string while the
+validated field has type `Component`. `BaseConfig` validates defaults; with an
+ordinary Pydantic model, enable `validate_default` as needed.
+Environment and CLI inputs can replace the entire field with another path.
+Nested overrides replace the path default rather than merging with its file.
+
+The same pattern works in more deeply nested settings and with the other file
+formats. In this excerpt from
+[file_roundtrip.py](https://github.com/sztal/confidantic/blob/master/examples/file_roundtrip.py),
+`Service` is the base type and the paths contain `WebService` directives:
+
+```python
+class ServiceFiles(BaseConfig):
+    json_service: Make[FromJson[Service]] = str(json_path)  # type: ignore[assignment]
+    yaml_service: Make[FromYaml[Service]] = str(yaml_path)  # type: ignore[assignment]
+    toml_service: Make[FromToml[Service]] = str(toml_path)  # type: ignore[assignment]
+
+
+class Application(BaseConfig):
+    services: ServiceFiles = Field(default_factory=ServiceFiles)
+
+
+application = Application()
+assert type(application.services.yaml_service) is WebService
+```
+
+Run the complete script with `uv run python examples/file_roundtrip.py` after
+installing the YAML and TOML extras. It writes files in a temporary directory and
+checks all three reconstructed types. Bare `FromYaml` instead returns the parsed
+mapping, including `@call`, without executing it.
+
+The resolved field contains the validated value, not its source path. Dumping
+the containing model does not write back to the file. A normal dump without
+`context={"make": True}` does not record the concrete class; it can still be
+loaded as the declared type. Use directives only with trusted documents: they
+can import and call arbitrary Python objects before type validation.
 
 ## Use a TOML file as a settings source
 

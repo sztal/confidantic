@@ -29,7 +29,7 @@ process. Preserve cleanup on exceptions, lazy construction, independent subclass
 storage, and reference identity for accepted activations. Override settings policy
 on a subclass rather than changing activation methods to perform extra validation.
 
-Evidence: [source](../../confidantic/context.py),
+Evidence: [source](../../src/confidantic/context.py),
 [context tests](../../tests/test_context.py), and
 [process serialization tests](../../tests/integration/test_serialization.py).
 See [contexts](../concepts/contexts.md), [the guide](../examples/contexts.md),

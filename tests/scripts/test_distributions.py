@@ -1,6 +1,7 @@
 """Distribution contents, version coherence, and checking the supplied artifacts."""
 
 import io
+import os
 import subprocess
 import tarfile
 import zipfile
@@ -8,8 +9,11 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from packaging.utils import parse_wheel_filename
+from packaging.version import Version
 
 from scripts import distributions
+from scripts._repository import git
 
 
 def artifacts(
@@ -36,8 +40,8 @@ def artifacts(
             "pyproject.toml",
             "README.md",
             "LICENSE",
-            "confidantic/__init__.py",
-            "confidantic/py.typed",
+            "src/confidantic/__init__.py",
+            "src/confidantic/py.typed",
         ):
             content = info.encode() if name == "PKG-INFO" else b"content"
             entry = tarfile.TarInfo(f"confidantic-{version}/{name}")
@@ -130,11 +134,73 @@ def test_failed_build_preserves_previous_dist(
     assert wheel.exists() and sdist.exists()
 
 
+@pytest.mark.parametrize(
+    "name",
+    [
+        "SETUPTOOLS_SCM_PRETEND_VERSION",
+        "SETUPTOOLS_SCM_PRETEND_VERSION_FOR_CONFIDANTIC",
+    ],
+)
 def test_version_override_is_rejected(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str
 ) -> None:
-    monkeypatch.setenv("UV_DYNAMIC_VERSIONING_BYPASS", "1.2.3")
+    monkeypatch.setenv(name, "1.2.3")
     with pytest.raises(ValueError, match="overrides"):
         distributions.build(tmp_path)
     with pytest.raises(ValueError, match="overrides"):
         distributions.check_distributions(tmp_path)
+
+
+def test_vcs_versions_ignore_lightweight_tags(
+    repository: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Build from real Git tags using the repository's Hatch configuration."""
+    for name in tuple(os.environ):
+        if name == "SETUPTOOLS_SCM_PRETEND_VERSION" or name.startswith(
+            "SETUPTOOLS_SCM_PRETEND_VERSION_FOR_"
+        ):
+            monkeypatch.delenv(name)
+
+    root = Path(__file__).resolve().parents[2]
+    for name in ("pyproject.toml", "README.md", "LICENSE"):
+        (repository / name).write_bytes((root / name).read_bytes())
+    package = repository / "src/confidantic"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("")
+    (package / "py.typed").write_text("")
+    git(repository, "add", ".")
+    git(repository, "commit", "-qm", "Configure package")
+
+    def build_version(name: str) -> Version:
+        output = tmp_path / name
+        subprocess.run(
+            [
+                "uv",
+                "build",
+                "--no-sources",
+                "--wheel",
+                "--out-dir",
+                str(output),
+                str(repository),
+            ],
+            cwd=tmp_path,
+            check=True,
+        )
+        (wheel,) = output.glob("*.whl")
+        return parse_wheel_filename(wheel.name)[1]
+
+    git(repository, "tag", "-a", "v1.2.3", "-m", "Release 1.2.3")
+    assert str(build_version("annotated")) == "1.2.3"
+    git(repository, "tag", "v9.0.0")
+    assert str(build_version("lightweight")) == "1.2.3"
+
+    git(repository, "commit", "--allow-empty", "-qm", "Next change")
+    clean_version = build_version("development")
+    assert clean_version.is_devrelease
+    assert clean_version.base_version != "9.0.0"
+    (repository / "tracked").write_text("dirty\n")
+    assert build_version("dirty") != clean_version
+
+    (repository / "tracked").write_text("baseline\n")
+    git(repository, "tag", "-a", "v1.2.4rc1", "-m", "Release 1.2.4rc1")
+    assert str(build_version("prerelease")) == "1.2.4rc1"

@@ -1,11 +1,13 @@
 # Serialize and validate configuration documents
 
 [formats.py](../../examples/formats.py) needs `confidantic[yaml,toml]`.
+[file_roundtrip.py](../../examples/file_roundtrip.py) uses the same extras.
 [serialization.py](../../examples/serialization.py) also displays its configuration,
 so that script needs `confidantic[rich]`.
 
 ```console
 uv run python examples/formats.py
+uv run python examples/file_roundtrip.py
 uv run python examples/serialization.py
 ```
 
@@ -42,6 +44,47 @@ retries = 5
 Additional assertions verify coercion from document strings and rejection of a
 negative count. Loading still performs model validation and can consult configured
 settings sources. Excluding nullable model fields does not remove null list entries.
+Use `model_dump()` and `model_validate()` for Python values, and `model_dump_json()`
+and `model_validate_json()` for JSON text. When checking a round trip, compare
+dumped field values; model equality can include private source-tracking state.
+
+## Load files inside nested configuration
+
+The file round-trip script writes a `WebService` instance to JSON, YAML, and TOML
+in a temporary directory. Each dump uses `context={"make": True}`, which writes
+an `@call` identifier for its concrete class. This excerpt uses its previously
+defined models and paths:
+
+```python
+class ServiceFiles(BaseConfig):
+    json_service: Make[FromJson[Service]] = str(json_path)  # type: ignore[assignment]
+    yaml_service: Make[FromYaml[Service]] = str(yaml_path)  # type: ignore[assignment]
+    toml_service: Make[FromToml[Service]] = str(toml_path)  # type: ignore[assignment]
+    raw_yaml: FromYaml = str(yaml_path)  # type: ignore[assignment]
+
+
+class Application(BaseConfig):
+    services: ServiceFiles = Field(default_factory=ServiceFiles)
+
+
+application = Application()
+assert type(application.services.yaml_service) is WebService
+```
+
+The three `Make` fields load their files when `Application()` constructs the
+nested settings, then evaluate their directives and validate the resulting
+services. The bare `FromYaml` field returns the document mapping without executing
+its directive. The script prints:
+
+```text
+WebService {'name': 'orders', 'host': 'localhost', 'port': 8080}
+```
+
+For transfer between processes, place `WebService` in an importable module shared
+by both programs. The script's `__main__` identifier is suitable for its own
+process. Relative paths use the working directory. The file path is an input;
+dumping the application does not write the resolved values back to the files.
+Only use `Make` with trusted data, because directives import and call Python code.
 
 ## Retain concrete configuration types
 

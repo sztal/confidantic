@@ -58,7 +58,7 @@ mutable defaults. Do not instantiate target types merely to discover missing def
 Generated classes are not registered on their declared module. Changes to copied
 defaults need settings-merge and provenance tests as well as factory tests.
 
-Evidence: [source](../../../confidantic/_config/_factory_build.py) and
+Evidence: [source](../../../src/confidantic/_config/_factory_build.py) and
 [builder tests](../../../tests/_config/test_factory_build.py).
 See [factories and templates](../../concepts/factories-and-templates.md),
 [object templates](../../examples/object-templates.md), and [the index](README.md).

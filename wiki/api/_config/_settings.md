@@ -66,7 +66,7 @@ other source, validation, and dependency errors propagate. Preserve this narrow
 fallback, per-call option handling, default laziness, exact-type normalization,
 and cleanup of nested scopes when editing the module.
 
-Evidence: [source](../../../confidantic/_config/_settings.py) and
+Evidence: [source](../../../src/confidantic/_config/_settings.py) and
 [settings tests](../../../tests/_config/test_settings.py).
 Read [source semantics](../../concepts/sources-and-inheritance.md),
 [the lifecycle](../../architecture/settings-lifecycle.md), and

@@ -8,7 +8,7 @@ argument-hint: Optional module or documentation concern
 
 Check public classes, functions, and properties for concise, accurate
 NumPy-style docstrings. Determine the public API from verified exports and
-documentation, not naming conventions alone. Review doctests in `confidantic/`, `docs/`, and
+documentation, not naming conventions alone. Review doctests in `src/confidantic/`, `docs/`, and
 `README.md`, which pytest collects. After documentation changes, run
 `uv run noxfile.py -s lint`, `uv run pytest`, and
 `uv run noxfile.py -s docs`; lint precedes pytest because pre-commit may modify

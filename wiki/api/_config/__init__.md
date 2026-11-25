@@ -17,7 +17,7 @@ Changes here should preserve symbol identity, avoid cycles, and keep Rich,
 docstring-parser, YAML, and TOML writers out of core import paths. Import failures
 from required dependencies propagate normally.
 
-Evidence: [source](../../../confidantic/_config/__init__.py),
+Evidence: [source](../../../src/confidantic/_config/__init__.py),
 [root export tests](../../../tests/test_init.py), and
 [fresh-process imports](../../../tests/integration/test_import_defaults.py).
 See [configuration models](../../concepts/configuration-models.md),

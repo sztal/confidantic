@@ -12,7 +12,7 @@ change and agent guidance may be stale. Read [the agent guide](../../../AGENTS.m
 1. Inspect the repository tree, package exports, tests, `README.md`,
    `pyproject.toml`, `Makefile`, `noxfile.py`, `zensical.toml`, `.python-version`,
    maintenance scripts, and CI/release configuration.
-1. Verify project facts rather than copying template defaults. `confidantic/`
+1. Verify project facts rather than copying template defaults. `src/confidantic/`
    is the package; `docs/`, `examples/`, and `changelog.d/` are the published
    documentation, runnable guides, and release-note surfaces. Test placement
    follows `tests/README.md`; example coverage is listed in

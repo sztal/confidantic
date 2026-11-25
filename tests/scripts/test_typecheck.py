@@ -29,7 +29,9 @@ def test_level_controls_effective_mypy_options(policy: Path, level: str) -> None
     if level == "none":
         assert flags is None
         return
-    _, options = process_options(["--config-file", str(policy), *flags, "confidantic"])
+    _, options = process_options(
+        ["--config-file", str(policy), *flags, "src/confidantic"]
+    )
     assert options.disallow_untyped_defs is (level == "strict")
     assert options.disallow_untyped_calls is (level == "strict")
     assert options.warn_return_any is (level == "strict")
@@ -47,9 +49,9 @@ def test_scope_is_explicitly_opt_in(policy: Path, source_only: bool) -> None:
         )
     )
     assert typecheck.mypy_paths() == (
-        ["confidantic"]
+        ["src/confidantic"]
         if source_only
-        else ["confidantic", "tests", "scripts", "noxfile.py"]
+        else ["src/confidantic", "tests", "scripts", "noxfile.py"]
     )
 
 
@@ -140,7 +142,7 @@ def test_nox_uses_policy_and_preserves_explicit_overrides(
     command = session.run.call_args.args
     assert command[0] == "mypy"
     assert "--strict" in command
-    paths = posargs or ["confidantic", "tests", "scripts", "noxfile.py"]
+    paths = posargs or ["src/confidantic", "tests", "scripts", "noxfile.py"]
     assert list(command[-len(paths) :]) == paths
 
 
@@ -150,7 +152,9 @@ def test_repository_defaults_check_only_package_without_strict_mode() -> None:
         ["--config-file", str(typecheck.PYPROJECT), *typecheck.mypy_paths()]
     )
     assert sources
-    assert all(Path(source.path).parts[0] == "confidantic" for source in sources)
+    assert all(
+        Path(source.path).parts[:2] == ("src", "confidantic") for source in sources
+    )
     assert not options.disallow_untyped_defs
     assert not options.disallow_untyped_calls
     assert not options.disallow_any_generics

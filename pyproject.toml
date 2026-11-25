@@ -1,8 +1,9 @@
 [build-system]
 build-backend = "hatchling.build"
 requires = [
+  "hatch-vcs>=0.5",
   "hatchling>=1.27",
-  "uv-dynamic-versioning>=0.14",
+  "setuptools-scm>=10",
 ]
 
 [project]
@@ -89,12 +90,25 @@ release = [
   "twine>=6.1",
 ]
 
-[tool.hatch.version]
-source = "uv-dynamic-versioning"
+[tool.hatch]
+version.source = "vcs"
+version.raw-options.scm.git.describe_command = [
+  "git",
+  "describe",
+  "--dirty",
+  "--long",
+  "--abbrev=40",
+  "--match",
+  "v[0-9]*",
+]
+build.targets.wheel.packages = [
+  "src/confidantic",
+]
 
-[tool.hatch.build.targets.wheel]
-packages = [
-  "./confidantic",
+[tool.uv]
+cache-keys = [
+  { file = "pyproject.toml" },
+  { git = { commit = true, tags = true } },
 ]
 
 [tool.ruff]
@@ -120,14 +134,14 @@ lint.ignore = [
   "E501",
   "ISC001", # conflicts with formatter
 ]
-lint.per-file-ignores."confidantic/_config/factory.py" = [
+lint.per-file-ignores."src/confidantic/_config/factory.py" = [
   "UP040", # preserve runtime aliases used by Pydantic
   "UP046", # preserve Pydantic generic metadata
 ]
-lint.per-file-ignores."confidantic/annotations.py" = [
+lint.per-file-ignores."src/confidantic/annotations.py" = [
   "UP040", # preserve public runtime annotation aliases
 ]
-lint.per-file-ignores."confidantic/types.py" = [
+lint.per-file-ignores."src/confidantic/types.py" = [
   "UP046", # preserve the public generic's runtime metadata
 ]
 lint.per-file-ignores."tests/**" = [
@@ -161,7 +175,7 @@ filterwarnings = [
 log_level = "INFO"
 testpaths = [
   "docs",
-  "confidantic",
+  "src/confidantic",
   "tests",
   "README.md",
 ]
@@ -171,7 +185,7 @@ strict = true
 html.show_contexts = true
 html.skip_covered = false
 paths.source = [
-  ".",
+  "src",
   ".nox/**/site-packages",
 ]
 report.exclude_also = [
@@ -247,7 +261,7 @@ showcontent = true
 [tool.mypy]
 python_version = "3.13"
 files = [
-  "confidantic",
+  "src/confidantic",
 ]
 warn_unreachable = true
 enable_error_code = [

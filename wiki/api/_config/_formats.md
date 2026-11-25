@@ -29,7 +29,7 @@ serializers first. Keep model dump filtering/context delegated to Pydantic, avoi
 evaluating directives while parsing, and retain parser/writer errors. There is no
 model cache or persistent codec state here.
 
-Evidence: [source](../../../confidantic/_config/_formats.py),
+Evidence: [source](../../../src/confidantic/_config/_formats.py),
 [format tests](../../../tests/_config/test_formats.py), and
 [optional-dependency tests](../../../tests/integration/test_optional_dependencies.py).
 See [serialization concepts](../../concepts/serialization.md),

@@ -36,6 +36,16 @@ constraint's check before resolution. Existence is not otherwise required.
 For shared roots, anchors, and callable path joining, see
 [BasePaths and ExtensiblePath](../recipes/paths.md).
 
+## Files
+
+`FromJson`, `FromYaml`, and `FromToml` read a file into a mapping. Parameterize
+them with a type to validate the parsed mapping, or compose them with `Make` to
+evaluate directives in the document: `Make[FromYaml[MyConfig]]`. Strings and
+path-like values name files relative to the working directory; mappings and
+already constructed values are also accepted. Files must contain a mapping.
+YAML reading requires `confidantic[yaml]`. See the [files guide](../guide/files.md#file-backed-fields)
+for defaults, serialization, and settings-source behavior.
+
 ## Imports and executable directives
 
 | Annotation  | Operation                                                              |

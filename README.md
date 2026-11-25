@@ -207,6 +207,46 @@ print(config.model_dump())
 See [input parsing](https://sztal.github.io/confidantic/guide/input-parsing/)
 for other separators, mappings, and paths.
 
+### Configuration round trips
+
+Use `model_dump()` and `model_validate()` for Python values, or
+`model_dump_json()` and `model_validate_json()` for JSON text. A field annotated
+with `Make[FromJson[T]]` can also load a trusted file automatically:
+
+```python
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+from confidantic import BaseConfig
+from confidantic.annotations import FromJson, Make
+
+
+class Service(BaseConfig):
+    name: str
+
+
+class Application(BaseConfig):
+    service: Make[FromJson[Service]]
+
+
+service = Service(name="orders")
+with TemporaryDirectory() as directory:
+    path = Path(directory) / "service.json"
+    path.write_text(service.model_dump_json(context={"make": True}), encoding="utf-8")
+    application = Application.model_validate({"service": str(path)})
+    print(application.service.model_dump())
+```
+
+```text
+{'name': 'orders'}
+```
+
+`FromYaml` and `FromToml` offer the same field pattern. YAML loading and writing
+require `confidantic[yaml]`; TOML writing requires `confidantic[toml]`. Make
+directives import and call Python objects, so use them only with trusted files.
+See the [round-trip guide](https://sztal.github.io/confidantic/guide/files/)
+for ordinary documents, concrete subclasses, and nested configurations.
+
 For other application needs, explore [contexts](https://sztal.github.io/confidantic/recipes/contexts/),
 [configured objects](https://sztal.github.io/confidantic/recipes/configurable-objects/),
 [paths](https://sztal.github.io/confidantic/recipes/paths/),
@@ -237,7 +277,7 @@ make typecheck
 make docs
 ```
 
-Type checking defaults to non-strict mypy over `confidantic/` only. Configure
+Type checking defaults to non-strict mypy over `src/confidantic/` only. Configure
 the level, scope, and required/advisory policy in `[tool.project-checks]` in
 `pyproject.toml`. `make typecheck` propagates failures; `make check-typecheck`
 honors the policy and is used by CI and shared merge/release validation. Both

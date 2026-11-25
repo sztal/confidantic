@@ -51,7 +51,9 @@ def mypy_args() -> list[str] | None:
 def mypy_paths() -> list[str]:
     """Return package sources and any explicitly enabled maintenance/test paths."""
     _, _, source_only = settings()
-    return ["confidantic"] + ([] if source_only else ["tests", "scripts", "noxfile.py"])
+    return ["src/confidantic"] + (
+        [] if source_only else ["tests", "scripts", "noxfile.py"]
+    )
 
 
 def main(argv: Sequence[str] | None = None) -> None:

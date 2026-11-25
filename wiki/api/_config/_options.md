@@ -29,7 +29,7 @@ Keep new custom keys distinguishable from upstream keys and provide handling in 
 owning collaborator. Check model-level, class-keyword, and per-instance behavior.
 Preserve import ordering: registration must happen before model class creation.
 
-Evidence: [source](../../../confidantic/_config/_options.py) and
+Evidence: [source](../../../src/confidantic/_config/_options.py) and
 [option tests](../../../tests/_config/test_options.py).
 See [configuration models](../../concepts/configuration-models.md),
 [environment examples](../../examples/environment-and-dotenv.md), and [the index](README.md).

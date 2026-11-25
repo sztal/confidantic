@@ -52,13 +52,14 @@ ignores unknown arguments, which is useful for [staged parsers](../advanced/dyna
 !!! note "Choose where arguments are parsed"
 
     Enable CLI parsing on the root settings class. Only the most-derived class
-    parses it within an inheritance chain. Automatic parsing is suppressed in
-    notebook-like runtimes, even when an explicit argument sequence is configured.
-    Run these examples as scripts.
+    parses it within an inheritance chain. In notebook-like runtimes,
+    `cli_parse_args=True` is ignored while `sys.argv` still belongs to the
+    kernel launcher; explicit argument sequences and replaced `sys.argv`
+    (such as IPython `%run`) are still parsed.
 
-For tests or embedded usage, `cli_parse_args=["--name", "shipping"]` supplies an
-explicit sequence outside notebook-like runtimes. CLI values normally outrank
-initializer input and other sources.
+For tests, notebooks, or embedded usage, `cli_parse_args=["--name", "shipping"]`
+supplies an explicit sequence. CLI values normally outrank initializer input
+and other sources.
 
 ## Add a subcommand
 

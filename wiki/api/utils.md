@@ -38,7 +38,7 @@ importability checks to identifier formatting without accounting for local class
 and serialization consumers. Calls can execute arbitrary application code and are
 intended for trusted inputs.
 
-Evidence: [source](../../confidantic/utils.py) and
+Evidence: [source](../../src/confidantic/utils.py) and
 [utility tests](../../tests/test_utils.py).
 See [input annotations](../concepts/input-annotations.md),
 [portable object graphs](../examples/advanced/portable-object-graphs.md),

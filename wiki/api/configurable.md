@@ -39,7 +39,7 @@ runtime constructor arguments must accommodate the copy protocol itself.
 Do not silently copy arbitrary runtime attributes or refresh resources during
 reconfiguration: either change would alter the abstraction's lifecycle.
 
-Evidence: [source](../../confidantic/configurable.py) and
+Evidence: [source](../../src/confidantic/configurable.py) and
 [behavior tests](../../tests/test_configurable.py).
 See [configured objects](../concepts/configured-objects.md),
 [the runnable guide](../examples/configurable-objects.md), and

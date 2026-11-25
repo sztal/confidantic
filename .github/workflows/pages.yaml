@@ -13,19 +13,10 @@ permissions:
   contents: read
 
 jobs:
-  pages:
+  build:
     runs-on: ubuntu-latest
-    # Master builds and package releases share the same Pages destination.
-    concurrency:
-      group: github-pages
-      cancel-in-progress: false
-    permissions:
-      contents: read
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+    outputs:
+      artifact_name: ${{ steps.artifact_identity.outputs.name }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -47,12 +38,56 @@ jobs:
           uv run --no-sync zensical build --clean --strict
           uv run --no-sync coverage html --data-file=coverage-data -d site/coverage
           uv run --no-sync scripts/generate_coverage_badge.py coverage.json site/coverage.svg
-      - name: Configure GitHub Pages
-        uses: actions/configure-pages@v5
+      - name: Choose a unique artifact name
+        id: artifact_identity
+        run: echo "name=github-pages-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
       - name: Upload GitHub Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: site
+          name: ${{ steps.artifact_identity.outputs.name }}
+          retention-days: 7
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    # Master builds and package releases share the same Pages destination.
+    concurrency:
+      group: github-pages
+      cancel-in-progress: false
+      queue: max
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment_first.outputs.page_url || steps.deployment_second.outputs.page_url || steps.deployment_third.outputs.page_url }}
+    steps:
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
       - name: Deploy to GitHub Pages
-        id: deployment
+        id: deployment_first
+        continue-on-error: true
         uses: actions/deploy-pages@v4
+        with:
+          artifact_name: ${{ needs.build.outputs.artifact_name }}
+      - name: Wait before second deployment attempt
+        if: ${{ steps.deployment_first.outcome == 'failure' }}
+        run: sleep 5
+      - name: Retry GitHub Pages deployment
+        id: deployment_second
+        if: ${{ steps.deployment_first.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/deploy-pages@v4
+        with:
+          artifact_name: ${{ needs.build.outputs.artifact_name }}
+      - name: Wait before final deployment attempt
+        if: ${{ steps.deployment_second.outcome == 'failure' }}
+        run: sleep 15
+      - name: Final GitHub Pages deployment attempt
+        id: deployment_third
+        if: ${{ steps.deployment_second.outcome == 'failure' }}
+        uses: actions/deploy-pages@v4
+        with:
+          artifact_name: ${{ needs.build.outputs.artifact_name }}

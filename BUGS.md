@@ -5,6 +5,27 @@ concise symptom, reproduction or evidence, affected behavior, and expected
 behavior. Remove an entry after its regression test and required checks pass.
 Do not track bugs in `wiki/`.
 
+## Pages deployment can fail immediately after uploading its artifact
+
+The former upload and deployment steps in `.github/workflows/pages.yaml` ran in
+the same job, with no retry of a failed artifact lookup. In the
+[v0.3.0 publication run](https://github.com/sztal/confidantic/actions/runs/45632275329),
+the upload succeeded at 14:19:09 UTC on 2026-11-25, but the immediately following
+deployment could not find an artifact named `github-pages`. GitHub's run artifact
+list subsequently showed that artifact, and the overall publication workflow
+failed even though PyPI publication and GitHub release creation succeeded.
+
+An artifact visibility race is likely, but not proven by the available logs; an
+[upstream report](https://github.com/actions/deploy-pages/issues/451) describes the
+same intermittent failure when upload and deployment are consecutive steps.
+The current workflow separates build and deployment, uses attempt-specific
+artifact names, and retries deployment without re-uploading. It retains Pages
+artifacts for seven days for deploy-only recovery. These mitigations still need
+verification in a real GitHub Actions deployment and deploy-only rerun before this
+entry can be resolved. Bounded retries cannot guarantee that GitHub's artifact
+service is available. The old run retains its original combined workflow; rerunning
+that job can create multiple artifacts with the same name in one workflow run.
+
 ## Nested model partial updates lose per-call validation options
 
 Partial updates to an existing nested model call `_NestedModelUpdates._update_model`, which

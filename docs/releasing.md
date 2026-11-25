@@ -108,8 +108,14 @@ not a versioned documentation archive.
 
 Both deployment paths use the shared Pages workflow. It installs locked
 documentation dependencies and all package extras, builds strictly, then adds
-the coverage report and badge from the same run's validation artifact. Deployments
-share a concurrency group so they do not run simultaneously.
+the coverage report and badge from the same run's validation artifact. A build
+job uploads an attempt-specific Pages artifact retained for seven days. A
+separate deployment job retries against that artifact up to three times.
+
+Deployments share a concurrency group and queue rather than running simultaneously.
+GitHub queues up to 100 pending deployments and does not guarantee commit order,
+so an older commit can deploy after a newer one. The parent CI workflow can still
+cancel an older master-push run before its Pages job reaches the deployment queue.
 
 In the repository's **Settings → Pages**, select **GitHub Actions** as the
 publishing source. The `github-pages` environment must allow deployments from
@@ -195,6 +201,17 @@ release creation failed, rerun only the failed job. Never delete or move a relea
 tag to conceal a partial publication. Check publisher registration after an
 `invalid-publisher` error.
 
-If documentation deployment fails after a successful package upload, rerun the
-failed Pages job in that release workflow while its coverage artifact is retained.
+If documentation deployment fails after a successful package upload, rerun only
+the failed Pages **deploy** job while its seven-day Pages artifact is retained.
+It reuses the build job's artifact name and does not upload another artifact.
+If that artifact has expired but the run's `coverage-data` artifact remains,
+rerun its Pages **build** job and its dependent deploy job. The build uses the
+original validated ref and creates a new attempt-specific artifact. If coverage
+has also expired, use a subsequent validated master push to deploy current docs,
+or arrange a separate documentation-only deployment for the desired commit.
 The package is already published; do not repeat the package upload to repair the site.
+
+The failed `v0.3.0` publication run used the earlier combined Pages job. Rerunning
+that old run uses its original workflow and can upload a duplicate artifact; its
+documentation was already deployed by the successful master CI run for the same
+commit. Do not rerun that publication merely to repair documentation.

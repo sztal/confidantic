@@ -150,8 +150,8 @@ def test_pages_build_keeps_coverage_from_the_validated_commit() -> None:
     """Strict builds and coverage artifacts share a checkout and deploy together."""
     root = Path(__file__).resolve().parents[2]
     workflow = yaml.safe_load((root / ".github/workflows/pages.yaml").read_text())
-    pages = workflow["jobs"]["pages"]
-    steps = pages["steps"]
+    job = workflow["jobs"]["build"]
+    steps = job["steps"]
     checkout = next(
         step for step in steps if step.get("uses", "").startswith("actions/checkout@")
     )
@@ -177,8 +177,86 @@ def test_pages_build_keeps_coverage_from_the_validated_commit() -> None:
     assert "coverage html --data-file=coverage-data -d site/coverage" in build
     assert "generate_coverage_badge.py coverage.json site/coverage.svg" in build
     assert upload["with"]["path"] == "site"
+    assert upload["with"]["name"] == "${{ steps.artifact_identity.outputs.name }}"
+    assert upload["with"]["retention-days"] == 7
+    assert (
+        job["outputs"]["artifact_name"] == "${{ steps.artifact_identity.outputs.name }}"
+    )
+    identity = next(step for step in steps if step.get("id") == "artifact_identity")
+    assert "${GITHUB_RUN_ID}" in identity["run"]
+    assert "${GITHUB_RUN_ATTEMPT}" in identity["run"]
+    assert '>> "$GITHUB_OUTPUT"' in identity["run"]
+
+
+def test_pages_artifact_names_change_between_attempts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Rebuilding on a rerun cannot reuse the previous attempt's artifact name."""
+    root = Path(__file__).resolve().parents[2]
+    workflow = yaml.safe_load((root / ".github/workflows/pages.yaml").read_text())
+    steps = workflow["jobs"]["build"]["steps"]
+    identity = next(step for step in steps if step.get("id") == "artifact_identity")
+    output = tmp_path / "outputs"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.setenv("GITHUB_RUN_ID", "123")
+    for attempt in ("1", "2"):
+        monkeypatch.setenv("GITHUB_RUN_ATTEMPT", attempt)
+        subprocess.run(["bash", "-c", identity["run"]], check=True)
+    assert output.read_text().splitlines() == [
+        "name=github-pages-123-1",
+        "name=github-pages-123-2",
+    ]
+
+
+def test_pages_deploy_retries_the_selected_artifact() -> None:
+    """Deployments queue, retry failures, and propagate the last failure."""
+    root = Path(__file__).resolve().parents[2]
+    workflow = yaml.safe_load((root / ".github/workflows/pages.yaml").read_text())
+    pages = workflow["jobs"]["deploy"]
+    assert pages["needs"] == "build"
+    assert pages["permissions"] == {
+        "contents": "read",
+        "pages": "write",
+        "id-token": "write",
+    }
     assert pages["concurrency"] == {
         "group": "github-pages",
         "cancel-in-progress": False,
+        "queue": "max",
     }
     assert pages["environment"]["name"] == "github-pages"
+    steps = pages["steps"]
+    deployments = [
+        step
+        for step in steps
+        if step.get("uses", "").startswith("actions/deploy-pages@")
+    ]
+    assert [step["id"] for step in deployments] == [
+        "deployment_first",
+        "deployment_second",
+        "deployment_third",
+    ]
+    assert all(
+        step["with"]["artifact_name"] == "${{ needs.build.outputs.artifact_name }}"
+        for step in deployments
+    )
+    assert deployments[0]["continue-on-error"] is True
+    assert deployments[1]["continue-on-error"] is True
+    assert not deployments[2].get("continue-on-error", False)
+    for step in deployments:
+        assert f"steps.{step['id']}.outputs.page_url" in pages["environment"]["url"]
+    assert deployments[1]["if"] == "${{ steps.deployment_first.outcome == 'failure' }}"
+    assert deployments[2]["if"] == "${{ steps.deployment_second.outcome == 'failure' }}"
+    waits = [step for step in steps if step.get("run", "").startswith("sleep ")]
+    assert [(step["run"], step["if"]) for step in waits] == [
+        ("sleep 5", deployments[1]["if"]),
+        ("sleep 15", deployments[2]["if"]),
+    ]
+    assert [
+        steps.index(step)
+        for step in (deployments[0], waits[0], deployments[1], waits[1], deployments[2])
+    ] == sorted(steps.index(step) for step in (*deployments, *waits))
+    assert not any(
+        step.get("uses", "").startswith("actions/upload-pages-artifact@")
+        for step in steps
+    )

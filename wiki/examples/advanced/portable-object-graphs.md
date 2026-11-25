@@ -48,6 +48,10 @@ context produces new constructor directives.
 
 For YAML/TOML containing directives, parse the document and validate the parsed
 value through Make. Plain model format loaders do not evaluate a root directive.
+Alternatively, a `Make[FromYaml[ServiceConfig]]` field reads a YAML path and
+evaluates its directives during validation; JSON and TOML have corresponding file
+annotations. The [serialization guide](../serialization.md#load-files-inside-nested-configuration)
+includes a runnable nested example.
 Constructor imports and calls execute code, so this recipe assumes trusted documents.
 
 Read [serialization concepts](../../concepts/serialization.md),

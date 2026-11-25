@@ -19,6 +19,9 @@ is not necessarily the only input used to construct settings.
 TOML cannot represent None. `exclude_none=True` removes nullable model fields but
 does not remove None entries inside lists or mappings. YAML can represent null.
 Per-call validation options follow BaseConfig's normal validation boundaries.
+When comparing a restored model with its original, compare the dumped values if
+source provenance is not part of the comparison: equality can include private
+state that differs between defaults and explicitly loaded values.
 
 ## Trusted construction directives
 
@@ -32,6 +35,12 @@ do not themselves interpret a root `@call`. Identifiers must resolve to importab
 targets in the receiving process; local classes and unregistered generated classes
 are not portable identifiers. These documents execute imports and constructors and
 are intended for trusted data.
+
+`Make[FromJson[T]]`, `Make[FromYaml[T]]`, and `Make[FromToml[T]]` combine file
+reading with directive evaluation and validation as `T`. These annotations work
+on fields in nested settings as well as at the root. A bare file annotation reads a
+mapping without executing directives. It does not preserve the path for write-back.
+See the [file-backed round-trip example](../examples/serialization.md#load-files-inside-nested-configuration).
 
 ## Python serialization
 

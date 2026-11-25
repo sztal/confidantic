@@ -1,4 +1,4 @@
-# Read and write configuration files
+# Round-trip configuration documents and files
 
 A configuration document is useful for saving values or exchanging them with
 another program. Start with a known model class and a plain document:
@@ -20,6 +20,28 @@ another program. Start with a known model class and a plain document:
 To use a file, write that text with `Path.write_text(..., encoding="utf-8")` and
 pass `Path.read_text(encoding="utf-8")` to the loader. Loading still validates
 values against the model.
+
+| Representation | Serialize                  | Validate as a known class             |
+| -------------- | -------------------------- | ------------------------------------- |
+| Python values  | `config.model_dump()`      | `AppConfig.model_validate(values)`    |
+| JSON text      | `config.model_dump_json()` | `AppConfig.model_validate_json(text)` |
+| YAML text      | `config.model_dump_yaml()` | `AppConfig.model_validate_yaml(text)` |
+| TOML text      | `config.model_dump_toml()` | `AppConfig.model_validate_toml(text)` |
+
+For example, continuing with `config` and `AppConfig`, a JSON file round trip is:
+
+```python
+from pathlib import Path
+
+path = Path("config.json")
+path.write_text(config.model_dump_json(), encoding="utf-8")
+restored = AppConfig.model_validate_json(path.read_text(encoding="utf-8"))
+assert restored.model_dump() == config.model_dump()
+```
+
+Compare dumped field values when checking a round trip. Model equality can also
+reflect private state, such as whether values came from defaults or initializer
+inputs. Dumping a model does not promise to preserve that source information.
 
 ## YAML and TOML
 
@@ -115,6 +137,31 @@ validated field has type `Component`. `BaseConfig` validates defaults; with an
 ordinary Pydantic model, enable `validate_default` as needed.
 Environment and CLI inputs can replace the entire field with another path.
 Nested overrides replace the path default rather than merging with its file.
+
+The same pattern works in more deeply nested settings and with the other file
+formats. In this excerpt from
+[file_roundtrip.py](https://github.com/sztal/confidantic/blob/master/examples/file_roundtrip.py),
+`Service` is the base type and the paths contain `WebService` directives:
+
+```python
+class ServiceFiles(BaseConfig):
+    json_service: Make[FromJson[Service]] = str(json_path)  # type: ignore[assignment]
+    yaml_service: Make[FromYaml[Service]] = str(yaml_path)  # type: ignore[assignment]
+    toml_service: Make[FromToml[Service]] = str(toml_path)  # type: ignore[assignment]
+
+
+class Application(BaseConfig):
+    services: ServiceFiles = Field(default_factory=ServiceFiles)
+
+
+application = Application()
+assert type(application.services.yaml_service) is WebService
+```
+
+Run the complete script with `uv run python examples/file_roundtrip.py` after
+installing the YAML and TOML extras. It writes files in a temporary directory and
+checks all three reconstructed types. Bare `FromYaml` instead returns the parsed
+mapping, including `@call`, without executing it.
 
 The resolved field contains the validated value, not its source path. Dumping
 the containing model does not write back to the file. A normal dump without

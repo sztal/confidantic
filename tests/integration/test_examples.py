@@ -149,6 +149,7 @@ def test_quickstart_invalid_cli_input(quickstart_directory: Path) -> None:
         ("directive_annotations.py", []),
         ("env_files.py", []),
         ("factory.py", []),
+        ("file_roundtrip.py", []),
         ("formats.py", []),
         ("logging_config.py", []),
         ("import_directive.py", []),

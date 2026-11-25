@@ -9,6 +9,22 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/).
 
 <!-- towncrier release notes start -->
 
+## [0.3.0](https://github.com/sztal/confidantic/tree/v0.3.0) - 2026-11-25
+
+### Added
+
+- - Add `FromJson`, `FromYaml`, and `FromToml` annotations for loading mappings or typed values from files, including composition with `Make` for trusted constructor directives in nested configuration.
+
+### Changed
+
+- - Move the source tree to `src/confidantic` without changing the public import package. Package versions now derive from annotated `v` tags; lightweight tags do not select a release version.
+
+### Fixed
+
+- - Honor explicit CLI arguments and IPython `%run` in notebook-like runtimes while continuing to ignore kernel launcher arguments.
+  - Preserve raw scalar and delimited inputs for compatible `Delimited` and `Map` unions from environment, dotenv, and CLI sources.
+
+
 ## [0.2.0](https://github.com/sztal/confidantic/tree/v0.2.0) - 2026-11-20
 
 ### Added

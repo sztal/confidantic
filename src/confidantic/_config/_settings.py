@@ -26,10 +26,13 @@ from pydantic_settings.sources import DefaultSettingsSource
 from pydantic_settings.sources.types import ENV_FILE_SENTINEL
 from pydantic_settings.sources.utils import InitState, _get_alias_names
 
-from confidantic._config._cli import _CliSettings, _ConfidanticCliSettingsSource
+from confidantic._config._cli import (
+    _CliSettings,
+    _ConfidanticCliSettingsSource,
+    is_jupyter_kernel_argv,
+)
 from confidantic._config._nested import _NestedModelUpdates
 from confidantic._config._options import _CUSTOM_CONFIG_KEYS
-from confidantic.utils import is_runtime_jupyterlike
 
 _FieldSource = tuple[type[PydanticBaseSettingsSource], type[BaseSettings]]
 _SourceResult = tuple[tuple[PydanticBaseSettingsSource, ...], dict[str, Any]]
@@ -327,6 +330,11 @@ class _SettingsSources:
         if not self.levels:
             if self.source_options.get("_env_prefix") is None:
                 self.source_options["_env_prefix"] = ""
+            if (
+                self.source_options.get("_cli_parse_args") is True
+                and is_jupyter_kernel_argv()
+            ):
+                self.source_options["_cli_parse_args"] = False
             return fallback(**self.source_options)
 
         resolved_sources: list[PydanticBaseSettingsSource] = []
@@ -396,7 +404,9 @@ class _SettingsSources:
         )
         level_options = self.source_options | {
             "_env_prefix": cli.env_prefix or "",
-            "_cli_parse_args": self.options["_cli_parse_args"] if concrete else False,
+            "_cli_parse_args": (
+                cli.cli_options["cli_parse_args"] if concrete else False
+            ),
             "_cli_settings_source": cli_source,
             "_init_kwargs": self.init_kwargs,
         }
@@ -573,7 +583,7 @@ def validate_settings(
 
     Notes
     -----
-    Automatic CLI parsing is suppressed in notebook and resolution contexts.
+    Automatic CLI parsing is suppressed during resolution contexts.
     A fresh nested-update scope spans value assembly and validation, restoring
     any enclosing scope on exit. Importable callbacks keep this transient state
     out of serialized model classes.
@@ -581,7 +591,7 @@ def validate_settings(
     if not isinstance(value, Mapping):
         return handler(value)
     kwargs = dict(value)
-    if _CliSettings.is_suppressed() or is_runtime_jupyterlike():
+    if _CliSettings.is_suppressed():
         kwargs["_cli_parse_args"] = False
 
     config_options = {

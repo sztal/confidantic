@@ -2,8 +2,10 @@
 
 A CLI is another settings source for a configuration model. Enable it on the root
 model with `cli_parse_args=True`, or supply an explicit argument sequence. Automatic
-parsing is disabled by default and suppressed in notebook-like runtimes, including
-when a sequence was configured. Pydantic Settings owns parser syntax and subcommands.
+parsing is disabled by default; in notebook-like runtimes, `cli_parse_args=True` is
+ignored while `sys.argv` still belongs to the kernel launcher, whereas explicit
+argument sequences and replaced `sys.argv` (such as IPython `%run`) are still parsed.
+Pydantic Settings owns parser syntax and subcommands.
 
 ## Options and precedence
 

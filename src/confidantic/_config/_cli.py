@@ -1,10 +1,12 @@
 """CLI source selection and context-local suppression during resolution."""
 
+import sys
 from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
 from copy import copy
 from inspect import signature
+from pathlib import Path
 from types import GenericAlias
 from typing import Any, get_args, get_origin
 
@@ -27,11 +29,68 @@ from pydantic_settings.sources.utils import (
 from typing_inspection import typing_objects
 from typing_inspection.introspection import is_union_origin
 
+from confidantic.utils import is_runtime_jupyterlike
+
 # Resolution may construct arbitrary settings inside a target constructor, so
 # suppression must reach those calls without changing their public signatures.
 _CLI_SUPPRESSED: ContextVar[bool] = ContextVar(
     "confidantic_cli_suppressed", default=False
 )
+
+_KERNEL_LAUNCHER_STEMS = frozenset({"ipykernel_launcher", "colab_kernel_launcher"})
+_KERNEL_LAUNCHER_PACKAGES = frozenset({"ipykernel", "spyder_kernels"})
+
+
+def _has_zmq_shell() -> bool:
+    ipython = sys.modules.get("IPython")
+    if ipython is None:
+        return False
+    get_ipython = getattr(ipython, "get_ipython", None)
+    if get_ipython is None:
+        return False
+    shell = get_ipython()
+    return shell is not None and type(shell).__name__ == "ZMQInteractiveShell"
+
+
+def _matches_orig_argv(argv: list[str], orig_argv: list[str]) -> bool:
+    if not argv or not orig_argv:
+        return False
+    if len(orig_argv) >= len(argv) and orig_argv[-len(argv) :] == argv:
+        return True
+    tail = argv[1:]
+    flag_pos = len(orig_argv) - len(tail) - 2
+    if flag_pos < 1 or orig_argv[flag_pos + 2 :] != tail:
+        return False
+    flag = orig_argv[flag_pos]
+    if flag == "-m":
+        module_leaf = orig_argv[flag_pos + 1].rsplit(".", 1)[-1]
+        prog = Path(argv[0])
+        return prog.stem == module_leaf or (
+            prog.name == "__main__.py" and prog.parent.name == module_leaf
+        )
+    return flag == "-c" and argv[0] == "-c"
+
+
+def _is_known_kernel_launcher(argv0: str) -> bool:
+    prog = Path(argv0)
+    return prog.stem in _KERNEL_LAUNCHER_STEMS or (
+        prog.name == "__main__.py"
+        and any(part in _KERNEL_LAUNCHER_PACKAGES for part in prog.parts)
+    )
+
+
+def is_jupyter_kernel_argv() -> bool:
+    """Return whether ``sys.argv`` currently reflects a Jupyter kernel launcher."""
+    if not is_runtime_jupyterlike() or not sys.argv:
+        return False
+    if _has_zmq_shell():
+        orig_argv = getattr(sys, "orig_argv", [])
+        if orig_argv:
+            if _matches_orig_argv(sys.argv, orig_argv):
+                return True
+        elif not hasattr(sys.modules.get("__main__"), "__file__"):
+            return True
+    return _is_known_kernel_launcher(sys.argv[0])
 
 
 def _branch_has_nodecode(annotation: Any) -> bool:
@@ -248,6 +307,8 @@ class _CliSettings:
             self.cli_options["cli_parse_none_str"] = self.env_options[
                 "env_parse_none_str"
             ]
+        if self.cli_options.get("cli_parse_args") is True and is_jupyter_kernel_argv():
+            self.cli_options["cli_parse_args"] = False
 
     def source(
         self, supplied: CliSettingsSource[Any] | None

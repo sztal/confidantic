@@ -70,8 +70,9 @@ class BaseConfig(BaseSettings):
     ``nested_model_default_partial_update`` is enabled (the default).
     Discriminated fields select a variant rather than patching the baseline.
     Process environment parsing is disabled by default (``env_prefix=None``);
-    dotenv loading and CLI parsing are opt-in. Notebook-like runtimes suppress
-    automatic CLI parsing.
+    dotenv loading and CLI parsing are opt-in. Notebook-like runtimes ignore
+    implicit ``sys.argv`` parsing while ``sys.argv`` still belongs to the
+    kernel launcher.
 
     Validation of merged settings retains per-call ``strict``, ``extra``, and
     ``context`` options. Custom ``__init__`` methods retain Pydantic's limitations.

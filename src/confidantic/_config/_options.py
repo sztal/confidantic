@@ -59,8 +59,10 @@ class ConfigModelDict(PydanticSettingsConfigDict, total=False):
     cli_parse_args
         ``True`` parses process arguments; a list or tuple supplies explicit
         arguments. ``None`` and ``False`` disable automatic parsing. Only the
-        most-derived class parses CLI arguments, and notebook-like runtimes
-        suppress automatic parsing even for an explicit argument sequence.
+        most-derived class parses CLI arguments. In notebook-like runtimes,
+        ``True`` is ignored while ``sys.argv`` still belongs to the kernel
+        launcher; explicit argument sequences and replaced ``sys.argv`` (such
+        as IPython ``%run``) are still parsed.
     cli_parse_none_str
         Command-line string value interpreted as ``None``. When
         ``env_parse_none_str`` is set, the settings CLI uses that value instead.

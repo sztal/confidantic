@@ -2,6 +2,8 @@
 
 import sys
 from enum import Enum
+from pathlib import Path
+from types import ModuleType
 
 import pytest
 from pydantic import BaseModel, ValidationError
@@ -39,8 +41,176 @@ def test_cli_parsing_is_disabled_in_jupyterlike_runtime(
 
     class Config(BaseConfig, cli_parse_args=True):
         value: str = "from-default"
+        f: int = 1
+
+    class RequiredConfig(BaseConfig, cli_parse_args=True, cli_enforce_required=True):
+        value: int
 
     assert Config().value == "from-default"
+    assert Config().f == 1
+    assert RequiredConfig(value=7).value == 7
+    assert BaseConfig(_cli_parse_args=True) == BaseConfig()
+
+
+def test_cli_explicit_sequences_are_parsed_in_jupyterlike_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Explicit CLI argument sequences still parse inside Jupyter-like runtimes."""
+    shell = type("ZMQInteractiveShell", (), {})()
+    ipython = ModuleType("IPython")
+    monkeypatch.setattr(ipython, "get_ipython", lambda: shell, raising=False)
+    monkeypatch.setitem(sys.modules, "IPython", ipython)
+    monkeypatch.setitem(sys.modules, "ipykernel", object())
+    monkeypatch.setattr(
+        sys,
+        "orig_argv",
+        ["python", "-m", "ipykernel_launcher", "--f=/tmp/kernel.json"],
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["/site-packages/ipykernel_launcher.py", "--f=/tmp/kernel.json"],
+    )
+
+    class Config(BaseConfig, cli_parse_args=True):
+        param: float | CommaDelimited[tuple[float, float]] = 0.0
+
+    class ExplicitConfig(BaseConfig, cli_parse_args=["--param=0.2"]):
+        param: float = 0.0
+
+    assert Config().param == 0.0
+    assert Config(_cli_parse_args=["--param=0.1"]).param == 0.1
+    assert Config(_cli_parse_args=["--param=0.1,0.2"]).param == (0.1, 0.2)
+    assert ExplicitConfig().param == 0.2
+
+
+@pytest.mark.parametrize(
+    ("orig_argv", "argv"),
+    [
+        (
+            ["python", "-m", "ipykernel_launcher", "-f", "kernel.json"],
+            ["/env/ipykernel_launcher.py", "-f", "kernel.json"],
+        ),
+        (
+            [
+                "python",
+                "-X",
+                "frozen_modules=off",
+                "-m",
+                "spyder_kernels.console",
+                "-f",
+                "kernel.json",
+            ],
+            ["/env/spyder_kernels/console/__main__.py", "-f", "kernel.json"],
+        ),
+        (
+            ["python", "-u", "/env/custom_kernel.py", "-f", "kernel.json"],
+            ["/env/custom_kernel.py", "-f", "kernel.json"],
+        ),
+        (
+            ["python", "-c", "launch_kernel()", "-f", "kernel.json"],
+            ["-c", "-f", "kernel.json"],
+        ),
+        (
+            [],
+            ["/env/custom_kernel.py", "-f", "kernel.json"],
+        ),
+    ],
+)
+def test_cli_jupyter_kernel_argv_is_suppressed_across_launch_styles(
+    orig_argv: list[str],
+    argv: list[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Untouched kernel launch arguments are ignored across kernel launchers."""
+    shell = type("ZMQInteractiveShell", (), {})()
+    ipython = ModuleType("IPython")
+    monkeypatch.setattr(ipython, "get_ipython", lambda: shell, raising=False)
+    monkeypatch.setitem(sys.modules, "IPython", ipython)
+    monkeypatch.setitem(sys.modules, "ipykernel", object())
+    monkeypatch.setattr(sys, "orig_argv", orig_argv)
+    monkeypatch.setattr(sys, "argv", argv)
+    if not orig_argv:
+        monkeypatch.setitem(sys.modules, "__main__", ModuleType("__main__"))
+
+    class Config(BaseConfig, cli_parse_args=True, cli_ignore_unknown_args=False):
+        f: int = 1
+
+    assert Config().f == 1
+
+
+def test_cli_replaced_argv_and_non_kernel_ipykernel_imports_still_parse(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Manual sys.argv replacement and CLI scripts importing ipykernel still parse."""
+
+    class Config(BaseConfig, cli_parse_args=True):
+        value: str = "from-default"
+
+    # Manual sys.argv replacement inside an active ZMQ kernel shell.
+    shell = type("ZMQInteractiveShell", (), {})()
+    ipython = ModuleType("IPython")
+    monkeypatch.setattr(ipython, "get_ipython", lambda: shell, raising=False)
+    monkeypatch.setitem(sys.modules, "IPython", ipython)
+    monkeypatch.setitem(sys.modules, "ipykernel", object())
+    monkeypatch.setattr(
+        sys,
+        "orig_argv",
+        ["python", "-m", "ipykernel_launcher", "-f", "kernel.json"],
+    )
+    monkeypatch.setattr(sys, "argv", ["app.py", "--value=from-replaced-argv"])
+    assert Config().value == "from-replaced-argv"
+
+    # Plain CLI script that merely imported ipykernel (no active ZMQ shell).
+    monkeypatch.setattr(ipython, "get_ipython", lambda: None, raising=False)
+    monkeypatch.setattr(
+        sys, "orig_argv", ["python", "script.py", "--value=from-script"]
+    )
+    monkeypatch.setattr(sys, "argv", ["script.py", "--value=from-script"])
+    assert Config().value == "from-script"
+
+
+def test_cli_ipython_run_magic_parses_script_args_in_jupyterlike_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """IPython %run scripts receive CLI arguments inside a notebook kernel."""
+    from IPython.core.interactiveshell import InteractiveShell
+
+    kernel_argv = ["/env/ipykernel_launcher.py", "-f", "kernel.json"]
+    kernel_orig_argv = ["python", "-m", "ipykernel_launcher", "-f", "kernel.json"]
+
+    shell = InteractiveShell()
+    zmq_shell = type("ZMQInteractiveShell", (), {})()
+    ipython = ModuleType("IPython")
+    monkeypatch.setattr(ipython, "get_ipython", lambda: zmq_shell, raising=False)
+    monkeypatch.setitem(sys.modules, "IPython", ipython)
+    monkeypatch.setitem(sys.modules, "ipykernel", object())
+    monkeypatch.setattr(sys, "orig_argv", kernel_orig_argv)
+    monkeypatch.setattr(sys, "argv", kernel_argv)
+
+    script = tmp_path / "run_cli.py"
+    script.write_text(
+        "from confidantic import BaseConfig\n"
+        "from confidantic.annotations import CommaDelimited\n"
+        "class RunConfig(BaseConfig, cli_parse_args=True):\n"
+        "    param: float | CommaDelimited[tuple[float, float]] = 0.0\n"
+        "result = RunConfig().param\n",
+        encoding="utf-8",
+    )
+
+    class CellConfig(BaseConfig, cli_parse_args=True):
+        f: int = 1
+
+    assert CellConfig().f == 1
+
+    shell.run_line_magic("run", f"{script} --param=0.1")
+    assert shell.user_ns["result"] == 0.1
+
+    shell.run_line_magic("run", f"-i {script} --param=0.2,0.3")
+    assert shell.user_ns["result"] == (0.2, 0.3)
+
+    assert CellConfig().f == 1
 
 
 def test_cli_boolean_values_are_explicit_for_nested_models() -> None:

@@ -72,6 +72,56 @@ The loaders do not evaluate a root `@call` directive. For trusted documents that
 choose constructors, parse the document and validate it through `Make` as shown
 in [object directives and portability](../advanced/object-directives-and-portability.md#make-directives).
 
+## File-backed fields
+
+`FromJson`, `FromYaml`, and `FromToml` read UTF-8 files during field validation.
+Without a type argument, each returns a mapping; a parameter such as
+`FromYaml[AppConfig]` validates the file's mapping as that type. Use
+`Make[FromYaml[AppConfig]]` to evaluate its directives first. YAML requires
+`confidantic[yaml]`; JSON and TOML reading require no extra. All three require a
+mapping at the document root. Strings and path-like values name files relative
+to the current working directory; existing mappings and instances are also accepted.
+
+For a portable subtype round trip, define the configuration classes in an
+importable module available to both processes and write the producer's instance:
+
+```python
+from pathlib import Path
+
+path = Path("component.yaml")
+path.write_text(
+    component.model_dump_yaml(context={"make": True}, serialize_as_any=True),
+    encoding="utf-8",
+)
+```
+
+Then the consumer can use that file as a default:
+
+```python
+from confidantic import BaseConfig
+from confidantic.annotations import FromYaml, Make
+from my_application import Component
+
+
+class Settings(BaseConfig):
+    component: Make[FromYaml[Component]] = "component.yaml"  # type: ignore[assignment]
+
+
+component = Settings().component
+```
+
+Mypy needs the targeted ignore because the input default is a string while the
+validated field has type `Component`. `BaseConfig` validates defaults; with an
+ordinary Pydantic model, enable `validate_default` as needed.
+Environment and CLI inputs can replace the entire field with another path.
+Nested overrides replace the path default rather than merging with its file.
+
+The resolved field contains the validated value, not its source path. Dumping
+the containing model does not write back to the file. A normal dump without
+`context={"make": True}` does not record the concrete class; it can still be
+loaded as the declared type. Use directives only with trusted documents: they
+can import and call arbitrary Python objects before type validation.
+
 ## Use a TOML file as a settings source
 
 Loading a document explicitly is different from automatically consulting a file

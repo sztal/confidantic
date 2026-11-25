@@ -2,7 +2,11 @@
 
 import json
 import re
+import tomllib
 from collections.abc import Callable, Iterator, Mapping
+from dataclasses import dataclass
+from importlib import import_module
+from os import PathLike
 from pathlib import Path
 from typing import (
     Annotated,
@@ -13,11 +17,12 @@ from typing import (
     get_origin,
 )
 
-from pydantic import ImportString, PlainSerializer
+from pydantic import GetCoreSchemaHandler, ImportString, PlainSerializer
 from pydantic.functional_validators import (
     AfterValidator,
     WrapValidator,
 )
+from pydantic_core import CoreSchema, core_schema
 from pydantic_settings import NoDecode
 
 from confidantic.utils import _call_mapping, get_import_string, import_from_string, make
@@ -27,6 +32,9 @@ __all__ = (
     "Call",
     "CommaDelimited",
     "Delimited",
+    "FromJson",
+    "FromToml",
+    "FromYaml",
     "Import",
     "Make",
     "Map",
@@ -39,6 +47,7 @@ __all__ = (
 
 T = TypeVar("T")
 P = TypeVar("P", bound=Path, default=Path)
+F = TypeVar("F", default=Mapping[str, Any])
 
 
 def get_proper_args(annotation: Any) -> Iterator[type]:
@@ -236,6 +245,65 @@ Map: TypeAlias = Annotated[T, NoDecode, WrapValidator(_dict_like)]
 
 
 # -----------------------------------------------------------------------------------
+# File-backed values
+# -----------------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class _FileInput:
+    """Read a mapping from a file before validating its contents."""
+
+    format: str
+
+    def read(self, value: Any) -> Any:
+        """Parse path inputs and pass already constructed values through."""
+        if not isinstance(value, str | PathLike):
+            return value
+        path = Path(value)
+        try:
+            data = path.read_text(encoding="utf-8")
+            if self.format == "json":
+                result = json.loads(data)
+            elif self.format == "toml":
+                result = tomllib.loads(data)
+            else:
+                try:
+                    yaml = import_module("yaml")
+                except ModuleNotFoundError as error:
+                    if error.name != "yaml":
+                        raise
+                    raise ImportError(
+                        "FromYaml requires PyYAML; install confidantic[yaml]"
+                    ) from error
+                result = yaml.safe_load(data)
+        except ImportError:
+            raise
+        except Exception as error:
+            raise ValueError(
+                f"Could not load {self.format} file {path}: {error}"
+            ) from error
+        if not isinstance(result, Mapping):
+            raise ValueError(f"{self.format} file {path} must contain a mapping")
+        return result
+
+    def __get_pydantic_core_schema__(
+        self, source: Any, handler: GetCoreSchemaHandler
+    ) -> CoreSchema:
+        return core_schema.no_info_before_validator_function(
+            self.read, handler(source), metadata={"confidantic_file_input": self}
+        )
+
+
+#: Read a UTF-8 JSON file into a mapping or a parameterized validated type.
+FromJson: TypeAlias = Annotated[F, NoDecode, _FileInput("json")]
+#: Read a UTF-8 TOML file into a mapping or a parameterized validated type.
+FromToml: TypeAlias = Annotated[F, NoDecode, _FileInput("toml")]
+#: Read a UTF-8 YAML file into a mapping or a parameterized validated type.
+#: YAML loading requires ``confidantic[yaml]``.
+FromYaml: TypeAlias = Annotated[F, NoDecode, _FileInput("yaml")]
+
+
+# -----------------------------------------------------------------------------------
 # Import directive annotation
 # -----------------------------------------------------------------------------------
 
@@ -291,10 +359,43 @@ def _make(value: Any, handler: Callable[[Any], Any]) -> Any:
     return make(value, handler)
 
 
+@dataclass(frozen=True)
+class _MakeDirective:
+    """Place file parsing before directive evaluation when directly composed."""
+
+    def __get_pydantic_core_schema__(
+        self, source: Any, handler: GetCoreSchemaHandler
+    ) -> CoreSchema:
+        schema = handler(source)
+
+        def extract(current: CoreSchema) -> tuple[CoreSchema, _FileInput | None]:
+            if isinstance(current.get("metadata"), dict):
+                file_input = current["metadata"].get("confidantic_file_input")
+                if isinstance(file_input, _FileInput):
+                    return current["schema"], file_input
+            if current["type"] in {
+                "function-before",
+                "function-after",
+                "function-wrap",
+            }:
+                child, file_input = extract(current["schema"])
+                if file_input is not None:
+                    return {**current, "schema": child}, file_input
+            return current, None
+
+        schema, file_input = extract(schema)
+        wrapped = core_schema.no_info_wrap_validator_function(_make, schema)
+        if file_input is not None:
+            return core_schema.no_info_before_validator_function(
+                file_input.read, wrapped
+            )
+        return wrapped
+
+
 #: Evaluate directives with :func:`confidantic.utils.make` before validation.
 #: Mapping values, lists, and tuples are traversed recursively. Nested strings
 #: and callables remain data; top-level strings and callables are called without
 #: arguments. Mapping keys and values returned by calls are not traversed.
 #: The built value is validated as T; dumping uses that value's serialization,
 #: without automatically recovering its original directive.
-Make: TypeAlias = Annotated[T, WrapValidator(_make)]
+Make: TypeAlias = Annotated[T, _MakeDirective()]

@@ -83,6 +83,25 @@ def test_core_does_not_import_optional_packages(tmp_path: Path) -> None:
     )
 
 
+def test_from_yaml_requires_yaml_extra(tmp_path: Path) -> None:
+    """File annotations defer the optional YAML import until a file is read."""
+    (tmp_path / "config.yaml").write_text("value: 1\n", encoding="utf-8")
+    _run(
+        tmp_path,
+        """
+        from pydantic import TypeAdapter
+        from confidantic.annotations import FromYaml
+        try:
+            TypeAdapter(FromYaml).validate_python("config.yaml")
+        except ImportError as error:
+            assert "install confidantic[yaml]" in str(error)
+        else:
+            raise AssertionError("missing YAML was accepted")
+        """,
+        ("yaml",),
+    )
+
+
 @pytest.mark.parametrize("method", ["Config.model_info", "Config().info"])
 @pytest.mark.parametrize("output", ["table", "string", "print"])
 def test_rich_modes_require_the_extra(tmp_path: Path, method: str, output: str) -> None:

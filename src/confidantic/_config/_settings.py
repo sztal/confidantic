@@ -10,6 +10,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from functools import wraps
 from inspect import Parameter, get_annotations, signature
+from os import PathLike
 from typing import Any, cast
 
 from pydantic import ConfigDict, GetCoreSchemaHandler, PydanticUserError, TypeAdapter
@@ -118,6 +119,13 @@ class ClassDefaultsSource(PydanticBaseSettingsSource):
                     if isinstance(field.default_factory, _CopiedDefault)
                     else field.get_default(call_default_factory=False)
                 )
+                from confidantic.annotations import _FileInput
+
+                if isinstance(default, str | PathLike) and any(
+                    isinstance(item, _FileInput) for item in field.metadata
+                ):
+                    self.defaults[key] = default
+                    continue
                 adapter_config = (
                     ConfigDict(arbitrary_types_allowed=True)
                     if settings_cls.model_config.get("arbitrary_types_allowed")

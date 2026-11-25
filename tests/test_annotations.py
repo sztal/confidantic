@@ -8,6 +8,7 @@ from typing import Annotated, Any
 
 import pytest
 from pydantic import (
+    AfterValidator,
     BaseModel,
     DirectoryPath,
     Field,
@@ -24,6 +25,9 @@ from confidantic.annotations import (
     Call,
     CommaDelimited,
     Delimited,
+    FromJson,
+    FromToml,
+    FromYaml,
     Import,
     Make,
     Map,
@@ -32,6 +36,168 @@ from confidantic.annotations import (
     WhitespaceDelimited,
     get_proper_args,
 )
+from tests._config.models import PolymorphicChildConfig, PolymorphicConfig
+
+
+@pytest.mark.parametrize(
+    ("annotation", "contents"),
+    [
+        (FromJson, '{"name": "example", "count": 4}'),
+        (FromYaml, "name: example\ncount: 4\n"),
+        (FromToml, 'name = "example"\ncount = 4\n'),
+    ],
+)
+def test_file_annotations_read_mappings_and_validate_models(
+    annotation: Any, contents: str, tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """File annotations resolve relative paths and validate parsed values."""
+    path = tmp_path / "config"
+    path.write_text(contents, encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    assert TypeAdapter(annotation).validate_python(path.name) == {
+        "name": "example",
+        "count": 4,
+    }
+    adapter = TypeAdapter(annotation[PolymorphicChildConfig])
+    assert adapter.validate_python(path) == PolymorphicChildConfig(
+        name="example", count=4
+    )
+    value = PolymorphicChildConfig(name="direct", count=8)
+    assert adapter.validate_python(value) is value
+    assert adapter.validate_python({"name": "direct", "count": 8}) == value
+
+
+@pytest.mark.parametrize(
+    "annotation", [FromJson, FromYaml, FromToml], ids=["json", "yaml", "toml"]
+)
+def test_file_annotations_compose_with_make(annotation: Any, tmp_path: Path) -> None:
+    """A file is read before its root and nested Make directives are evaluated."""
+    config = PolymorphicChildConfig(name="example", count=7)
+    if annotation is FromJson:
+        contents = config.model_dump_json(context={"make": True})
+    elif annotation is FromYaml:
+        contents = config.model_dump_yaml(context={"make": True})
+    else:
+        contents = config.model_dump_toml(context={"make": True})
+    path = tmp_path / "config"
+    path.write_text(contents, encoding="utf-8")
+    raw = TypeAdapter(annotation).validate_python(path)
+    assert raw["@call"] == "tests._config.models:PolymorphicChildConfig"
+    adapter = TypeAdapter(Make[annotation[PolymorphicConfig]])
+    for value in (path, str(path), raw, config):
+        result = adapter.validate_python(value)
+        assert type(result) is PolymorphicChildConfig
+        assert result == config
+
+
+@pytest.mark.parametrize(
+    ("annotation", "contents"),
+    [(FromJson, "[1, 2]"), (FromYaml, "- 1\n- 2\n"), (FromToml, "invalid = [")],
+)
+def test_file_annotations_report_invalid_files(
+    annotation: Any, contents: str, tmp_path: Path
+) -> None:
+    """Missing, malformed, and non-mapping files identify the input path."""
+    path = tmp_path / "bad-config"
+    adapter = TypeAdapter(annotation)
+    with raises(ValidationError, match="bad-config"):
+        adapter.validate_python(path)
+    path.write_text(contents, encoding="utf-8")
+    with raises(ValidationError, match="bad-config"):
+        adapter.validate_python(path)
+
+
+@pytest.mark.parametrize(
+    ("annotation", "contents"),
+    [
+        (FromJson, '{"name":'),
+        (FromYaml, "name: ["),
+        (FromToml, "name = ["),
+    ],
+)
+def test_file_annotations_report_malformed_documents(
+    annotation: Any, contents: str, tmp_path: Path
+) -> None:
+    """Each parser reports a malformed document with its source path."""
+    path = tmp_path / "malformed"
+    path.write_text(contents, encoding="utf-8")
+    with raises(ValidationError, match="malformed"):
+        TypeAdapter(annotation).validate_python(path)
+
+
+def test_make_file_annotation_composes_with_other_validators(tmp_path: Path) -> None:
+    """Additional validation metadata does not prevent file loading before Make."""
+    config = PolymorphicChildConfig(name="child", count=5)
+    path = tmp_path / "config.json"
+    path.write_text(config.model_dump_json(context={"make": True}), encoding="utf-8")
+    adapter = TypeAdapter(
+        Make[
+            Annotated[FromJson[PolymorphicConfig], AfterValidator(lambda value: value)]
+        ]
+    )
+    assert type(adapter.validate_python(path)) is PolymorphicChildConfig
+
+
+def test_make_file_annotation_resolves_nested_directives(tmp_path: Path) -> None:
+    """Nested directives in the loaded mapping are evaluated before validation."""
+    path = tmp_path / "config.json"
+    path.write_text(
+        '{"child": {"@call": "builtins:dict", "count": 5}}', encoding="utf-8"
+    )
+    result = TypeAdapter(Make[FromJson[dict[str, dict[str, int]]]]).validate_python(
+        path
+    )
+    assert result == {"child": {"count": 5}}
+
+
+def test_file_annotation_validates_pydantic_default(tmp_path: Path) -> None:
+    """Ordinary Pydantic models can opt in to validating path defaults."""
+    path = tmp_path / "config.json"
+    path.write_text('{"name": "example", "count": 1}', encoding="utf-8")
+
+    class Model(BaseModel):
+        item: FromJson[PolymorphicChildConfig] = Field(
+            default=str(path), validate_default=True
+        )
+
+    assert Model().item == PolymorphicChildConfig(name="example", count=1)
+
+
+@pytest.mark.parametrize(
+    "annotation", [FromJson, FromYaml, FromToml], ids=["json", "yaml", "toml"]
+)
+def test_file_annotations_settings_sources_and_defaults(
+    annotation: Any, tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """Settings accept file defaults, environment values, and whole CLI paths."""
+    from confidantic import ConfigModelDict
+
+    config = PolymorphicChildConfig(name="default", count=7)
+    alternate = PolymorphicChildConfig(name="alternate", count=9)
+    dump = {
+        FromJson: "model_dump_json",
+        FromYaml: "model_dump_yaml",
+        FromToml: "model_dump_toml",
+    }[annotation]
+    default_path = tmp_path / "default"
+    alternate_path = tmp_path / "alternate"
+    for path, value in ((default_path, config), (alternate_path, alternate)):
+        path.write_text(getattr(value, dump)(context={"make": True}), encoding="utf-8")
+
+    class Settings(BaseConfig):
+        model_config = ConfigModelDict(env_prefix="FILE_TEST_")
+        item: Make[annotation[PolymorphicConfig]] = Field(default=str(default_path))
+
+    assert Settings().item == config
+    monkeypatch.setenv("FILE_TEST_ITEM", str(alternate_path))
+    assert Settings().item == alternate
+    assert Settings(_cli_parse_args=["--item", str(default_path)]).item == config
+    monkeypatch.delenv("FILE_TEST_ITEM")
+    nested = Settings(_cli_parse_args=["--item.name", "override"])
+    assert type(nested.item) is PolymorphicConfig
+    assert nested.item.name == "override"
+    default_path.unlink()
+    assert Settings(item=alternate).item == alternate
 
 
 def test_absolute_path_annotation_accepts_path_values() -> None:

@@ -1,12 +1,21 @@
 """Tests for public annotation helpers."""
 
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
+from enum import Enum
 from pathlib import Path
 from typing import Annotated, Any
 
 import pytest
-from pydantic import BaseModel, DirectoryPath, FilePath, TypeAdapter, ValidationError
+from pydantic import (
+    BaseModel,
+    DirectoryPath,
+    Field,
+    FilePath,
+    TypeAdapter,
+    ValidationError,
+)
+from pydantic_settings import ForceDecode, NoDecode
 from pytest import MonkeyPatch, raises
 
 from confidantic import BaseConfig
@@ -235,6 +244,207 @@ def test_map_annotations_parse_environment_and_dotenv_values(
     dotenv_path = tmp_path / ".env"
     dotenv_path.write_text("DICT_LIKE_VALUES=first=1,second=2\n", encoding="utf-8")
     assert Settings(_env_file=dotenv_path).values == {"first": 1, "second": 2}
+
+
+class _UnionColor(Enum):
+    RED = "red"
+    BLUE = "blue"
+
+
+type _FloatListAlias = CommaDelimited[list[float]]
+
+
+@pytest.mark.parametrize(
+    ("annotation", "default", "arguments", "expected"),
+    [
+        (float | CommaDelimited[tuple[float, float]], 0.0, ["--value=0.1"], 0.1),
+        (
+            float | CommaDelimited[tuple[float, float]],
+            0.0,
+            ["--value=0.1,0.2"],
+            (0.1, 0.2),
+        ),
+        (
+            float | CommaDelimited[tuple[float, float]],
+            0.0,
+            ["--value=[0.1,0.2]"],
+            (0.1, 0.2),
+        ),
+        (float | CommaDelimited[tuple[float, ...]], 0.0, ["--value=0.1"], 0.1),
+        (
+            float | CommaDelimited[tuple[float, ...]],
+            0.0,
+            ["--value=0.1,0.2"],
+            (0.1, 0.2),
+        ),
+        (float | CommaDelimited[list[float]], 0.0, ["--value=0.1"], 0.1),
+        (float | CommaDelimited[list[float]], 0.0, ["--value=0.1,0.2"], [0.1, 0.2]),
+        (float | CommaDelimited[list[float]], 0.0, ["--value=[0.1,0.2]"], [0.1, 0.2]),
+        (
+            float | CommaDelimited[list[float]],
+            0.0,
+            ["--value", "0.1", "--value", "0.2"],
+            [0.1, 0.2],
+        ),
+        (float | CommaDelimited[set[float]], 0.0, ["--value=0.1"], 0.1),
+        (float | CommaDelimited[set[float]], 0.0, ["--value=0.1,0.2"], {0.1, 0.2}),
+        (float | CommaDelimited[Sequence[float]], 0.0, ["--value=0.1"], 0.1),
+        (
+            float | CommaDelimited[Sequence[float]],
+            0.0,
+            ["--value=0.1,0.2"],
+            [0.1, 0.2],
+        ),
+        (float | SemiColonDelimited[list[float]], 0.0, ["--value=0.1"], 0.1),
+        (
+            float | SemiColonDelimited[list[float]],
+            0.0,
+            ["--value=0.1;0.2"],
+            [0.1, 0.2],
+        ),
+        (float | WhitespaceDelimited[list[float]], 0.0, ["--value=0.1"], 0.1),
+        (
+            float | WhitespaceDelimited[list[float]],
+            0.0,
+            ["--value=0.1 0.2"],
+            [0.1, 0.2],
+        ),
+        (float | Delimited("|")[list[float]], 0.0, ["--value=0.1"], 0.1),
+        (float | Delimited("|")[list[float]], 0.0, ["--value=0.1|0.2"], [0.1, 0.2]),
+        (CommaDelimited[list[float]] | None, None, ["--value=null"], None),
+        (CommaDelimited[list[float]] | None, None, ["--value=0.1,0.2"], [0.1, 0.2]),
+        (float | CommaDelimited[list[float]] | None, None, ["--value=null"], None),
+        (float | CommaDelimited[list[float]] | None, None, ["--value=0.1"], 0.1),
+        (
+            float | CommaDelimited[list[float]] | None,
+            None,
+            ["--value=0.1,0.2"],
+            [0.1, 0.2],
+        ),
+        (str | CommaDelimited[tuple[str, str]], "a", ["--value=1"], "1"),
+        (
+            Path | CommaDelimited[tuple[Path, Path]],
+            Path("."),
+            ["--value=123"],
+            Path("123"),
+        ),
+        (
+            _UnionColor | CommaDelimited[tuple[_UnionColor, _UnionColor]],
+            _UnionColor.RED,
+            ["--value=RED"],
+            _UnionColor.RED,
+        ),
+        (
+            _UnionColor | CommaDelimited[tuple[_UnionColor, _UnionColor]],
+            _UnionColor.RED,
+            ["--value=red,blue"],
+            (_UnionColor.RED, _UnionColor.BLUE),
+        ),
+        (float | Map[dict[str, float]], 0.0, ["--value=0.1"], 0.1),
+        (
+            float | Map[dict[str, float]],
+            0.0,
+            ["--value=a=1 b=2"],
+            {"a": 1.0, "b": 2.0},
+        ),
+        (Map[dict[str, float]] | None, None, ["--value=null"], None),
+        (
+            Map[dict[str, float]] | None,
+            None,
+            ["--value=a=1 b=2"],
+            {"a": 1.0, "b": 2.0},
+        ),
+        (float | _FloatListAlias, 0.0, ["--value=0.1"], 0.1),
+        (float | _FloatListAlias, 0.0, ["--value=0.1,0.2"], [0.1, 0.2]),
+    ],
+)
+def test_delimited_and_map_unions_preserve_scalar_and_delimited_cli_inputs(
+    annotation: Any,
+    default: Any,
+    arguments: list[str],
+    expected: Any,
+) -> None:
+    """Unions mixing scalars or None with Delimited/Map skip premature JSON decoding."""
+    settings_cls: Any = type(
+        "Settings",
+        (BaseConfig,),
+        {"__annotations__": {"value": annotation}, "value": default},
+        cli_parse_args=True,
+    )
+
+    result = settings_cls(_cli_parse_args=arguments)
+    assert result.value == expected
+    assert type(result.value) is type(expected)
+
+
+def test_delimited_unions_preserve_scalar_values_from_env_and_dotenv(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Environment and dotenv sources keep raw strings for scalar+Delimited unions."""
+
+    class Settings(BaseConfig, env_prefix="UNION_"):
+        text: str | CommaDelimited[tuple[str, str]] = "a"
+        color: _UnionColor | CommaDelimited[tuple[_UnionColor, _UnionColor]] = (
+            _UnionColor.RED
+        )
+
+    monkeypatch.setenv("UNION_TEXT", "1")
+    monkeypatch.setenv("UNION_COLOR", "RED")
+    from_env = Settings()
+    assert from_env.text == "1"
+    assert from_env.color is _UnionColor.RED
+
+    monkeypatch.delenv("UNION_TEXT")
+    monkeypatch.delenv("UNION_COLOR")
+    dotenv_path = tmp_path / ".env"
+    dotenv_path.write_text("UNION_TEXT=1\nUNION_COLOR=red,blue\n", encoding="utf-8")
+    from_dotenv = Settings(_env_file=dotenv_path)
+    assert from_dotenv.text == "1"
+    assert from_dotenv.color == (_UnionColor.RED, _UnionColor.BLUE)
+
+
+def test_union_no_decode_preserves_mixed_complex_branches_and_force_decode(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Non-NoDecode complex branches and explicit ForceDecode retain JSON decoding."""
+
+    class Sub(BaseModel):
+        x: int = 1
+
+    class Settings(BaseConfig, cli_parse_args=True, env_prefix="MIXED_"):
+        sub_union: Sub | CommaDelimited[tuple[int, int]] = Sub()
+        dict_union: dict[str, int] | CommaDelimited[list[int]] = Field(
+            default_factory=dict
+        )
+        forced: Annotated[float | CommaDelimited[list[float]], ForceDecode] = 0.0
+
+    assert NoDecode not in Settings.model_fields["sub_union"].metadata
+    assert NoDecode not in Settings.model_fields["dict_union"].metadata
+    assert NoDecode not in Settings.model_fields["forced"].metadata
+
+    monkeypatch.setenv("MIXED_SUB_UNION", '{"x": 2}')
+    assert Settings(_cli_parse_args=[]).sub_union == Sub(x=2)
+    monkeypatch.setenv("MIXED_SUB_UNION", "1,2")
+    assert Settings(_cli_parse_args=[]).sub_union == (1, 2)
+    monkeypatch.delenv("MIXED_SUB_UNION")
+
+    assert Settings(_cli_parse_args=['--dict-union={"x": 2}']).dict_union == {"x": 2}
+    assert Settings(_cli_parse_args=["--dict-union=1,2"]).dict_union == [1, 2]
+    assert Settings(_cli_parse_args=["--forced=0.1"]).forced == [0.1]
+
+
+def test_union_no_decode_applies_after_forward_ref_model_rebuild() -> None:
+    """Forward-referenced union fields gain NoDecode when model_rebuild completes them."""
+
+    class Settings(BaseConfig, cli_parse_args=True):
+        value: "float | DeferredFloatList" = 0.0
+
+    DeferredFloatList = CommaDelimited[list[float]]
+    Settings.model_rebuild()
+
+    assert Settings(_cli_parse_args=["--value=0.1"]).value == 0.1
+    assert Settings(_cli_parse_args=["--value=0.1,0.2"]).value == [0.1, 0.2]
 
 
 def test_import_resolves_import_strings_and_serializes_objects() -> None:

@@ -1,13 +1,14 @@
 """CLI parsing, factory fields, help policy, and scoped suppression."""
 
 import sys
+from enum import Enum
 
 import pytest
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 from pydantic_settings import CliSettingsSource
 
 from confidantic import BaseConfig, Factory
-from confidantic.annotations import Import
+from confidantic.annotations import CommaDelimited, Import
 from tests._config.factory_targets import DerivedTarget, SimpleTarget
 
 
@@ -228,3 +229,53 @@ def test_cli_environment_help_can_be_enabled(
             Config(_cli_parse_args=["--help"])
     assert error.value.code == 0
     assert f"[env: {env_prefix}VALUE]" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("help_enabled", [True, False])
+def test_cli_nested_models_propagate_union_no_decode_without_mutating_plain_models(
+    help_enabled: bool,
+) -> None:
+    """Nested plain BaseModel, BaseConfig, and Factory union-NoDecode fields parse cleanly."""
+
+    class Color(Enum):
+        RED = "red"
+        BLUE = "blue"
+
+    class PlainNested(BaseModel):
+        floats: float | CommaDelimited[list[float]] = 0.0
+        text: str | CommaDelimited[tuple[str, str]] = "a"
+        color: Color | CommaDelimited[tuple[Color, Color]] = Color.RED
+
+    class ConfigNested(BaseConfig):
+        floats: float | CommaDelimited[list[float]] = 0.0
+
+    class Target:
+        def __init__(self, floats: float | CommaDelimited[list[float]] = 0.0) -> None:
+            self.floats = floats
+
+    class Root(BaseConfig, cli_parse_args=True, cli_help=help_enabled):
+        plain: PlainNested = PlainNested()
+        nested: ConfigNested = ConfigNested()
+        target: Factory[Target] = Factory.instance_from(Target)
+
+    config = Root(
+        _cli_parse_args=[
+            "--plain.floats=0.1",
+            "--plain.text=1",
+            "--plain.color=RED",
+            "--nested.floats=0.2",
+            "--target.floats=0.3",
+        ]
+    )
+
+    assert config.plain.floats == 0.1
+    assert config.plain.text == "1"
+    assert config.plain.color is Color.RED
+    assert config.nested.floats == 0.2
+    assert config.target.instance().floats == 0.3
+    assert config.model_field_sources["plain"] == (CliSettingsSource, Root)
+    assert config.model_field_sources["nested"] == (CliSettingsSource, Root)
+    assert config.model_field_sources["target"] == (CliSettingsSource, Root)
+    assert PlainNested.model_fields["floats"].metadata == []
+    assert PlainNested.model_fields["text"].metadata == []
+    assert PlainNested.model_fields["color"].metadata == []

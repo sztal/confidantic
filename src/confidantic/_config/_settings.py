@@ -26,7 +26,7 @@ from pydantic_settings.sources import DefaultSettingsSource
 from pydantic_settings.sources.types import ENV_FILE_SENTINEL
 from pydantic_settings.sources.utils import InitState, _get_alias_names
 
-from confidantic._config._cli import _CliSettings
+from confidantic._config._cli import _CliSettings, _ConfidanticCliSettingsSource
 from confidantic._config._nested import _NestedModelUpdates
 from confidantic._config._options import _CUSTOM_CONFIG_KEYS
 from confidantic.utils import is_runtime_jupyterlike
@@ -232,7 +232,11 @@ class _ProvenanceSource(PydanticBaseSettingsSource):
                         self.field_sources[field_name] = (
                             InitSettingsSource
                             if isinstance(source, _InitSettingsSource)
-                            else type(source),
+                            else (
+                                CliSettingsSource
+                                if isinstance(source, _ConfidanticCliSettingsSource)
+                                else type(source)
+                            ),
                             source.settings_cls,
                         )
                     if any(

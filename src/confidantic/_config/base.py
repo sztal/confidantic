@@ -26,10 +26,10 @@ from pydantic import (
     model_serializer,
 )
 from pydantic_core import CoreSchema, PydanticUndefined
-from pydantic_settings import BaseSettings, PydanticBaseSettingsSource
+from pydantic_settings import BaseSettings, NoDecode, PydanticBaseSettingsSource
 
 from confidantic._config import _formats
-from confidantic._config._cli import _CliSettings
+from confidantic._config._cli import _CliSettings, needs_union_no_decode
 from confidantic._config._docstrings import replace_attributes
 from confidantic._config._nested import _NestedModelUpdates
 from confidantic._config._options import ConfigModelDict
@@ -166,6 +166,14 @@ class BaseConfig(BaseSettings):
             is found.
         """
         return find_dotenv()
+
+    @classmethod
+    def __pydantic_on_complete__(cls) -> None:
+        """Propagate branch-level ``NoDecode`` markers to union fields."""
+        super().__pydantic_on_complete__()
+        for field_info in cls.model_fields.values():
+            if needs_union_no_decode(field_info):
+                field_info.metadata.append(NoDecode)
 
     @classmethod
     def __pydantic_init_subclass__(cls, **kwargs: Any) -> None:
